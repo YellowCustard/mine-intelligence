@@ -195,7 +195,13 @@ class MqttIngestor:
                 session.close()
 
     def _offline_loop(self) -> None:
-        """Periodically scan for assets that have gone silent while active."""
+        """Periodic maintenance: offline detection and cycle/metric recompute.
+
+        Cycles are recomputed from stored positions (not in the ingest hot path,
+        brief §9), so the dashboard's cycle chart stays fresh without coupling
+        analytics to ingest.
+        """
+        from minemonitor.cycles.recompute import recompute
         from minemonitor.rules.offline import detect_offline
 
         while not self._stop.wait(self._offline_interval_s):
@@ -209,9 +215,10 @@ class MqttIngestor:
                         "asset offline",
                         extra={"site_id": ev.site_id, "asset_id": ev.asset_id},
                     )
+                recompute(session, self._site_id)
             except Exception as exc:  # noqa: BLE001 - transient DB errors; retry next tick
                 session.rollback()
-                log.warning("offline check failed", extra={"error": str(exc)})
+                log.warning("maintenance tick failed", extra={"error": str(exc)})
             finally:
                 session.close()
 

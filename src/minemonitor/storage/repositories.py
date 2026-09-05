@@ -68,3 +68,24 @@ def list_positions(
         stmt = stmt.where(Position.asset_id == asset_id)
     stmt = stmt.order_by(Position.ts.desc()).limit(limit)
     return list(session.execute(stmt).scalars().all())
+
+
+def latest_positions(session: Session, site_id: str) -> list[Position]:
+    """The most recent position for each asset at a site (for live markers)."""
+    from sqlalchemy import and_, func
+
+    latest = (
+        select(Position.asset_id, func.max(Position.ts).label("mts"))
+        .where(Position.site_id == site_id)
+        .group_by(Position.asset_id)
+        .subquery()
+    )
+    stmt = select(Position).join(
+        latest,
+        and_(
+            Position.site_id == site_id,
+            Position.asset_id == latest.c.asset_id,
+            Position.ts == latest.c.mts,
+        ),
+    )
+    return list(session.execute(stmt).scalars().all())

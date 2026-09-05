@@ -8,7 +8,7 @@ with per-zone rules, a unified alarm queue, haul-cycle analytics (the commercial
 payload — queue time at the face), and a live operations dashboard. See
 [`CLAUDE.md`](./CLAUDE.md) for the full build brief.
 
-## Status — M1 skeleton · M2 MQTT ingest · M3 zones & rules · M4 cycle analytics
+## Status — M1 skeleton · M2 MQTT · M3 zones & rules · M4 cycle analytics · M5 live dashboard
 
 - Data contracts published as JSON Schema in [`contracts/`](./contracts) with
   matching Pydantic v2 models.
@@ -36,8 +36,16 @@ payload — queue time at the face), and a live operations dashboard. See
   mean cycle time, segment breakdown incl. queue %). No target is ever hardcoded —
   we report this mine's observed numbers. API: cycles, shift-summary, metrics, and
   an idempotent recompute.
+- **Live operations dashboard** — the existing `web/mine.html` wired to the real
+  API (not rewritten): the site plan, geofences, asset markers, fleet and alarm
+  tables and cycle chart are driven by a `fetch()` of current state plus a
+  **Server-Sent Events** stream for live updates, with in-page **alarm
+  acknowledgement**. Lat/lon is projected onto the SVG site plan; no hardcoded
+  operational data remains, and Phase-1 non-goals (tonnes, fuel) are not shown.
+  Served by the API at `/`.
 - `docker compose up` brings up the database, MQTT broker, MinIO, the API and the
-  ingestor; `docker compose --profile sim up` adds the simulator.
+  ingestor; `docker compose --profile sim up` adds the simulator. The dashboard
+  is at `http://localhost:8000/`.
 
 ## Quickstart
 
@@ -109,4 +117,4 @@ Every event is **advisory**: the platform warns people, it never actuates plant.
 ## Roadmap
 
 M1 skeleton ✓ · M2 simulator + MQTT ingest ✓ · M3 zones & rules ✓ · M4 cycle
-analytics ✓ · M5 live dashboard · M6 hardening for site.
+analytics ✓ · M5 live dashboard ✓ · M6 hardening for site.

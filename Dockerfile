@@ -19,6 +19,7 @@ COPY src ./src
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY contracts ./contracts
+COPY web ./web
 COPY docker/entrypoint.sh ./docker/entrypoint.sh
 RUN uv sync --frozen --extra dev && chmod +x ./docker/entrypoint.sh
 

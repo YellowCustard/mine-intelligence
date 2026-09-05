@@ -1,0 +1,1366 @@
+<title>Karratha North Mine Monitor</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+:root{
+  --chrome:#123a2e; --chrome-2:#0d2c23; --chrome-ink:#e6efe9; --chrome-mut:#8fb0a3;
+  --bg:#f1f2ee; --panel:#fbfbf8; --panel2:#e9e9e3; --line:#d9d8d0; --line2:#e6e5de;
+  --ink:#1a1917; --ink2:#474540; --mut:#78746b; --dim:#a19c92;
+  --acc:#8a6512; --acc-soft:rgba(138,101,18,.13); --acc-line:rgba(138,101,18,.34);
+  --ok:#3a7349; --ok-bg:rgba(58,115,73,.13);
+  --warn:#b2560f; --warn-bg:rgba(178,86,15,.13);
+  --crit:#a83226; --crit-bg:rgba(168,50,38,.12);
+  --terrain:#dcd7ca; --terrain2:#c9c2ae; --rock:#bfb7a2; --water:#7fa7b5; --road:#f6f3e9;
+  --cond:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --sans:"Barlow",-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  /* Light only, by choice: a control-room screen shared into a bright
+     meeting room reads better light, and the camera panels supply their
+     own dark ground so footage still reads as footage. */
+  color-scheme: light;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5}
+
+/* ─── app chrome ─── */
+.top{background:var(--chrome);color:var(--chrome-ink)}
+.top .in{max-width:1420px;margin:0 auto;padding:10px 20px;display:flex;align-items:center;
+  gap:16px;flex-wrap:wrap}
+.top .brand{font-family:var(--cond);font-size:19px;font-weight:700;letter-spacing:.02em;
+  text-transform:uppercase;display:flex;align-items:baseline;gap:9px}
+.top .brand small{font-size:12px;font-weight:600;letter-spacing:.11em;color:var(--chrome-mut)}
+.top .sp{flex:1}
+.cchip{display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.18);
+  border-radius:3px;padding:3px 9px;font-family:var(--cond);font-size:11.5px;font-weight:600;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--chrome-mut);white-space:nowrap}
+.cchip i{width:6px;height:6px;border-radius:50%;background:#6fbf8c;display:block}
+.cchip.warnc i{background:#e0a63c} .cchip.critc{color:#f0b6ac;border-color:rgba(240,160,150,.35)}
+.cchip.critc i{background:#e06b57}
+
+nav{background:var(--chrome-2)}
+nav .in{max-width:1420px;margin:0 auto;padding:0 20px;display:flex;gap:0}
+nav button{appearance:none;background:none;border:0;border-bottom:2px solid transparent;
+  cursor:pointer;font-family:var(--cond);font-size:14px;font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--chrome-mut);padding:11px 17px;transition:.13s}
+nav button:hover{color:#fff}
+nav button[aria-selected="true"]{color:#fff;border-bottom-color:var(--acc)}
+nav button:focus-visible{outline:2px solid var(--acc);outline-offset:-3px}
+
+.wrap{max-width:1420px;margin:0 auto;padding:16px 20px 44px;display:flex;flex-direction:column;gap:13px}
+/* view containers reuse .wrap; as flex items, margin:0 auto shrink-wraps them */
+.wrap > .wrap{margin:0;max-width:none;width:100%}
+.hide{display:none!important}
+
+/* ─── panels ─── */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.panel>header{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;
+  justify-content:space-between;align-items:baseline;gap:10px}
+.panel>header h2{margin:0;font-family:var(--cond);font-size:12.5px;font-weight:700;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--mut)}
+.panel>header .meta{font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+.panel .body{padding:13px 14px}
+.panel .body.flush{padding:0}
+
+/* ─── tiles ─── */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:9px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:11px 13px}
+.tile .lab{font-family:var(--cond);font-size:11px;font-weight:600;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--mut);display:block}
+.tile .val{font-family:var(--mono);font-size:24px;font-weight:500;letter-spacing:-.03em;
+  font-variant-numeric:tabular-nums;display:block;margin:2px 0 1px}
+.tile .sub{font-size:11.5px;color:var(--dim);display:block}
+.tile.crit{border-color:var(--crit)} .tile.crit .val{color:var(--crit)}
+.tile.warn{border-color:var(--warn)} .tile.warn .val{color:var(--warn)}
+.tile.good .val{color:var(--ok)}
+
+/* ─── tables ─── */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-family:var(--cond);font-size:11px;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--mut);font-weight:600;padding:0 11px 7px 0;
+  border-bottom:1px solid var(--line)}
+td{padding:7px 11px 7px 0;border-bottom:1px solid var(--line2);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+tbody tr.sel{background:var(--acc-soft)}
+tbody tr[data-click]{cursor:pointer}
+tbody tr[data-click]:hover{background:var(--panel2)}
+.m{font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--ink2)}
+.sub2{color:var(--dim);font-size:11.5px;display:block}
+.tag{display:inline-block;font-family:var(--cond);font-size:11px;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;padding:2px 7px;border-radius:3px;white-space:nowrap}
+.t-ok{background:var(--ok-bg);color:var(--ok)}
+.t-warn{background:var(--warn-bg);color:var(--warn)}
+.t-crit{background:var(--crit-bg);color:var(--crit)}
+.t-acc{background:var(--acc-soft);color:var(--acc)}
+.t-mut{background:var(--panel2);color:var(--mut)}
+.bar{height:5px;border-radius:2px;background:var(--panel2);overflow:hidden;min-width:54px}
+.bar b{display:block;height:100%;border-radius:2px;background:var(--ok)}
+.bar b.low{background:var(--crit)} .bar b.mid{background:var(--warn)}
+
+/* ─── map ─── */
+.mapwrap{position:relative;background:var(--terrain)}
+svg{display:block;width:100%;height:auto}
+.legend{border-top:1px solid var(--line);padding:9px 14px;display:flex;gap:16px;align-items:center;
+  flex-wrap:wrap;font-family:var(--cond);font-size:11.5px;font-weight:600;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--mut);background:var(--panel)}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:11px;height:8px;border-radius:1.5px;display:block;border:1px solid}
+.maptools{position:absolute;right:11px;top:11px;display:flex;flex-direction:column;gap:5px}
+.maptools button{appearance:none;font-family:var(--cond);font-size:11px;font-weight:600;
+  letter-spacing:.07em;text-transform:uppercase;padding:5px 9px;border-radius:3px;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel);color:var(--ink2);transition:.12s}
+.maptools button[aria-pressed="true"]{background:var(--acc-soft);color:var(--acc);border-color:var(--acc-line)}
+.maptools button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+
+.g2{display:grid;grid-template-columns:minmax(0,1.62fr) minmax(0,1fr);gap:13px;align-items:start}
+@media(max-width:1080px){.g2{grid-template-columns:1fr}}
+.g2b{display:grid;grid-template-columns:1fr 1fr;gap:13px;align-items:start}
+@media(max-width:900px){.g2b{grid-template-columns:1fr}}
+.note{font-size:12.5px;color:var(--ink2);line-height:1.5;margin:0}
+.note b{color:var(--ink);font-weight:600}
+.kv{display:grid;grid-template-columns:1fr auto;gap:0}
+.kv div{padding:6px 0;border-bottom:1px solid var(--line2);font-size:13px;color:var(--ink2)}
+.kv div:nth-child(even){text-align:right;font-family:var(--mono);font-size:11.5px;color:var(--ink);
+  font-variant-numeric:tabular-nums}
+.kv div:nth-last-child(-n+2){border-bottom:0}
+.foot{font-size:12px;color:var(--mut);line-height:1.55;border-top:1px solid var(--line);padding-top:12px}
+.foot b{color:var(--ink2)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+.pulse{animation:pl 2.4s ease-in-out infinite}
+@keyframes pl{0%,100%{opacity:.28}50%{opacity:.06}}
+</style>
+
+<div class="top"><div class="in">
+  <span class="brand">Mine Monitor <small>Live Operations</small></span>
+  <span class="cchip"><i></i><span id="hdr-assets">—</span> assets tracked</span>
+  <span class="sp"></span>
+  <span class="cchip critc"><i></i><span id="hdr-crit">—</span> critical alarms</span>
+  <span class="cchip warnc"><i></i>Synthetic data</span>
+  <span class="cchip" style="border:0"><span class="m" id="clock">—</span></span>
+</div></div>
+
+<nav><div class="in">
+  <button role="tab" id="n-site" aria-selected="true" onclick="go('site')">Site overview</button>
+  <button role="tab" id="n-fleet" aria-selected="false" onclick="go('fleet')">Fleet</button>
+  <button role="tab" id="n-vision" aria-selected="false" onclick="go('vision')">Vision</button>
+  <button role="tab" id="n-explore" aria-selected="false" onclick="go('explore')">Exploration</button>
+</div></nav>
+
+<div class="wrap">
+
+<!-- ══════════════════ SITE OVERVIEW ══════════════════ -->
+<div id="site" class="wrap" style="padding:0;gap:13px">
+  <div class="tiles">
+    <div class="tile"><span class="lab">In loading zone</span><span class="val" id="k-load">—</span>
+      <span class="sub" id="k-load-sub">loading zones</span></div>
+    <div class="tile"><span class="lab">In unloading</span><span class="val" id="k-unload">—</span>
+      <span class="sub" id="k-unload-sub">ROM pad · tips</span></div>
+    <div class="tile crit"><span class="lab">Geofence breaches</span><span class="val" id="k-breach">—</span>
+      <span class="sub" id="k-breach-sub">open critical</span></div>
+    <div class="tile"><span class="lab">Loads counted</span><span class="val" id="k-loads">—</span>
+      <span class="sub" id="k-loads-sub">this shift</span></div>
+    <div class="tile"><span class="lab">Queue at face</span><span class="val" id="k-queue">—</span>
+      <span class="sub" id="k-queue-sub">of every cycle · observed</span></div>
+    <div class="tile"><span class="lab">Mean cycle</span><span class="val" id="k-cycle">—</span>
+      <span class="sub" id="k-cycle-sub">this shift</span></div>
+  </div>
+
+  <div class="g2">
+    <section class="panel">
+      <header><h2>Site plan · geofenced zones</h2>
+        <span class="meta">GDA2020 MGA50 · 1:8,000 · click an asset</span></header>
+      <div class="body flush"><div class="mapwrap">
+        <svg id="map" viewBox="0 0 1200 780" role="img"
+          aria-label="Open pit gold mine site plan with geofenced loading, unloading, restricted and speed-limited zones, and nine tracked assets"></svg>
+        <div class="maptools">
+          <button id="t-zones" aria-pressed="true" onclick="tog('zones')">Zones</button>
+          <button id="t-roads" aria-pressed="true" onclick="tog('roads')">Haul roads</button>
+          <button id="t-assets" aria-pressed="true" onclick="tog('assets')">Assets</button>
+          <button id="t-trails" aria-pressed="false" onclick="tog('trails')">Trails</button>
+        </div>
+      </div>
+      <div class="legend">
+        <span><i style="background:rgba(58,115,73,.3);border-color:#3a7349"></i>Loading</span>
+        <span><i style="background:rgba(58,110,150,.3);border-color:#3a6e96"></i>Unloading</span>
+        <span><i style="background:rgba(168,50,38,.28);border-color:#a83226"></i>Restricted</span>
+        <span><i style="background:rgba(178,86,15,.22);border-color:#b2560f"></i>Speed 40</span>
+        <span style="margin-left:auto;font-family:var(--mono);text-transform:none;letter-spacing:0">
+          9 assets · 6 geofences · 1 breach</span>
+      </div></div>
+    </section>
+
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <section class="panel">
+        <header><h2>Zones</h2><span class="meta" id="zcount">6 geofences</span></header>
+        <div class="body"><table><thead><tr><th>Name</th><th>Type</th><th>Rule</th>
+          <th style="width:52px">In</th></tr></thead><tbody id="ztab"></tbody></table></div>
+      </section>
+      <section class="panel">
+        <header><h2>Fleet</h2><span class="meta" id="fcount">— reporting</span></header>
+        <div class="body"><table><thead><tr><th>Asset</th><th style="width:78px">Last fix</th>
+          <th>Status</th><th style="width:66px">Speed</th></tr></thead><tbody id="ftab"></tbody></table></div>
+      </section>
+    </div>
+  </div>
+
+  <section class="panel">
+    <header><h2>Alarms</h2><span class="meta" id="acount">realtime · live</span></header>
+    <div class="body"><table><thead><tr><th style="width:78px">Time</th><th style="width:96px">Asset</th>
+      <th style="width:120px">Type</th><th>Detail</th><th style="width:88px">Severity</th>
+      <th style="width:100px">Source</th><th style="width:96px">Action</th></tr></thead><tbody id="atab"></tbody></table></div>
+  </section>
+</div>
+
+<!-- ══════════════════ FLEET ══════════════════ -->
+<div id="fleet" class="wrap hide" style="padding:0;gap:13px">
+  <div class="panel"><header><h2 id="fh">HT-102 · Haul truck · Komatsu HD1500</h2>
+    <span class="meta">telemetry 1 Hz · vision 12 fps</span></header>
+    <div class="body">
+      <div class="tiles" style="grid-template-columns:repeat(auto-fit,minmax(136px,1fr))">
+        <div class="tile"><span class="lab">Payload</span><span class="val">218 t</span>
+          <span class="sub">97% of rated 224 t</span></div>
+        <div class="tile"><span class="lab">Speed</span><span class="val">47 km/h</span>
+          <span class="sub">in a 40 zone</span></div>
+        <div class="tile warn"><span class="lab">Fuel</span><span class="val">62%</span>
+          <span class="sub">1,240 L · 6.2 h remaining</span></div>
+        <div class="tile"><span class="lab">Cycle time</span><span class="val">18.4 min</span>
+          <span class="sub">fleet mean 19.1</span></div>
+        <div class="tile"><span class="lab">Loads today</span><span class="val">31</span>
+          <span class="sub">6,758 t moved</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="g2">
+    <section class="panel">
+      <header><h2>Route history · last 4 cycles</h2><span class="meta">pit face L1 → ROM pad U1</span></header>
+      <div class="body flush"><div class="mapwrap">
+        <svg id="map2" viewBox="0 0 1200 780" role="img"
+          aria-label="Route history of haul truck HT-102 between the pit face and the ROM pad"></svg>
+      </div></div>
+    </section>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <section class="panel"><header><h2>Speed</h2><span class="meta">km/h · 40 limit</span></header>
+        <div class="body"><svg id="sp" viewBox="0 0 460 150" role="img"
+          aria-label="Speed trace with the 40 kilometre per hour limit marked"></svg></div></section>
+      <section class="panel"><header><h2>Payload</h2><span class="meta">tonnes · rated 224</span></header>
+        <div class="body"><svg id="pl" viewBox="0 0 460 150" role="img"
+          aria-label="Payload trace showing loaded and empty cycles"></svg></div></section>
+      <section class="panel"><header><h2>Fuel level</h2><span class="meta">% · refuel at 08:40</span></header>
+        <div class="body"><svg id="fu" viewBox="0 0 460 150" role="img"
+          aria-label="Fuel level declining across the shift with one refuel"></svg></div></section>
+    </div>
+  </div>
+
+  <section class="panel">
+    <header><h2>Cycle breakdown</h2><span class="meta">where the 18.4 minutes goes</span></header>
+    <div class="body g2b">
+      <svg id="cyc" viewBox="0 0 560 130" role="img"
+        aria-label="Stacked breakdown of haul cycle time by activity"></svg>
+      <div>
+        <p class="note"><b>Queue at the face is 3.1 min of every cycle</b> — 17% of the truck's day
+          spent waiting on EX-01. Across four trucks that is roughly 1,100 t of lost daily haulage
+          at the current rate.</p>
+        <p class="note" style="margin-top:9px">This is the number a vision system earns its keep on:
+          it is measured from the same footage as the geofence events, needs no extra hardware, and
+          the operations superintendent already owns the KPI it moves.</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- ══════════════════ VISION ══════════════════ -->
+<div id="vision" class="wrap hide" style="padding:0;gap:13px">
+  <div class="tiles">
+    <div class="tile"><span class="lab">Cameras</span><span class="val good">4 / 4</span>
+      <span class="sub">purge on · clean due 4 d</span></div>
+    <div class="tile"><span class="lab">Inference</span><span class="val">31 ms</span>
+      <span class="sub">12.9 fps · dust-derated</span></div>
+    <div class="tile crit"><span class="lab">Proximity events</span><span class="val">1</span>
+      <span class="sub">person near EX-01</span></div>
+    <div class="tile warn"><span class="lab">Tip coverage</span><span class="val" id="k-cov">84%</span>
+      <span class="sub">live from CAM-02 · 11.4 min lead</span></div>
+    <div class="tile"><span class="lab">Truck fill accuracy</span><span class="val">±4.1%</span>
+      <span class="sub">vs weightometer, 6 wks</span></div>
+  </div>
+
+  <div class="g2b">
+    <section class="panel"><header><h2>CAM-01 · Pit face, bench 340</h2>
+      <span class="meta">person &amp; plant detection</span></header>
+      <div class="body flush"><canvas id="cam1" width="1280" height="720" role="img" aria-label="Pit face camera with excavator, haul trucks and a person detected" style="display:block;width:100%;height:auto;background:#14120d"></canvas></div></section>
+    <section class="panel"><header><h2>CAM-02 · ROM tip</h2>
+      <span class="meta">coverage &amp; oversize</span></header>
+      <div class="body flush"><canvas id="cam2" width="1280" height="720" role="img" aria-label="ROM tip camera showing bin mouth coverage and an oversize fragment" style="display:block;width:100%;height:auto;background:#14120d"></canvas></div></section>
+    <section class="panel"><header><h2>CAM-03 · Waste dump tip head</h2>
+      <span class="meta">full / empty classification</span></header>
+      <div class="body flush"><canvas id="cam3" width="1280" height="720" role="img" aria-label="Waste dump camera classifying haul trucks as full or empty against dump zones" style="display:block;width:100%;height:auto;background:#14120d"></canvas></div></section>
+    <section class="panel"><header><h2>CAM-04 · Plant conveyor CV-201</h2>
+      <span class="meta">belt state &amp; foreign object</span></header>
+      <div class="body flush"><canvas id="cam4" width="1280" height="720" role="img" aria-label="Conveyor camera showing belt running state and a foreign object candidate" style="display:block;width:100%;height:auto;background:#14120d"></canvas></div></section>
+  </div>
+
+  <section class="panel">
+    <header><h2>What the vision layer is, and is not</h2><span class="meta">carried in every event payload</span></header>
+    <div class="body"><table><tbody>
+      <tr><td style="width:26%"><b>Advisory, EMESRT Level 7</b></td>
+        <td>Every detection here warns a person. Nothing on this page actuates plant or a vehicle.
+          Intervention at Level 8–9 needs functional-safety certification and OEM machine integration —
+          a different product on a different timescale.</td></tr>
+      <tr><td><b>Proximity is a warning, not a control</b></td>
+        <td>Person-near-plant raises an alarm and logs an evidence clip. It does not brake the
+          excavator, and it does not replace the site's exclusion-zone procedure.</td></tr>
+      <tr><td><b>Truck fill is a proxy</b></td>
+        <td>Load state is estimated from tray geometry, not weighed. It tracks the weightometer to
+          ±4.1% over six weeks — useful for cycle analytics, not for a royalty calculation.</td></tr>
+      <tr><td><b>Dust derates everything</b></td>
+        <td>Frame rate drops to 12 fps in poor visibility and the air purge takes each camera offline
+          for about 40 s per cycle. Both are logged rather than hidden.</td></tr>
+    </tbody></table></div>
+  </section>
+</div>
+
+<!-- ══════════════════ EXPLORATION ══════════════════ -->
+<div id="explore" class="wrap hide" style="padding:0;gap:13px">
+  <div class="g2">
+    <section class="panel">
+      <header><h2>Prospectivity surface · 13-element geochemistry</h2>
+        <span class="meta">P(mineralised) · five delineated targets</span></header>
+      <div class="body flush"><div class="mapwrap">
+        <svg id="pros" viewBox="0 0 800 560" role="img"
+          aria-label="Prospectivity heat map with five delineated targets along a fault structure"></svg>
+      </div></div>
+    </section>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <section class="panel"><header><h2>Priority targets</h2>
+        <span class="meta">ranked by AI confidence</span></header>
+        <div class="body">
+          <div class="kv" id="exsum">
+            <div>High-priority targets</div><div style="color:var(--acc)"><b>5</b></div>
+            <div>Prospective ground mapped</div><div>14.3 km²</div>
+            <div>Top target confidence</div><div style="color:var(--acc)"><b>94%</b></div>
+            <div>Known workings captured</div><div>2 of 2</div>
+          </div>
+        </div></section>
+      <section class="panel"><header><h2>What it means for you</h2>
+        <span class="meta">drill smarter</span></header>
+        <div class="body">
+          <p style="margin:0;line-height:1.65">Point your drilling budget where the ground is
+          most likely to pay. The platform ranks every target by confidence — so you chase
+          <b>more hits with fewer holes</b>, from data you already own.</p>
+        </div></section>
+    </div>
+  </div>
+
+  <div>
+    <section class="panel" id="tsec"><header><h2>Delineated targets</h2>
+      <span class="meta">ranked by mean probability</span></header>
+      <div class="body"><table><thead><tr><th style="width:78px">Target</th><th>Setting</th>
+        <th style="width:62px">Mean P</th><th style="width:70px">Area</th></tr></thead>
+        <tbody id="ttab"></tbody></table></div></section>
+  </div>
+</div>
+
+  <p class="foot">All figures shown are <b>synthetic demonstration data</b> — a representative gold
+  operation, not a live site. The platform, its logic and its analytics are real.</p>
+</div>
+
+<script>
+const T = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const E = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+const P = (pts) => pts.map(p=>p.join(',')).join(' ');
+
+/* ───────────────────────── site geometry ───────────────────────── */
+const PIT_RIM = [[140,300],[230,225],[360,210],[455,270],[492,380],[465,500],[370,588],[250,592],[158,520],[126,410]];
+const PIT_C = [312,404];
+const shrink = (poly,k,c=PIT_C) => poly.map(([x,y])=>[c[0]+(x-c[0])*k, c[1]+(y-c[1])*k]);
+
+const RAMP = "M312,404 L392,452 L452,412 L470,336 L432,286 L494,258";
+const HAUL_MAIN = "M494,258 L604,250 L702,272 L748,318";
+const HAUL_WASTE = "M604,250 L648,176 L726,142";
+const SERVICE = "M126,410 L104,556 L188,662 L300,690";
+const PLANT_RD = "M860,350 L892,350";
+
+const WASTE_DUMP = [[624,86],[812,72],[916,130],[900,214],[742,236],[642,196]];
+const TSF = [[806,474],[1146,470],[1152,706],[992,742],[832,700],[792,584]];
+
+/* Live operational data — populated from the API (M5). No hardcoded values. */
+let ZONES = [];
+let ASSETS = [];
+let ALARMS = [];
+let CYCLES = null;
+
+const ICONS = {
+  truck:'M-9,-3 L-9,3 L9,3 L9,-1 L4,-1 L4,-3 Z',
+  excavator:'M-8,3 L8,3 L8,-1 L2,-1 L2,-5 L-4,-5 L-4,-1 L-8,-1 Z',
+  dozer:'M-8,3 L8,3 L8,-2 L1,-2 L1,-5 L-5,-5 L-5,-2 L-8,-2 Z',
+  water:'M-9,-2 L-9,3 L9,3 L9,-2 Z',
+  light:'M-6,-2 L-4,-4 L4,-4 L6,-2 L6,2 L-6,2 Z'
+};
+const SEV = {ok:'--ok', warn:'--warn', crit:'--crit'};
+const ZFILL = {load:['rgba(58,115,73,.26)','#3a7349'], unload:['rgba(58,110,150,.24)','#3a6e96'],
+               restrict:['rgba(168,50,38,.24)','#a83226'], speed:['rgba(178,86,15,.20)','#b2560f']};
+
+let LAYERS = {zones:true, roads:true, assets:true, trails:false};
+let SELECTED = null;
+
+/* ───────────────────────── the map ───────────────────────── */
+function baseMap(){
+  const terr=T('--terrain'), t2=T('--terrain2'), rock=T('--rock'),
+        water=T('--water'), road=T('--road'), line=T('--line'), dim=T('--dim'), mut=T('--mut');
+  let s=`<defs>
+    <pattern id="hatch" width="7" height="7" patternTransform="rotate(38)" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="0" x2="0" y2="7" stroke="${t2}" stroke-width="2.4"/></pattern>
+    <radialGradient id="pitg" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="${rock}" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="${t2}" stop-opacity="0.5"/></radialGradient>
+  </defs>`;
+  s+=`<rect x="0" y="0" width="1200" height="780" fill="${terr}"/>`;
+  s+=`<rect x="0" y="0" width="1200" height="780" fill="url(#hatch)" opacity="0.5"/>`;
+
+  // survey grid
+  for(let x=100;x<1200;x+=100) s+=`<line x1="${x}" y1="0" x2="${x}" y2="780" stroke="${line}" stroke-width="0.6" opacity="0.45"/>`;
+  for(let y=100;y<780;y+=100) s+=`<line x1="0" y1="${y}" x2="1200" y2="${y}" stroke="${line}" stroke-width="0.6" opacity="0.45"/>`;
+
+  // waste dump with contours
+  s+=`<polygon points="${P(WASTE_DUMP)}" fill="${rock}" opacity="0.85"/>`;
+  [0.82,0.62,0.4].forEach((k,i)=>{
+    const c=[770,150]; const p=WASTE_DUMP.map(([x,y])=>[c[0]+(x-c[0])*k, c[1]+(y-c[1])*k]);
+    s+=`<polygon points="${P(p)}" fill="none" stroke="${t2}" stroke-width="1.1" opacity="${0.75-i*0.15}"/>`;
+  });
+  s+=`<text x="672" y="106" fill="${mut}" font-size="12" font-family="Barlow Condensed,sans-serif" font-weight="600" letter-spacing="1.6" text-anchor="middle">WASTE DUMP WD-2</text>`;
+
+  // open pit — rim then benches
+  s+=`<polygon points="${P(PIT_RIM)}" fill="url(#pitg)"/>`;
+  [0.86,0.72,0.58,0.44,0.30].forEach((k,i)=>{
+    s+=`<polygon points="${P(shrink(PIT_RIM,k))}" fill="${rock}" opacity="${0.13+i*0.05}"/>`;
+    s+=`<polygon points="${P(shrink(PIT_RIM,k))}" fill="none" stroke="${t2}" stroke-width="1.6" opacity="0.95"/>`;
+  });
+  s+=`<polygon points="${P(shrink(PIT_RIM,0.18))}" fill="${t2}" opacity="0.8"/>`;
+  s+=`<text x="312" y="272" fill="${mut}" font-size="12.5" font-family="Barlow Condensed,sans-serif" font-weight="600" letter-spacing="1.8" text-anchor="middle">STAGE 4 PIT</text>`;
+  s+=`<text x="312" y="408" fill="${mut}" font-size="10" font-family="JetBrains Mono,monospace" text-anchor="middle" opacity="0.8">RL 340</text>`;
+
+  // TSF
+  s+=`<polygon points="${P(TSF)}" fill="${water}" opacity="0.85"/>`;
+  s+=`<polygon points="${P(TSF)}" fill="none" stroke="${t2}" stroke-width="3"/>`;
+  for(let i=0;i<5;i++){ const k=0.88-i*0.14;
+    const c=[972,600]; const q=TSF.map(([x,y])=>[c[0]+(x-c[0])*k, c[1]+(y-c[1])*k]);
+    s+=`<polygon points="${P(q)}" fill="none" stroke="#ffffff" stroke-width="0.8" opacity="0.12"/>`; }
+  s+=`<text x="986" y="640" fill="${mut}" font-size="12" font-family="Barlow Condensed,sans-serif" font-weight="600" letter-spacing="1.6" text-anchor="middle">TAILINGS STORAGE TSF-1</text>`;
+
+  // facilities
+  const box=(x,y,w,h,label,sub)=>{
+    let o=`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${T('--panel2')}" stroke="${T('--mut')}" stroke-width="1.1" rx="2" opacity="0.92"/>`;
+    o+=`<text x="${x+w/2}" y="${y+h/2+1}" fill="${T('--ink2')}" font-size="11" font-family="Barlow Condensed,sans-serif" font-weight="600" letter-spacing="1.1" text-anchor="middle">${label}</text>`;
+    if(sub) o+=`<text x="${x+w/2}" y="${y+h/2+13}" fill="${dim}" font-size="9" font-family="JetBrains Mono,monospace" text-anchor="middle">${sub}</text>`;
+    return o;
+  };
+  s+=`<rect x="734" y="294" width="138" height="112" fill="${rock}" opacity="0.7" rx="2"/>`;
+  s+=`<text x="803" y="318" fill="${mut}" font-size="10.5" font-family="Barlow Condensed,sans-serif" font-weight="600" letter-spacing="1.2" text-anchor="middle">ROM PAD</text>`;
+  s+=box(778,336,52,44,'CR-01','crusher');
+  s+=box(894,292,138,128,'PROCESS PLANT','9.4 Mtpa');
+  s+=box(286,632,150,74,'WORKSHOP','go-line');
+  s+=box(88,656,142,68,'ADMIN','muster');
+  s+=box(470,640,78,56,'FUEL','farm');
+  s+=box(84,96,106,74,'MAGAZINE','explosives');
+
+  // roads
+  if(LAYERS.roads){
+    [RAMP,HAUL_MAIN,HAUL_WASTE,SERVICE,PLANT_RD].forEach(d=>{
+      s+=`<path d="${d}" fill="none" stroke="${T('--mut')}" stroke-width="17" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"/>`;
+      s+=`<path d="${d}" fill="none" stroke="${road}" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>`;
+      s+=`<path d="${d}" fill="none" stroke="${T('--mut')}" stroke-width="1" stroke-dasharray="8 8" opacity="0.8"/>`;
+    });
+  }
+
+  // north arrow + scale
+  s+=`<g transform="translate(1128,712)">
+      <path d="M0,-26 L7,6 L0,0 L-7,6 Z" fill="${T('--ink2')}"/>
+      <text x="0" y="20" fill="${mut}" font-size="11" font-family="Barlow Condensed,sans-serif" font-weight="700" text-anchor="middle">N</text></g>`;
+  s+=`<g transform="translate(44,742)">
+      <line x1="0" y1="0" x2="120" y2="0" stroke="${T('--ink2')}" stroke-width="2"/>
+      <line x1="0" y1="-4" x2="0" y2="4" stroke="${T('--ink2')}" stroke-width="2"/>
+      <line x1="60" y1="-3" x2="60" y2="3" stroke="${T('--ink2')}" stroke-width="1.4"/>
+      <line x1="120" y1="-4" x2="120" y2="4" stroke="${T('--ink2')}" stroke-width="2"/>
+      <text x="0" y="16" fill="${mut}" font-size="9.5" font-family="JetBrains Mono,monospace">0</text>
+      <text x="120" y="16" fill="${mut}" font-size="9.5" font-family="JetBrains Mono,monospace" text-anchor="end">500 m</text></g>`;
+  return s;
+}
+
+function zoneLayer(){
+  if(!LAYERS.zones) return '';
+  let s='';
+  ZONES.forEach(z=>{
+    const [f,st]=ZFILL[z.kind];
+    if(z.poly){
+      s+=`<polygon points="${P(z.poly)}" fill="${z.outline?'none':f}" stroke="${st}" stroke-width="2.4"
+            ${z.kind==='restrict'?'stroke-dasharray="9 6"':''}/>`;
+      const [cx,cy]=z.lab;
+      const txt=`${z.id} · ${z.type.toUpperCase()}`;
+      const lw=txt.length*6.9+18;
+      s+=`<rect x="${cx-lw/2}" y="${cy-13}" width="${lw}" height="18" rx="2.5"
+            fill="${T('--panel')}" stroke="${st}" stroke-width="1.1" opacity="0.96"/>`;
+      s+=`<text x="${cx}" y="${cy}" fill="${st}" font-size="11.5" font-weight="700"
+            font-family="Barlow Condensed,sans-serif" letter-spacing="1" text-anchor="middle"
+            >${txt}</text>`;
+    } else {
+      s+=`<path d="${z.path}" fill="none" stroke="${st}" stroke-width="26" opacity="0.24" stroke-linecap="round"/>`;
+      s+=`<path d="${z.path}" fill="none" stroke="${st}" stroke-width="1.4" stroke-dasharray="6 5" opacity="0.9"/>`;
+      s+=`<text x="556" y="292" fill="${st}" font-size="12" font-weight="700"
+            font-family="Barlow Condensed,sans-serif" letter-spacing="1.2">S1 · 40 km/h</text>`;
+    }
+  });
+  return s;
+}
+
+function assetLayer(){
+  if(!LAYERS.assets) return '';
+  let s='';
+  ASSETS.forEach(a=>{
+    const col=T(SEV[a.sev]);
+    const sel = a.id===SELECTED;
+    if(a.sev!=='ok') s+=`<circle class="pulse" cx="${a.x}" cy="${a.y}" r="21" fill="${col}" opacity="0.22"/>`;
+    if(sel) s+=`<circle cx="${a.x}" cy="${a.y}" r="17" fill="none" stroke="${T('--acc')}" stroke-width="2"/>`;
+    s+=`<g transform="translate(${a.x},${a.y})" style="cursor:pointer" onclick="selectAsset('${a.id}')">
+        <circle r="12.5" fill="${T('--panel')}" stroke="${col}" stroke-width="2.2"/>
+        <path d="${ICONS[a.t]}" fill="${col}" transform="scale(0.86)"/></g>`;
+    s+=`<g transform="translate(${a.x+(a.lx??16)},${a.y+(a.ly??-14)})" style="pointer-events:none">
+        <rect x="0" y="0" width="${a.id.length*7.6+30}" height="17" rx="2.5"
+          fill="${T('--panel')}" stroke="${T('--line')}" stroke-width="1" opacity="0.97"/>
+        <text x="5" y="12.5" fill="${T('--ink')}" font-size="10.5" font-family="JetBrains Mono,monospace" font-weight="500">${a.id}</text>
+        <text x="${a.id.length*7.6+25}" y="12.5" fill="${col}" font-size="10" font-family="JetBrains Mono,monospace" text-anchor="end">${Math.round(a.sp)}</text></g>`;
+  });
+  return s;
+}
+
+const TRAIL = "M356,398 L392,452 L452,412 L470,336 L432,286 L494,258 L604,250 L702,272 L748,318 L800,352";
+function trailLayer(force){
+  if(!LAYERS.trails && !force) return '';
+  const ac=T('--acc');
+  let s=`<path d="${TRAIL}" fill="none" stroke="${T('--panel')}" stroke-width="7"
+          opacity="0.85" stroke-linecap="round" stroke-linejoin="round"/>`;
+  s+=`<path d="${TRAIL}" fill="none" stroke="${ac}" stroke-width="3.4" opacity="0.95"
+        stroke-linecap="round" stroke-linejoin="round"/>`;
+  [[356,398],[452,412],[494,258],[604,250],[748,318],[806,356]].forEach(([x,y])=>{
+    s+=`<circle cx="${x}" cy="${y}" r="3.4" fill="${T('--panel')}" stroke="${ac}" stroke-width="2"/>`;});
+  return s;
+}
+
+function drawMap(id, opts={}){
+  const el=document.getElementById(id); if(!el) return;
+  el.innerHTML = baseMap() + zoneLayer() + trailLayer(opts.trail) + assetLayer();
+}
+
+/* ───────────────────────── tables ───────────────────────── */
+function fuelBar(v){
+  const cls = v<20?'low':v<45?'mid':'';
+  return `<div style="display:flex;align-items:center;gap:7px">
+    <div class="bar"><b class="${cls}" style="width:${v}%"></b></div>
+    <span class="m">${v}%</span></div>`;
+}
+function renderTables(){
+  document.getElementById('ztab').innerHTML = ZONES.map(z=>{
+    const [,st]=ZFILL[z.kind];
+    return `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;
+      background:${st};margin-right:7px"></span>${z.id} ${E(z.name)}</td>
+      <td><span class="tag ${z.kind==='restrict'?'t-crit':z.kind==='speed'?'t-warn':'t-ok'}">${z.type}</span></td>
+      <td class="sub2">${E(z.rule)}</td><td class="m">${z.inside}</td></tr>`;}).join('');
+
+  document.getElementById('ftab').innerHTML = ASSETS.map(a=>
+    `<tr data-click class="${a.id===SELECTED?'sel':''}" onclick="selectAsset('${a.id}')">
+      <td><b>${a.id}</b><span class="sub2">${E(a.t)}</span></td>
+      <td class="m sub2">${E(a.age||'—')}</td>
+      <td><span class="tag ${a.sev==='crit'?'t-crit':a.sev==='warn'?'t-warn':'t-mut'}">${E(a.st)}</span>
+        <span class="sub2">${a.zone}</span></td>
+      <td class="m">${Math.round(a.sp)} km/h</td></tr>`).join('');
+
+  document.getElementById('atab').innerHTML = ALARMS.length ? ALARMS.map(x=>{
+    const ackd = x.state && x.state!=='open';
+    const action = ackd
+      ? `<span class="sub2">ack ${x.ack_by?E(x.ack_by):''}</span>`
+      : `<button class="ackbtn" onclick="ackAlarm('${x.event_id}')">Acknowledge</button>`;
+    return `<tr class="${ackd?'ackd':''}"><td class="m">${x.t}</td><td class="m">${E(x.a||'')}</td>
+      <td>${E(x.ty)}</td><td class="sub2" style="color:var(--ink2)">${E(x.d)}</td>
+      <td><span class="tag ${x.s==='crit'?'t-crit':'t-warn'}">${x.s==='crit'?'Critical':x.s==='warn'?'Warning':'Info'}</span></td>
+      <td class="sub2">${E(x.src)}</td><td>${action}</td></tr>`;}).join('')
+    : `<tr><td colspan="7" class="sub2" style="text-align:center;padding:18px">No alarms — all clear.</td></tr>`;
+}
+function selectAsset(id){ SELECTED=id; drawMap('map'); renderTables(); }
+function tog(k){
+  LAYERS[k]=!LAYERS[k];
+  document.getElementById('t-'+k).setAttribute('aria-pressed', String(LAYERS[k]));
+  drawMap('map');
+}
+
+/* ───────────────────────── small charts ───────────────────────── */
+function lineChart(id, v, opts){
+  const el=document.getElementById(id); if(!el) return;
+  const W=460,H=150,M={t:12,r:12,b:20,l:34}, n=v.length;
+  let lo=opts.lo!==undefined?opts.lo:Math.min(...v), hi=opts.hi!==undefined?opts.hi:Math.max(...v);
+  if(hi===lo) hi=lo+1;
+  const x=i=>M.l+i*(W-M.l-M.r)/(n-1), y=t=>M.t+(1-(t-lo)/(hi-lo))*(H-M.t-M.b);
+  const line=T('--line'), dim=T('--dim'), col=T(opts.col||'--acc');
+  let g='';
+  for(let k=0;k<=2;k++){ const val=lo+(hi-lo)*k/2, yy=y(val);
+    g+=`<line x1="${M.l}" y1="${yy}" x2="${W-M.r}" y2="${yy}" stroke="${line}" stroke-width="1"/>`+
+       `<text x="${M.l-6}" y="${yy+3.5}" fill="${dim}" font-size="9.5" font-family="JetBrains Mono,monospace" text-anchor="end">${Math.round(val)}</text>`;}
+  if(opts.limit!==undefined){ const yy=y(opts.limit);
+    g+=`<line x1="${M.l}" y1="${yy}" x2="${W-M.r}" y2="${yy}" stroke="${T('--crit')}" stroke-width="1.3" stroke-dasharray="5 4"/>`+
+       `<text x="${M.l+4}" y="${yy-5}" fill="${T('--crit')}" font-size="9.5" font-family="JetBrains Mono,monospace">${opts.limitLabel||opts.limit}</text>`;}
+  const path=v.map((t,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(t).toFixed(1)}`).join('');
+  if(opts.fill!==false) g+=`<path d="${path}L${x(n-1).toFixed(1)},${y(lo)} L${M.l},${y(lo)} Z" fill="${col}" fill-opacity="0.1"/>`;
+  g+=`<path d="${path}" fill="none" stroke="${col}" stroke-width="1.8" stroke-linejoin="round"/>`;
+  g+=`<circle cx="${x(n-1).toFixed(1)}" cy="${y(v[n-1]).toFixed(1)}" r="3.2" fill="${col}"/>`;
+  g+=`<text x="${M.l}" y="${H-5}" fill="${dim}" font-size="9.5" font-family="JetBrains Mono,monospace">06:00</text>`;
+  g+=`<text x="${W-M.r}" y="${H-5}" fill="${dim}" font-size="9.5" font-family="JetBrains Mono,monospace" text-anchor="end">now</text>`;
+  el.innerHTML=g;
+}
+
+function cycleBar(){
+  const el=document.getElementById('cyc'); if(!el) return;
+  const c = CYCLES;
+  if(!c || !c.cycles || !c.segments_s){
+    el.innerHTML = `<text x="14" y="60" fill="${T('--mut')}" font-size="12"
+      font-family="Barlow,sans-serif">Awaiting complete haul cycles this shift…</text>`;
+    return;
+  }
+  const m = s => (c.segments_s[s]||0)/60;  // seconds → minutes
+  const segs=[["Loading",m('load_s'),'--ok'],["Hauling loaded",m('haul_s'),'--acc'],
+              ["Queue at face",m('queue_s'),'--crit'],["Tipping",m('dump_s'),'--warn'],
+              ["Return empty",m('return_s'),'--mut']].map(([n,v,col])=>[n,+v.toFixed(1),col]);
+  const total=segs.reduce((a,s)=>a+s[1],0);
+  const W=560,H=130,L=14,R=14,BH=34, w=W-L-R;
+  let x=L,g='';
+  segs.forEach(([n,v,c])=>{
+    const sw=v/total*w, col=T(c);
+    g+=`<rect x="${x.toFixed(1)}" y="30" width="${Math.max(sw-2,1).toFixed(1)}" height="${BH}" fill="${col}" opacity="0.82" rx="2"/>`;
+    if(sw>52) g+=`<text x="${(x+sw/2-1).toFixed(1)}" y="${30+BH/2+4}" fill="#fff" font-size="11" font-family="JetBrains Mono,monospace" text-anchor="middle">${v}</text>`;
+    x+=sw;
+  });
+  const lw=(W-L-R)/segs.length;
+  segs.forEach(([n,,c],i)=>{
+    const lx=L+i*lw;
+    g+=`<rect x="${lx.toFixed(1)}" y="80" width="9" height="9" fill="${T(c)}" rx="1.5"/>`;
+    g+=`<text x="${(lx+13).toFixed(1)}" y="88.5" fill="${T('--ink2')}" font-size="10.5" font-family="Barlow,sans-serif">${n}</text>`;
+  });
+  g+=`<text x="${L}" y="18" fill="${T('--mut')}" font-size="11" font-family="Barlow Condensed,sans-serif" font-weight="600" letter-spacing="1.1">MINUTES PER CYCLE · MEAN ${total.toFixed(1)} · ${c.cycles} CYCLES (${(c.shift||'').toUpperCase()})</text>`;
+  const qp = c.queue_pct==null?0:c.queue_pct;
+  g+=`<text x="${L}" y="112" fill="${T('--crit')}" font-size="11.5" font-family="Barlow,sans-serif">Queue at face is ${qp.toFixed(0)}% of every cycle (observed).</text>`;
+  el.innerHTML=g;
+}
+
+/* ───────────────────────── camera scenes ───────────────────────── */
+function detBox(x,y,w,h,label,colTok,conf){
+  const c=T(colTok);
+  let g=`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${c}" fill-opacity="0.1"
+          stroke="${c}" stroke-width="2"/>`;
+  const txt = conf ? `${label} · ${conf}` : label;
+  const tw = txt.length*6.1+12;
+  g+=`<rect x="${x}" y="${y-17}" width="${tw}" height="17" fill="${c}"/>`;
+  g+=`<text x="${x+6}" y="${y-4.5}" fill="#fff" font-size="10.5"
+        font-family="JetBrains Mono,monospace" font-weight="500">${E(txt)}</text>`;
+  return g;
+}
+function camChrome(name, state){
+  const dim=T('--dim');
+  let g=`<rect x="0" y="0" width="640" height="24" fill="rgba(0,0,0,.45)"/>`;
+  g+=`<circle cx="14" cy="12" r="4" fill="${T(state==='ok'?'--ok':'--warn')}"/>`;
+  g+=`<text x="26" y="16" fill="#e9e9e3" font-size="10.5" font-family="JetBrains Mono,monospace">${E(name)}</text>`;
+  g+=`<text x="628" y="16" fill="#b9b9ae" font-size="10.5" font-family="JetBrains Mono,monospace" text-anchor="end">14:07:44 · 12 fps</text>`;
+  return g;
+}
+
+
+/* ═══════════════════ camera scenes — procedural canvas ═══════════════════
+   No external imagery is available to an artifact, and none should be: site
+   footage must not leave the mine. These are rendered from scratch so the
+   detection overlay, tracker lag and confidence jitter behave the way they do
+   on real video.                                                            */
+
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const rnd = (seed) => { let s = seed>>>0; return () => (s = (s*1664525+1013904223)>>>0) / 4294967296; };
+const lerp = (a,b,t)=>a+(b-a)*t;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+/* ---------- painters ---------- */
+function skyHaze(c,w,h,horizon,warm){
+  const g=c.createLinearGradient(0,0,0,horizon+90);
+  g.addColorStop(0, warm?'#6b5c3f':'#4a4e52');
+  g.addColorStop(0.7, warm?'#8a7550':'#6a6b63');
+  g.addColorStop(1, warm?'#a08a63':'#8a8478');
+  c.fillStyle=g; c.fillRect(0,0,w,horizon+90);
+}
+function ground(c,w,h,horizon,tone){
+  const g=c.createLinearGradient(0,horizon,0,h);
+  g.addColorStop(0, tone[0]); g.addColorStop(0.45, tone[1]); g.addColorStop(1, tone[2]);
+  c.fillStyle=g; c.fillRect(0,horizon-2,w,h-horizon+2);
+}
+function bench(c,w,y,depth,fill,edge,rough){
+  const R=rnd(depth*97+11);
+  c.beginPath(); c.moveTo(0,y);
+  for(let x=0;x<=w;x+=40){
+    const dy=Math.sin(x*0.006+depth)*rough + (R()-0.5)*rough*0.8;
+    c.lineTo(x, y+dy);
+  }
+  c.lineTo(w,y+150); c.lineTo(0,y+150); c.closePath();
+  c.fillStyle=fill; c.fill();
+  c.strokeStyle=edge; c.lineWidth=2.5; c.stroke();
+}
+function scatter(c,w,h,y0,y1,seed,n,tone){
+  const R=rnd(seed);
+  for(let i=0;i<n;i++){
+    const t=R(), x=R()*w, y=lerp(y0,y1,t*t);
+    const s=lerp(2,13,t)*(0.6+R()*0.9);
+    c.fillStyle=tone[(R()*tone.length)|0];
+    c.globalAlpha=0.35+R()*0.4;
+    c.beginPath(); c.ellipse(x,y,s,s*0.62,R()*3,0,7); c.fill();
+  }
+  c.globalAlpha=1;
+}
+function atmos(c,w,h,horizon){
+  const g=c.createLinearGradient(0,horizon-120,0,h);
+  g.addColorStop(0,'rgba(214,196,158,0.42)'); g.addColorStop(0.5,'rgba(214,196,158,0.10)');
+  g.addColorStop(1,'rgba(214,196,158,0)');
+  c.fillStyle=g; c.fillRect(0,horizon-120,w,h-horizon+120);
+}
+function dust(c,w,h,t,seed,n,strength){
+  const R=rnd(seed);
+  for(let i=0;i<n;i++){
+    const sp=0.15+R()*0.5, x=((R()*w + t*sp*38) % (w+140))-70;
+    const y=h*0.35 + R()*h*0.6 + Math.sin(t*0.7+i)*9;
+    const r=6+R()*26;
+    c.globalAlpha=strength*(0.04+R()*0.07);
+    c.fillStyle='#d8c9a6'; c.beginPath(); c.arc(x,y,r,0,7); c.fill();
+  }
+  c.globalAlpha=1;
+}
+function vignette(c,w,h){
+  const g=c.createRadialGradient(w/2,h/2,h*0.35,w/2,h/2,h*0.92);
+  g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,0.5)');
+  c.fillStyle=g; c.fillRect(0,0,w,h);
+}
+function scanlines(c,w,h){
+  c.globalAlpha=0.045; c.fillStyle='#000';
+  for(let y=0;y<h;y+=3) c.fillRect(0,y,w,1);
+  c.globalAlpha=1;
+}
+
+/* ---------- machines ---------- */
+function shadow(c,x,y,rx,ry){
+  c.save(); c.globalAlpha=0.34; c.fillStyle='#221c10';
+  c.beginPath(); c.ellipse(x,y,rx,ry,0,0,7); c.fill(); c.restore();
+}
+function wheel(c,x,y,r){
+  c.fillStyle='#17150f'; c.beginPath(); c.arc(x,y,r,0,7); c.fill();
+  c.fillStyle='#2e2a20'; c.beginPath(); c.arc(x,y,r*0.55,0,7); c.fill();
+  c.strokeStyle='#0d0b07'; c.lineWidth=r*0.22; c.beginPath(); c.arc(x,y,r*0.86,0,7); c.stroke();
+}
+function haulTruck(c,x,y,s,loaded,flip,tip){
+  c.save(); c.translate(x,y); c.scale(flip?-s:s,s);
+  shadow(c,4,30,74,12);
+  // tray
+  c.save(); if(tip) c.rotate(-tip);
+  const tg=c.createLinearGradient(0,-46,0,4);
+  tg.addColorStop(0, loaded?'#6d5330':'#5d5a4c'); tg.addColorStop(1, loaded?'#4a3720':'#403e34');
+  c.fillStyle=tg;
+  c.beginPath(); c.moveTo(-72,-42); c.lineTo(22,-46); c.lineTo(26,2); c.lineTo(-70,4); c.closePath(); c.fill();
+  c.strokeStyle='#2b2417'; c.lineWidth=2.4; c.stroke();
+  if(loaded){
+    c.fillStyle='#7d6440'; c.beginPath(); c.moveTo(-68,-44);
+    for(let i=0;i<=9;i++){ const px=-68+i*10.2; c.lineTo(px, -50-Math.sin(i*1.3)*7-6); }
+    c.lineTo(22,-46); c.closePath(); c.fill();
+    c.fillStyle='rgba(255,240,210,0.16)';
+    c.beginPath(); c.moveTo(-60,-50); c.lineTo(-20,-60); c.lineTo(4,-52); c.closePath(); c.fill();
+  }
+  c.restore();
+  // chassis + cab
+  c.fillStyle='#37332a'; c.fillRect(-70,2,104,16);
+  const cg=c.createLinearGradient(0,-34,0,10);
+  cg.addColorStop(0,'#e8d9a8'); cg.addColorStop(1,'#b39f66');
+  c.fillStyle=cg;
+  c.beginPath(); c.moveTo(24,-34); c.lineTo(50,-30); c.lineTo(54,6); c.lineTo(24,6); c.closePath(); c.fill();
+  c.strokeStyle='#5f5330'; c.lineWidth=2; c.stroke();
+  c.fillStyle='#2b3a3f'; c.fillRect(30,-28,18,15);
+  c.fillStyle='rgba(255,255,255,0.22)'; c.fillRect(30,-28,18,5);
+  wheel(c,-46,20,15); wheel(c,-20,20,15); wheel(c,40,20,14);
+  c.restore();
+}
+function excavator(c,x,y,s,swing,boom){
+  c.save(); c.translate(x,y); c.scale(s,s);
+  shadow(c,0,26,62,11);
+  c.fillStyle='#1f1c15'; c.beginPath(); c.roundRect(-56,6,112,22,8); c.fill();
+  c.fillStyle='#33301f';
+  for(let i=0;i<9;i++) c.fillRect(-52+i*12,8,7,18);
+  c.save(); c.translate(0,-4); c.rotate(swing*0.05);
+  const bg=c.createLinearGradient(0,-34,0,8);
+  bg.addColorStop(0,'#e2c23f'); bg.addColorStop(1,'#a8891f');
+  c.fillStyle=bg; c.beginPath(); c.roundRect(-40,-30,78,36,4); c.fill();
+  c.strokeStyle='#5f4d10'; c.lineWidth=2; c.stroke();
+  c.fillStyle='#243036'; c.fillRect(-34,-26,24,22);
+  c.fillStyle='rgba(255,255,255,0.2)'; c.fillRect(-34,-26,24,7);
+  // boom
+  c.save(); c.translate(28,-18); c.rotate(-0.55+Math.sin(boom)*0.30);
+  c.fillStyle='#c9a52c'; c.beginPath(); c.roundRect(0,-8,74,16,4); c.fill();
+  c.strokeStyle='#6b5713'; c.lineWidth=2; c.stroke();
+  c.translate(72,0); c.rotate(1.15+Math.sin(boom+1.1)*0.34);
+  c.fillStyle='#c9a52c'; c.beginPath(); c.roundRect(0,-6.5,58,13,4); c.fill(); c.stroke();
+  c.translate(56,0); c.rotate(0.5+Math.sin(boom+2.0)*0.5);
+  c.fillStyle='#8f7418';
+  c.beginPath(); c.moveTo(0,-9); c.lineTo(24,-13); c.lineTo(30,14); c.lineTo(2,11); c.closePath(); c.fill(); c.stroke();
+  c.restore(); c.restore(); c.restore();
+}
+function person(c,x,y,s,phase){
+  c.save(); c.translate(x,y); c.scale(s,s);
+  shadow(c,0,17,11,3.5);
+  const sw=Math.sin(phase)*0.5;
+  c.strokeStyle='#e8681f'; c.lineWidth=4; c.lineCap='round';
+  c.beginPath(); c.moveTo(0,4); c.lineTo(sw*6,17); c.moveTo(0,4); c.lineTo(-sw*6,17); c.stroke();
+  c.fillStyle='#f07a25'; c.beginPath(); c.roundRect(-5,-9,10,15,3); c.fill();
+  c.fillStyle='#ffd9a8'; c.fillRect(-5,-4,10,3.5);
+  c.strokeStyle='#f07a25'; c.lineWidth=3;
+  c.beginPath(); c.moveTo(-4,-6); c.lineTo(-sw*7,4); c.moveTo(4,-6); c.lineTo(sw*7,4); c.stroke();
+  c.fillStyle='#2a2a2a'; c.beginPath(); c.arc(0,-13,4.4,0,7); c.fill();
+  c.fillStyle='#f5c518'; c.beginPath(); c.arc(0,-15,5.2,Math.PI,0); c.fill();
+  c.restore();
+}
+
+/* ---------- detection overlay ---------- */
+function detect(c,b,label,col,conf,dashed){
+  const {x,y,w,h}=b, L=Math.min(w,h)*0.26;
+  // A tracker that keeps drawing a box for an object leaving frame is a bug, not a feature.
+  const vis=(Math.min(x+w,W)-Math.max(x,0))/w;
+  if(vis<0.55) return;
+  c.save();
+  c.strokeStyle=col; c.lineWidth=2.6; c.lineJoin='round';
+  if(dashed) c.setLineDash([7,5]);
+  [[x,y,1,1],[x+w,y,-1,1],[x,y+h,1,-1],[x+w,y+h,-1,-1]].forEach(([px,py,sx,sy])=>{
+    c.beginPath(); c.moveTo(px, py+sy*L); c.lineTo(px,py); c.lineTo(px+sx*L, py); c.stroke();
+  });
+  c.setLineDash([]);
+  c.globalAlpha=0.10; c.fillStyle=col; c.fillRect(x,y,w,h); c.globalAlpha=1;
+  const txt = conf!=null ? `${label} ${conf.toFixed(1)}%` : label;
+  c.font='600 19px "JetBrains Mono", monospace';
+  const tw=c.measureText(txt).width+16;
+  const lx=clamp(x, 6, W-tw-6);
+  c.fillStyle=col; c.fillRect(lx, y-27, tw, 25);
+  c.fillStyle='#14120d'; c.fillText(txt, lx+8, y-9);
+  c.restore();
+}
+function chrome(c,w,h,name,t,note,noteCol){
+  c.fillStyle='rgba(8,8,6,0.62)'; c.fillRect(0,0,w,42);
+  c.fillStyle= (t%2<1.4)?'#e0503c':'#7d3428';
+  c.beginPath(); c.arc(24,21,7,0,7); c.fill();
+  c.font='600 19px "JetBrains Mono", monospace'; c.fillStyle='#e9e5d8';
+  c.fillText(name, 42, 28);
+  const hh=14+Math.floor(t/60)%1, mm=(7+Math.floor(t/6))%60, ss=Math.floor(t*10)%60;
+  const pad=n=>String(n).padStart(2,'0');
+  c.textAlign='right'; c.fillStyle='#b9b3a2';
+  c.fillText(`${pad(hh)}:${pad(mm)}:${pad(ss)}  12 fps`, w-16, 28);
+  c.textAlign='left';
+  if(note){
+    c.font='600 19px "JetBrains Mono", monospace';
+    const tw=c.measureText(note).width+24;
+    c.fillStyle='rgba(8,8,6,0.7)'; c.fillRect(16,h-46,tw,32);
+    c.fillStyle=noteCol||'#e6d7a8'; c.fillText(note, 28, h-24);
+  }
+}
+
+/* ---------- tracked box with realistic lag ---------- */
+class Track{
+  constructor(x,y,w,h){ this.b={x,y,w,h}; this.c=0; }
+  to(t,dt,seed){
+    const k=1-Math.pow(0.0001,dt);
+    for(const q of ['x','y','w','h']) this.b[q]=lerp(this.b[q], t[q], k);
+    this.c = clamp((this.c||t.conf) + (Math.sin(seed+performance.now()/700)*0.16), 88, 99.4);
+    return this.b;
+  }
+}
+
+/* ═══════════════════ the four scenes ═══════════════════ */
+const W=1280, H=720;
+const TR = {t1:new Track(300,330,260,150), t2:new Track(720,380,250,140),
+            t3:new Track(200,470,90,140), ex:new Track(250,250,300,200),
+            ov:new Track(560,300,180,150), c1:new Track(200,470,300,160),
+            c2:new Track(560,520,300,160), c3:new Track(940,430,290,150),
+            fo:new Track(700,250,200,140), bl:new Track(260,380,300,190)};
+
+/* CAM-01 — pit face */
+function sceneA(c,t,dt){
+  const hz=250;
+  skyHaze(c,W,H,hz,true);
+  ground(c,W,H,hz,['#8d7a52','#7a6743','#584a2f']);
+  bench(c,W,hz-6,1.0,'#a3906244','#6d5c39',10);
+  bench(c,W,hz-6,1.0,'#9d8b5e','#65552f',10);
+  bench(c,W,hz+96,2.1,'#8a7850','#584a2b',13);
+  bench(c,W,hz+212,3.4,'#79684a','#4a3e24',16);
+  c.fillStyle='#6a5a3a'; c.fillRect(0,hz+330,W,H-hz-330);
+  scatter(c,W,H,hz+40,H-10,7,220,['#6d5d3c','#8b7a52','#57492e','#9c8b60']);
+  // haul road dust plume behind the moving truck
+  const px = ((t*46)%1500)-160;
+  dust(c,W,H,t,3,26,1.0);
+
+  const swing=Math.sin(t*0.55), boom=t*1.15;
+  excavator(c,330,404,1.55,swing,boom);
+  // truck being loaded (slight settle bounce)
+  haulTruck(c,690,430,1.25,true,false,0);
+  // second truck driving out of frame
+  haulTruck(c,px,536,1.5,false,true,0);
+  const walk=(t*26)%520;
+  const pxp=92+walk*0.30;
+  person(c,pxp,566,2.7,t*5.2);
+
+  atmos(c,W,H,hz);
+  // detections
+  detect(c,TR.ex.to({x:214,y:300,w:274,h:182},dt,1),'Excavator ACTIVE','#4fbf7a',TR.ex.c=clamp(96.4+Math.sin(t*1.3)*0.5,95,97.4));
+  detect(c,TR.t1.to({x:566,y:352,w:250,h:132},dt,2),'Haul truck FULL','#4fbf7a',clamp(95.1+Math.sin(t*0.9+1)*0.6,93.5,96.5));
+  detect(c,TR.t2.to({x:px-98,y:452,w:230,h:126},dt,3),'Truck EMPTY','#4fbf7a',clamp(93.8+Math.sin(t*1.7+2)*0.7,92,95.4));
+  detect(c,TR.t3.to({x:pxp-34,y:500,w:70,h:106},dt,4),'PERSON 11 m','#e0503c',clamp(91.2+Math.sin(t*2.1)*0.9,89,93));
+  c.strokeStyle='#e0503c'; c.lineWidth=2; c.setLineDash([9,7]); c.lineDashOffset=-t*22;
+  c.beginPath(); c.moveTo(pxp,548); c.lineTo(268,412); c.stroke(); c.setLineDash([]);
+  vignette(c,W,H); scanlines(c,W,H);
+  chrome(c,W,H,'CAM-01 · pit face bench 340',t,'PROXIMITY · advisory raised · EMESRT L7','#f0a99c');
+}
+
+/* CAM-02 — ROM tip: truck reverses, tips, bin fills */
+let binFill=0.62;
+function sceneB(c,t,dt){
+  const hz=190, cyc=(t%16)/16;
+  skyHaze(c,W,H,hz,true);
+  ground(c,W,H,hz,['#8a7852','#6f5f3f','#4c3f28']);
+  scatter(c,W,H,hz+30,H,11,150,['#5d4f33','#7d6c47','#463a24']);
+  // hopper: near lip wide, far lip narrow — reads as looking down into the mouth
+  c.beginPath(); c.moveTo(406,318); c.lineTo(902,318); c.lineTo(1076,650); c.lineTo(214,650); c.closePath();
+  const wall=c.createLinearGradient(0,318,0,650);
+  wall.addColorStop(0,'#171309'); wall.addColorStop(1,'#2e2718');
+  c.fillStyle=wall; c.fill();
+  c.strokeStyle='#5b4f33'; c.lineWidth=6; c.stroke();
+  c.strokeStyle='#7a6a44'; c.lineWidth=3;
+  c.beginPath(); c.moveTo(406,318); c.lineTo(214,650); c.moveTo(902,318); c.lineTo(1076,650); c.stroke();
+  // fill level
+  const target = cyc>0.55 && cyc<0.8 ? 0.86 : (cyc>0.8?0.40:binFill);
+  binFill = lerp(binFill, target, 1-Math.pow(0.2,dt));
+  const top = lerp(620, 300, binFill);
+  c.save(); c.beginPath(); c.moveTo(406,318); c.lineTo(902,318); c.lineTo(1076,650); c.lineTo(214,650); c.closePath(); c.clip();
+  const og=c.createLinearGradient(0,top,0,660); og.addColorStop(0,'#9c8654'); og.addColorStop(1,'#5b4c30');
+  c.fillStyle=og; c.fillRect(200,top,900,420);
+  const R=rnd(21);
+  for(let i=0;i<160;i++){ const x=214+R()*862, y=top+R()*(660-top);
+    c.globalAlpha=0.4+R()*0.4; c.fillStyle=['#6f5f3d','#a08c5c','#4f4229'][(R()*3)|0];
+    c.beginPath(); c.ellipse(x,y,5+R()*20,4+R()*13,R()*3,0,7); c.fill(); }
+  c.globalAlpha=1; c.restore();
+  // tipping truck
+  const inPos = clamp((cyc-0.12)/0.30,0,1), tipA = cyc>0.5&&cyc<0.82 ? Math.sin((cyc-0.5)/0.32*Math.PI)*0.9 : 0;
+  const tx = lerp(1420, 700, inPos);
+  haulTruck(c,tx,286,1.5,cyc<0.78,true,tipA);
+  // a boulder sitting proud of the surface, which is what the detector fires on
+  const bx=560, by=top+34;
+  c.fillStyle='#6d5c3a'; c.beginPath(); c.ellipse(bx,by,78,52,0.3,0,7); c.fill();
+  c.fillStyle='#8f7c50'; c.beginPath(); c.ellipse(bx-14,by-14,50,32,0.2,0,7); c.fill();
+  c.strokeStyle='#4a3d24'; c.lineWidth=3; c.beginPath(); c.ellipse(bx,by,78,52,0.3,0,7); c.stroke();
+  if(tipA>0.25) dust(c,W,H,t,9,18,1.4);
+  atmos(c,W,H,hz);
+  const pct=Math.round(binFill*100);
+  const kc=document.getElementById('k-cov'); if(kc) kc.textContent=pct+'%';
+  detect(c,TR.ov.to({x:bx-96,y:by-70,w:196,h:140},dt,5),'OVERSIZE 1.4 m','#e2a032',clamp(88.0+Math.sin(t*1.1)*1.2,85,91));
+  // fill gauge
+  c.fillStyle='rgba(8,8,6,0.6)'; c.fillRect(1084,300,150,308);
+  c.fillStyle='#332c1d'; c.fillRect(1114,326,42,256);
+  const gh=256*binFill;
+  c.fillStyle= pct>=70?'#e2a032':'#4fbf7a'; c.fillRect(1114,326+256-gh,42,gh);
+  c.strokeStyle='#e0503c'; c.lineWidth=3; c.beginPath(); c.moveTo(1104,326+256*0.30); c.lineTo(1166,326+256*0.30); c.stroke();
+  c.font='600 17px "JetBrains Mono",monospace'; c.fillStyle='#e9b0a6'; c.fillText('70%',1170,326+256*0.30+6);
+  c.fillStyle='#d8d2c0'; c.textAlign='center'; c.fillText(`${pct}%`,1135,600); c.textAlign='left';
+  vignette(c,W,H); scanlines(c,W,H);
+  chrome(c,W,H,'CAM-02 · ROM tip',t,
+    `BIN MOUTH COVERAGE ${pct}%  ·  held 11:24  ·  bog precursor`, pct>=70?'#e6c98a':'#cfe6c0');
+}
+
+/* CAM-03 — waste dump, full/empty against zones */
+function sceneC(c,t,dt){
+  const hz=170;
+  skyHaze(c,W,H,hz,true);
+  ground(c,W,H,hz,['#93815a','#7c6a46','#544629']);
+  bench(c,W,hz+70,1.7,'#8a7850','#6a5a38',12);
+  scatter(c,W,H,hz+40,H,31,190,['#6a5a3a','#8d7c54','#4c3f28']);
+  // zone polys
+  c.save(); c.globalAlpha=0.38; c.fillStyle='#3fae68';
+  c.beginPath(); c.moveTo(0,238); c.lineTo(382,204); c.lineTo(432,336); c.lineTo(0,378); c.closePath(); c.fill();
+  c.globalAlpha=1; c.strokeStyle='#4fbf7a'; c.lineWidth=4; c.stroke(); c.restore();
+  c.save(); c.globalAlpha=0.35; c.fillStyle='#c0402e';
+  c.beginPath(); c.moveTo(800,172); c.lineTo(1280,146); c.lineTo(1280,354); c.lineTo(838,332); c.closePath(); c.fill();
+  c.globalAlpha=1; c.strokeStyle='#e0503c'; c.lineWidth=4; c.stroke(); c.restore();
+  c.font='700 26px "Barlow Condensed",sans-serif'; c.fillStyle='#eef5ee'; c.textAlign='center';
+  c.fillText('ORE DUMP ZONE',208,300); c.fillText('WASTE DUMP ZONE',1046,262); c.textAlign='left';
+  // three trucks on a loop
+  const lane=(o,sp)=>((t*sp+o)%1.35)-0.18;
+  const p1=lane(0.05,0.055), p2=lane(0.52,0.048), p3=lane(0.92,0.062);
+  const px=p=>lerp(-180,1420,p);
+  haulTruck(c,px(p1),520,1.5,true,false,0);
+  haulTruck(c,px(p2),596,1.65,false,false,0);
+  haulTruck(c,px(p3),470,1.32,true,false,0);
+  dust(c,W,H,t,17,20,0.9);
+  atmos(c,W,H,hz);
+  detect(c,TR.c1.to({x:px(p1)-118,y:436,w:250,h:130},dt,6),'Haul truck FULL','#4fbf7a',clamp(97.1+Math.sin(t)*0.5,96,98.2));
+  detect(c,TR.c2.to({x:px(p2)-128,y:504,w:272,h:142},dt,7),'Haul truck EMPTY','#4fbf7a',clamp(96.4+Math.sin(t*1.4+1)*0.6,95,97.6));
+  detect(c,TR.c3.to({x:px(p3)-104,y:394,w:222,h:118},dt,8),'Haul truck FULL','#e2a032',clamp(95.3+Math.sin(t*0.8+2)*0.5,94,96.4));
+  vignette(c,W,H); scanlines(c,W,H);
+  chrome(c,W,H,'CAM-03 · waste tip head',t,'ORE IN WASTE ZONE · flagged','#e6c9a8');
+}
+
+/* CAM-04 — conveyor, belt scrolling, foreign object travelling */
+function sceneD(c,t,dt){
+  const hz=210;
+  skyHaze(c,W,H,hz,false);
+  ground(c,W,H,hz,['#6c6350','#585040','#3c362a']);
+  scatter(c,W,H,hz+30,H,41,110,['#4c4638','#6a6250','#3a352a']);
+  const ax=90, ay=590, bx=1210, by=170;
+  const dx=bx-ax, dy=by-ay, len=Math.hypot(dx,dy), ux=dx/len, uy=dy/len, nx=-uy, ny=ux;
+  // trestle
+  for(let i=0;i<=12;i++){ const p=i/12, x=ax+dx*p, y=ay+dy*p;
+    c.strokeStyle='#413a2c'; c.lineWidth=7; c.beginPath(); c.moveTo(x,y+16); c.lineTo(x+16,y+120); c.stroke(); }
+  // belt structure
+  const off=(w)=>[ [ax+nx*w, ay+ny*w], [bx+nx*w, by+ny*w] ];
+  const band=(w1,w2,fill)=>{ const a=off(w1),b=off(w2);
+    c.beginPath(); c.moveTo(a[0][0],a[0][1]); c.lineTo(a[1][0],a[1][1]);
+    c.lineTo(b[1][0],b[1][1]); c.lineTo(b[0][0],b[0][1]); c.closePath(); c.fillStyle=fill; c.fill(); };
+  band(-34,34,'#5c5645'); band(-26,26,'#2b2820');
+  // moving ore on the belt
+  c.save();
+  c.beginPath(); const a=off(-24),b=off(24);
+  c.moveTo(a[0][0],a[0][1]); c.lineTo(a[1][0],a[1][1]); c.lineTo(b[1][0],b[1][1]); c.lineTo(b[0][0],b[0][1]); c.closePath(); c.clip();
+  const R=rnd(5); const speed=REDUCED?0:190;
+  for(let i=0;i<150;i++){
+    const base=R(), w=(R()-0.5)*44;
+    const p=((base + (t*speed)/len) % 1);
+    const x=ax+dx*p+nx*w, y=ay+dy*p+ny*w, s=4+R()*13;
+    c.fillStyle=['#7e6f4c','#9a8a60','#5f5336'][(R()*3)|0]; c.globalAlpha=0.85;
+    c.beginPath(); c.ellipse(x,y,s,s*0.7,R()*3,0,7); c.fill();
+  }
+  c.globalAlpha=1; c.restore();
+  // idlers
+  for(let i=0;i<=22;i++){ const p=i/22, x=ax+dx*p, y=ay+dy*p;
+    c.strokeStyle='#6d6553'; c.lineWidth=3;
+    c.beginPath(); c.moveTo(x+nx*34,y+ny*34); c.lineTo(x-nx*34,y-ny*34); c.stroke(); }
+  // foreign object riding the belt
+  const fp=(t*speed/len*0.34)%1.15-0.08, fx=ax+dx*fp, fy=ay+dy*fp;
+  if(fp>-0.05&&fp<1.05){
+    c.save(); c.translate(fx,fy); c.rotate(Math.atan2(dy,dx)+0.3);
+    c.fillStyle='#8a8f96'; c.beginPath(); c.roundRect(-34,-7,68,14,3); c.fill();
+    c.fillStyle='#b9bec6'; c.fillRect(-30,-5,60,4); c.restore();
+  }
+  atmos(c,W,H,hz);
+  detect(c,TR.bl.to({x:260,y:392,w:300,h:190},dt,9),'Belt CV-201 ROLLING','#4fbf7a',null);
+  if(fp>0.02&&fp<0.98) detect(c,TR.fo.to({x:fx-104,y:fy-78,w:208,h:150},dt,10),'Foreign object','#e2a032',clamp(61+Math.sin(t*2)*4,54,70),true);
+  vignette(c,W,H); scanlines(c,W,H);
+  chrome(c,W,H,'CAM-04 · plant conveyor CV-201',t,'BELT 4.2 m/s · TRACKING NOMINAL · candidate below threshold','#d6d1c2');
+}
+
+/* ═══════════ photographic camera feeds ═══════════
+   When a still for a camera is present in img/, the panel renders that frame
+   with the detection overlay drawn on top, and the procedural scene below is
+   never used. Boxes are in normalised 0–1 coordinates so they stay glued to
+   the subject whatever the source resolution. If a file is missing the panel
+   silently falls back to its procedural scene, so the page never breaks. */
+const SHOTS = {
+  cam1:{ src:'img/cam1.jpg', name:'CAM-01 · pit face bench 340',
+         note:'PROXIMITY · advisory raised · EMESRT L7', noteCol:'#f0a99c',
+         boxes:[ {x:.18,y:.34,w:.22,h:.30,l:'Excavator ACTIVE',c:'#4fbf7a',cf:96.4},
+                 {x:.44,y:.44,w:.24,h:.20,l:'Haul truck FULL',c:'#4fbf7a',cf:95.1},
+                 {x:.09,y:.62,w:.05,h:.13,l:'PERSON 11 m',    c:'#e0503c',cf:91.2} ] },
+  cam2:{ src:'img/cam2.jpg', name:'CAM-02 · ROM tip',
+         note:'BIN MOUTH COVERAGE 84%  ·  held 11:24  ·  bog precursor', noteCol:'#e6c98a',
+         boxes:[ {x:.30,y:.40,w:.40,h:.34,l:'Bin mouth 84%',  c:'#e2a032',cf:null},
+                 {x:.44,y:.52,w:.14,h:.15,l:'OVERSIZE 1.4 m', c:'#e2a032',cf:88.0} ] },
+  cam3:{ src:'img/cam3.jpg', name:'CAM-03 · waste tip head',
+         note:'ORE IN WASTE ZONE · flagged', noteCol:'#e6c9a8',
+         boxes:[ {x:.14,y:.52,w:.26,h:.26,l:'Haul truck FULL', c:'#4fbf7a',cf:97.1},
+                 {x:.52,y:.46,w:.24,h:.24,l:'Haul truck EMPTY',c:'#4fbf7a',cf:96.4} ] },
+  cam4:{ src:'img/cam4.jpg', name:'CAM-04 · plant conveyor CV-201',
+         note:'BELT 4.2 m/s · TRACKING NOMINAL · candidate below threshold', noteCol:'#d6d1c2',
+         boxes:[ {x:.22,y:.40,w:.44,h:.26,l:'Belt CV-201 ROLLING',c:'#4fbf7a',cf:null},
+                 {x:.58,y:.30,w:.13,h:.14,l:'Foreign object',    c:'#e2a032',cf:61.0,dash:1} ] }
+};
+const SHOT_IMG = {};
+Object.entries(SHOTS).forEach(([id,cfg])=>{
+  const im = new Image();
+  im.onload = () => { SHOT_IMG[id] = im; };
+  im.src = cfg.src;
+});
+function drawCover(c,im,w,h){                    // fill the panel, preserve aspect
+  const s = Math.max(w/im.width, h/im.height);
+  const dw = im.width*s, dh = im.height*s;
+  c.drawImage(im, (w-dw)/2, (h-dh)/2, dw, dh);
+}
+function scenePhoto(c,t,dt,id){
+  const im = SHOT_IMG[id], cfg = SHOTS[id];
+  drawCover(c,im,W,H);
+  // grade it toward a dust-derated industrial feed rather than a glossy photo
+  c.save();
+  c.globalCompositeOperation='saturation';
+  c.fillStyle='hsl(0,55%,50%)'; c.fillRect(0,0,W,H);
+  c.restore();
+  c.fillStyle='rgba(38,30,16,0.14)'; c.fillRect(0,0,W,H);
+  cfg.boxes.forEach((b,i)=>{
+    const conf = b.cf==null ? null
+      : clamp(b.cf + Math.sin(t*(1.1+i*0.3)+i)*0.5, b.cf-1.4, b.cf+1.4);
+    detect(c,{x:b.x*W,y:b.y*H,w:b.w*W,h:b.h*H}, b.l, b.c, conf, b.dash);
+  });
+  vignette(c,W,H); scanlines(c,W,H);
+  chrome(c,W,H,cfg.name,t,cfg.note,cfg.noteCol);
+}
+
+/* ---------- driver ---------- */
+const SCENES=[['cam1',sceneA],['cam2',sceneB],['cam3',sceneC],['cam4',sceneD]];
+let camRAF=null, camT=0, camLast=0;
+function camFrame(ts){
+  const dt=Math.min(0.05,(ts-camLast)/1000)||0.016; camLast=ts;
+  camT += REDUCED?0:dt;
+  const visible = !document.getElementById('vision').classList.contains('hide');
+  if(visible){
+    SCENES.forEach(([id,fn])=>{
+      const el=document.getElementById(id); if(!el) return;
+      const c=el.getContext('2d');
+      c.save(); c.clearRect(0,0,W,H);
+      if(!REDUCED){ const j=Math.sin(camT*3.1)*0.7+Math.sin(camT*7.7)*0.35; c.translate(j,Math.cos(camT*2.6)*0.5); }
+      SHOT_IMG[id] ? scenePhoto(c,camT,dt,id) : fn(c,camT,dt);
+      c.restore();
+    });
+  }
+  camRAF = REDUCED && camT>0.1 ? null : requestAnimationFrame(camFrame);
+}
+function startCams(){ if(camRAF===null){ camLast=performance.now(); camRAF=requestAnimationFrame(camFrame); } }
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden && camRAF){ cancelAnimationFrame(camRAF); camRAF=null; } else startCams();
+});
+
+/* ───────────────────────── prospectivity ───────────────────────── */
+const TARGETS=[
+  {id:"I",   p:0.94, area:"4.1 km²", note:"Fault jog, encloses two known workings"},
+  {id:"II",  p:0.89, area:"2.7 km²", note:"Intrusion contact, coincident As–Sb halo"},
+  {id:"III", p:0.86, area:"3.4 km²", note:"Splay off the main structure"},
+  {id:"IV",  p:0.81, area:"1.9 km²", note:"Au–Ag only, no pathfinder support"},
+  {id:"V",   p:0.78, area:"2.2 km²", note:"Edge of survey — poorly constrained"}
+];
+function prospectivity(){
+  const el=document.getElementById('pros'); if(!el) return;
+  const W=800,H=560,cell=10;
+  const cols=Math.floor(W/cell), rows=Math.floor(H/cell);
+  const dark = false;                    // the UI is light-only
+  let g=`<rect width="${W}" height="${H}" fill="${T('--terrain')}"/>`;
+  const blob=(x,y,cx,cy,r)=>Math.exp(-(((x-cx)**2+(y-cy)**2)/(2*r*r)));
+  for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){
+    const x=c*cell+cell/2, y=r*cell+cell/2;
+    const fault=Math.abs((y-0.42*H)-0.55*(x-0.26*W));
+    const halo=Math.exp(-((fault/46)**2));
+    let v=0.72*halo
+      +1.15*blob(x,y,0.30*W,0.40*H,42)+0.95*blob(x,y,0.56*W,0.30*H,34)
+      +0.85*blob(x,y,0.70*W,0.58*H,32)+0.62*blob(x,y,0.40*W,0.72*H,28)
+      +0.55*blob(x,y,0.90*W,0.80*H,30);
+    v=Math.min(1,v*0.82+0.03*Math.sin(x*0.11)*Math.cos(y*0.09));
+    if(v<0.14) continue;
+    // sequential ramp: terrain -> gold -> ember
+    const t=Math.min(1,(v-0.14)/0.72);
+    const stops=dark?[[46,44,36],[120,92,30],[196,150,52],[236,196,110]]
+                    :[[214,208,190],[196,160,72],[168,104,26],[128,54,32]];
+    const i=Math.min(stops.length-2,Math.floor(t*(stops.length-1)));
+    const f=t*(stops.length-1)-i;
+    const col=stops[i].map((s,k)=>Math.round(s+(stops[i+1][k]-s)*f));
+    g+=`<rect x="${c*cell}" y="${r*cell}" width="${cell}" height="${cell}" fill="rgb(${col})" opacity="${(0.35+0.65*t).toFixed(2)}"/>`;
+  }
+  // structure
+  g+=`<path d="M0,${0.42*H-0.55*0.26*W} L${W},${0.42*H+0.55*(W-0.26*W)}" stroke="${dark?'#e8e4d6':'#22201c'}"
+        stroke-width="1.6" stroke-dasharray="10 6" opacity="0.55"/>`;
+  const pos=[[0.30,0.40],[0.56,0.30],[0.70,0.58],[0.40,0.72],[0.90,0.80]];
+  TARGETS.forEach((t,i)=>{
+    const x=pos[i][0]*W, y=pos[i][1]*H, r=26+t.p*22;
+    g+=`<circle cx="${x}" cy="${y}" r="${r}" fill="none" stroke="${dark?'#f2ede0':'#1c1a17'}" stroke-width="2" opacity="0.85"/>`;
+    g+=`<circle cx="${x}" cy="${y}" r="${r+7}" fill="none" stroke="${dark?'#f2ede0':'#1c1a17'}" stroke-width="0.8" opacity="0.4"/>`;
+    g+=`<rect x="${x-15}" y="${y-r-24}" width="30" height="18" rx="2.5" fill="${dark?'#12140f':'#fbfbf8'}" stroke="${T('--line')}"/>`;
+    g+=`<text x="${x}" y="${y-r-11}" fill="${T('--ink')}" font-size="11.5" font-weight="700"
+          font-family="Barlow Condensed,sans-serif" text-anchor="middle">${t.id}</text>`;
+  });
+  // colour key
+  g+=`<rect x="16" y="${H-48}" width="176" height="34" rx="3" fill="${dark?'rgba(0,0,0,.5)':'rgba(255,255,255,.82)'}"/>`;
+  for(let i=0;i<40;i++){
+    const t=i/39;
+    const stops=dark?[[46,44,36],[120,92,30],[196,150,52],[236,196,110]]
+                    :[[214,208,190],[196,160,72],[168,104,26],[128,54,32]];
+    const k=Math.min(stops.length-2,Math.floor(t*(stops.length-1))), f=t*(stops.length-1)-k;
+    const col=stops[k].map((s,j)=>Math.round(s+(stops[k+1][j]-s)*f));
+    g+=`<rect x="${24+i*3.6}" y="${H-40}" width="3.7" height="10" fill="rgb(${col})"/>`;
+  }
+  g+=`<text x="24" y="${H-19}" fill="${T('--mut')}" font-size="9.5" font-family="JetBrains Mono,monospace">0.14</text>`;
+  g+=`<text x="168" y="${H-19}" fill="${T('--mut')}" font-size="9.5" font-family="JetBrains Mono,monospace" text-anchor="end">0.95</text>`;
+  g+=`<text x="96" y="${H-19}" fill="${T('--mut')}" font-size="9.5" font-family="JetBrains Mono,monospace" text-anchor="middle">P(mineralised)</text>`;
+  el.innerHTML=g;
+
+  document.getElementById('ttab').innerHTML=TARGETS.map(t=>
+    `<tr><td><b>Target ${t.id}</b></td><td class="sub2" style="color:var(--ink2)">${E(t.note)}</td>
+      <td class="m">${t.p.toFixed(2)}</td><td class="m">${t.area}</td></tr>`).join('');
+}
+
+/* reproduction figures, filled from the training run */
+/* measured, seed 0, 250 WGAN epochs, 300 synthetic patches per class */
+const REPRO = {raw:"0.9383", aug:"0.9481", lift:"+0.0097", sd:"600 (from 114 real)"};
+function fillRepro(){
+  const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
+  set('r-raw',REPRO.raw); set('r-aug',REPRO.aug); set('r-lift',REPRO.lift); set('r-sd',REPRO.sd);
+}
+
+/* ───────────────────────── views ───────────────────────── */
+function go(v){
+  ['site','fleet','vision','explore'].forEach(k=>{
+    document.getElementById(k).classList.toggle('hide', k!==v);
+    document.getElementById('n-'+k).setAttribute('aria-selected', String(k===v));
+  });
+  paint();
+}
+function paint(){
+  drawMap('map'); renderTables();
+  drawMap('map2',{trail:true});
+  lineChart('sp',[12,28,41,47,38,22,9,31,44,47,40,26,14,33,46,47],
+    {lo:0,hi:60,limit:40,limitLabel:'40 limit',col:'--warn'});
+  lineChart('pl',[0,0,224,220,218,0,0,222,216,0,0,219,214,0,218,218],
+    {lo:0,hi:240,col:'--acc'});
+  lineChart('fu',[98,94,89,85,80,76,71,97,93,88,83,78,74,69,65,62],
+    {lo:0,hi:100,col:'--ok'});
+  cycleBar(); prospectivity(); fillRepro(); startCams();
+}
+
+/* ───────────────────────── live data (M5) ───────────────────────── */
+const SITE = 'kn-zw-01';
+let PROJECT = (lat,lon)=>[600,390];   // replaced once we have geometry
+let RAW = {zones:[], assets:[], events:[], cycles:null};
+
+const KINDMAP = {loading:'load', unloading:'unload', restricted:'restrict', speed_limited:'speed', generic:'speed'};
+const TYPEMAP = {loading:'Loading', unloading:'Unloading', restricted:'Restricted', speed_limited:'Speed', generic:'Zone'};
+const ICONMAP = {haul_truck:'truck', excavator:'excavator', light_vehicle:'light', water_bowser:'water', grader:'dozer'};
+const SEVMAP = {critical:'crit', warning:'warn', info:'info'};
+
+function ring(z){ return (z.geometry&&z.geometry.coordinates&&z.geometry.coordinates[0])||[]; }
+function pipLL(lat,lon,r){ let inside=false;
+  for(let i=0,j=r.length-1;i<r.length;j=i++){ const xi=r[i][0],yi=r[i][1],xj=r[j][0],yj=r[j][1];
+    if((yi>lat)!==(yj>lat)){ const xc=xi+(lat-yi)/(yj-yi)*(xj-xi); if(lon<xc) inside=!inside; } }
+  return inside; }
+function buildProjection(pts){
+  if(!pts.length) return;
+  const lats=pts.map(p=>p[0]), lons=pts.map(p=>p[1]);
+  const laMin=Math.min(...lats),laMax=Math.max(...lats),loMin=Math.min(...lons),loMax=Math.max(...lons);
+  const k=Math.cos((laMin+laMax)/2*Math.PI/180);
+  const xw=Math.max((loMax-loMin)*k,1e-9), yh=Math.max(laMax-laMin,1e-9);
+  const RX0=160,RX1=1040,RY0=130,RY1=650, rw=RX1-RX0, rh=RY1-RY0;
+  const s=Math.min(rw/xw, rh/yh);
+  const ox=RX0+(rw-xw*s)/2, oy=RY0+(rh-yh*s)/2;
+  PROJECT=(lat,lon)=>[ ox+((lon-loMin)*k)*s, oy+((laMax-lat))*s ];
+}
+function shortCode(id){ const h=id.split('-')[0]; return h.length<=4?h.toUpperCase():h.slice(0,4).toUpperCase(); }
+function ruleText(z){ const r=z.rules||{};
+  if(r.speed_limit_kph!=null) return `${r.speed_limit_kph} km/h`;
+  if(Array.isArray(r.authorized_classes)) return r.authorized_classes.length?`Authorised: ${r.authorized_classes.join(', ')}`:'Authorised entry only';
+  if(r.dwell_s!=null) return `dwell < ${r.dwell_s}s`;
+  return '—'; }
+function humanType(t){ return (t||'').replace(/_/g,' ').replace(/^\w/,c=>c.toUpperCase()); }
+function fmtTime(iso){ try{ return new Date(iso).toLocaleTimeString('en-GB',{hour12:false,timeZone:'Africa/Harare'}); }catch(e){ return ''; } }
+function ageStr(nowIso, tsIso){ const s=Math.max(0,(new Date(nowIso)-new Date(tsIso))/1000);
+  return s<90?`${Math.round(s)}s`:s<5400?`${Math.round(s/60)}m`:`${(s/3600).toFixed(1)}h`; }
+
+function applyState(snap, haveZones){
+  if(haveZones) RAW.zones = snap.zones||[];
+  RAW.assets = snap.assets||[]; RAW.events = snap.events||[]; RAW.cycles = snap.cycles||null;
+  if(haveZones){
+    const pts=[];
+    RAW.zones.forEach(z=>ring(z).forEach(([lo,la])=>pts.push([la,lo])));
+    RAW.assets.forEach(a=>pts.push([a.lat,a.lon]));
+    buildProjection(pts);
+  }
+  // worst open severity per asset
+  const sevByAsset={};
+  RAW.events.forEach(e=>{ if(e.state==='resolved'||!e.asset_id) return;
+    const rank={crit:3,warn:2,info:1}, cur=sevByAsset[e.asset_id], s=SEVMAP[e.severity]||'info';
+    if(!cur || rank[s]>rank[cur]) sevByAsset[e.asset_id]=s; });
+
+  // zones (dashboard shape) + inside counts
+  const inside={};
+  ZONES = RAW.zones.map(z=>{
+    const r=ring(z);
+    const poly=r.map(([lo,la])=>PROJECT(la,lo).map(n=>+n.toFixed(1)));
+    const cx=poly.reduce((a,p)=>a+p[0],0)/(poly.length||1), cy=poly.reduce((a,p)=>a+p[1],0)/(poly.length||1);
+    let cnt=0; RAW.assets.forEach(a=>{ if(pipLL(a.lat,a.lon,r)) cnt++; }); inside[z.zone_id]=cnt;
+    return {id:shortCode(z.zone_id), zid:z.zone_id, name:z.name, type:TYPEMAP[z.kind]||'Zone',
+            rule:ruleText(z), poly, kind:KINDMAP[z.kind]||'speed', inside:cnt, lab:[cx, cy-4]};
+  });
+
+  // assets (dashboard shape)
+  ASSETS = RAW.assets.map(a=>{
+    const [x,y]=PROJECT(a.lat,a.lon);
+    const inZone=RAW.zones.find(z=>pipLL(a.lat,a.lon,ring(z)));
+    const sp=a.speed_kph||0;
+    const st = inZone?TYPEMAP[inZone.kind]:(sp<1.5?(a.ignition?'Idle':'Parked'):'Moving');
+    return {id:a.asset_id, t:ICONMAP[a.asset_class]||'truck', x, y, sp, sev:sevByAsset[a.asset_id]||'ok',
+            st, zone: inZone?shortCode(inZone.zone_id):'—', age: ageStr(snap.now, a.ts)};
+  });
+
+  // alarms (dashboard shape)
+  ALARMS = RAW.events.map(e=>({t:fmtTime(e.ts), a:e.asset_id, ty:humanType(e.type), d:e.summary,
+    s:SEVMAP[e.severity]||'info', src:e.source, event_id:e.event_id, state:e.state}));
+
+  CYCLES = RAW.cycles;
+
+  // meta counts + KPI tiles + header — all derived, none hardcoded
+  const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
+  const openEvents = RAW.events.filter(e=>e.state==='open');
+  const openCrit = openEvents.filter(e=>e.severity==='critical');
+  const inLoad = RAW.zones.filter(z=>z.kind==='loading').reduce((a,z)=>a+(inside[z.zone_id]||0),0);
+  const inUnload = RAW.zones.filter(z=>z.kind==='unloading').reduce((a,z)=>a+(inside[z.zone_id]||0),0);
+  const breaches = openCrit.filter(e=>e.type==='zone_breach');
+
+  set('zcount', `${ZONES.length} geofences`);
+  set('fcount', `${ASSETS.length} reporting`);
+  set('acount', `realtime · live · ${openEvents.length} open`);
+  set('k-load', inLoad);
+  set('k-unload', inUnload);
+  set('k-breach', breaches.length);
+  set('k-breach-sub', breaches.length ? breaches[0].summary.slice(0,40) : 'none open');
+  set('hdr-assets', ASSETS.length);
+  set('hdr-crit', openCrit.length);
+
+  const c=CYCLES;
+  if(c && c.cycles){
+    set('k-loads', c.cycles);
+    set('k-loads-sub', `${(c.shift||'').toUpperCase()} shift`);
+    set('k-queue', `${Math.round(c.queue_pct||0)}%`);
+    set('k-cycle', `${((c.mean_cycle_time_s||0)/60).toFixed(1)} min`);
+  } else {
+    set('k-loads','0'); set('k-queue','—'); set('k-cycle','—');
+  }
+  if(snap.cycles && snap.cycles.shift) set('clock', `${snap.cycles.shift[0].toUpperCase()+snap.cycles.shift.slice(1)} shift · live`);
+}
+
+async function ackAlarm(id){
+  try{ await fetch(`/sites/${SITE}/events/${id}/ack`,{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({acknowledged_by:'control room'})}); }
+  catch(e){}
+  await loadState();
+}
+
+async function loadState(){
+  const r=await fetch(`/sites/${SITE}/state`); const snap=await r.json();
+  applyState(snap, true); paint();
+}
+function startStream(){
+  const es=new EventSource(`/sites/${SITE}/stream`);
+  es.onmessage=ev=>{ try{ applyState(JSON.parse(ev.data), false);
+    if(document.getElementById('site') && !document.getElementById('site').classList.contains('hide')){ drawMap('map'); renderTables(); cycleBar(); }
+    else { drawMap('map2',{trail:true}); renderTables(); }
+  }catch(e){} };
+  es.onerror=()=>{/* EventSource auto-reconnects; survives flaky links */};
+}
+async function boot(){
+  // ack button styling, injected so we don't touch the stylesheet block
+  const st=document.createElement('style');
+  st.textContent='.ackbtn{font:600 10.5px Barlow,sans-serif;color:var(--acc);background:transparent;'
+    +'border:1px solid var(--acc);border-radius:3px;padding:2px 8px;cursor:pointer}'
+    +'.ackbtn:hover{background:var(--acc);color:#fff}tr.ackd{opacity:.62}';
+  document.head.appendChild(st);
+  try{ await loadState(); }catch(e){ paint(); }
+  startStream();
+}
+boot();
+</script>
