@@ -8,14 +8,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from minemonitor import audit
+from minemonitor.auth.deps import require_supervisor, require_viewer
 from minemonitor.events.repository import acknowledge_event, list_events
 from minemonitor.storage.db import get_db
+from minemonitor.storage.models import User
 
 router = APIRouter(tags=["events"])
 
 
 class AckIn(BaseModel):
-    acknowledged_by: str = Field(min_length=1)
+    # Optional note; the acknowledger is the authenticated user, not this field.
+    note: str | None = Field(default=None)
 
 
 def _to_dict(row: Any) -> dict[str, Any]:
@@ -39,7 +43,7 @@ def _to_dict(row: Any) -> dict[str, Any]:
     }
 
 
-@router.get("/sites/{site_id}/events")
+@router.get("/sites/{site_id}/events", dependencies=[Depends(require_viewer)])
 def get_events(
     site_id: str,
     state: str | None = Query(default=None),
@@ -54,10 +58,24 @@ def get_events(
 
 @router.post("/sites/{site_id}/events/{event_id}/ack")
 def ack_event(
-    site_id: str, event_id: str, body: AckIn, db: Session = Depends(get_db)
+    site_id: str,
+    event_id: str,
+    body: AckIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_supervisor),
 ) -> dict[str, Any]:
-    """Acknowledge an event."""
-    row = acknowledge_event(db, site_id, event_id, body.acknowledged_by)
+    """Acknowledge an event. The acknowledger is the authenticated user."""
+    row = acknowledge_event(db, site_id, event_id, user.username)
     if row is None:
         raise HTTPException(status_code=404, detail="event not found")
+    audit.record(
+        db,
+        actor=user.username,
+        action="event.ack",
+        entity_type="event",
+        entity_id=event_id,
+        site_id=site_id,
+        detail={"note": body.note},
+    )
+    db.commit()
     return _to_dict(row)

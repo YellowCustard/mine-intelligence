@@ -13,10 +13,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from minemonitor import audit
+from minemonitor.auth.deps import require_admin, require_viewer
 from minemonitor.cycles.recompute import recompute
 from minemonitor.cycles.shifts import shift_bounds
 from minemonitor.storage.db import get_db
-from minemonitor.storage.models import AssetMetrics, HaulCycle
+from minemonitor.storage.models import AssetMetrics, HaulCycle, User
 
 router = APIRouter(tags=["cycles"])
 
@@ -36,7 +38,7 @@ def _cycle_dict(c: HaulCycle) -> dict[str, Any]:
     return d
 
 
-@router.get("/sites/{site_id}/assets/{asset_id}/cycles")
+@router.get("/sites/{site_id}/assets/{asset_id}/cycles", dependencies=[Depends(require_viewer)])
 def get_cycles(
     site_id: str,
     asset_id: str,
@@ -70,7 +72,7 @@ def _summarise(cycles: list[HaulCycle]) -> dict[str, Any]:
     }
 
 
-@router.get("/sites/{site_id}/shift-summary")
+@router.get("/sites/{site_id}/shift-summary", dependencies=[Depends(require_viewer)])
 def shift_summary(
     site_id: str,
     shift_date: date = Query(alias="date"),
@@ -106,7 +108,7 @@ def shift_summary(
     }
 
 
-@router.get("/sites/{site_id}/metrics")
+@router.get("/sites/{site_id}/metrics", dependencies=[Depends(require_viewer)])
 def get_metrics(
     site_id: str,
     asset_id: str | None = Query(default=None),
@@ -148,6 +150,18 @@ def trigger_recompute(
     since: datetime | None = Query(default=None),
     until: datetime | None = Query(default=None),
     db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
 ) -> dict[str, int]:
     """Rebuild cycles and metrics from stored positions (idempotent)."""
-    return recompute(db, site_id, start=since, end=until)
+    result = recompute(db, site_id, start=since, end=until)
+    audit.record(
+        db,
+        actor=user.username,
+        action="recompute",
+        entity_type="site",
+        entity_id=site_id,
+        site_id=site_id,
+        detail=result,
+    )
+    db.commit()
+    return result
