@@ -49,7 +49,10 @@ services:
       MM_S3_ENDPOINT: http://minio:9000
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
     ports:
-      - "8000:8000"
+      # Bind to localhost only — the API has no auth yet (M6). Reach it via an
+      # SSH tunnel, or put it behind nginx + TLS + basic-auth. Override with
+      # MM_API_BIND=0.0.0.0 only once auth is in place.
+      - "${MM_API_BIND:-127.0.0.1}:8000:8000"
 
   # MQTT ingestor: subscribes to position topics and stores them idempotently.
   ingestor:
