@@ -21,6 +21,11 @@ for a product we sell.
 | alembic | MIT | https://github.com/sqlalchemy/alembic |
 | psycopg (3) | LGPL-3.0 | https://github.com/psycopg/psycopg |
 | python-ulid | MIT | https://github.com/mdomke/python-ulid |
+| paho-mqtt | EPL-2.0 / EDL-1.0 (dual) | https://github.com/eclipse/paho.mqtt.python |
+
+> **paho-mqtt** is dual-licensed EPL-2.0 / EDL-1.0. We take it under **EDL-1.0**,
+> which is the BSD-3-Clause text — permissive and compatible with a product we
+> sell. It is imported unmodified.
 
 > **psycopg 3** is LGPL-3.0. It is used unmodified as a dynamically linked
 > library (the driver), which LGPL permits in a proprietary product; we do not

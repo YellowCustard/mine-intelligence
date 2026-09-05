@@ -29,6 +29,8 @@ jobs:
     env:
       MM_DATABASE_URL: postgresql+psycopg://minemonitor:minemonitor@localhost:5432/minemonitor
       MM_TEST_DATABASE_URL: postgresql+psycopg://minemonitor:minemonitor@localhost:5432/minemonitor
+      MM_MQTT_HOST: localhost
+      MM_TEST_MQTT_HOST: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +46,16 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --extra dev
 
+      - name: Start MQTT broker (Mosquitto)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mosquitto mosquitto-clients
+          printf 'listener 1883\nallow_anonymous true\npersistence true\npersistence_location /tmp/\n' > /tmp/mosquitto.conf
+          mosquitto -c /tmp/mosquitto.conf -d
+          for i in $(seq 1 20); do
+            mosquitto_pub -h localhost -t hc -m 1 && break || sleep 0.5
+          done
+
       - name: Lint
         run: uv run ruff check .
 
@@ -53,5 +65,5 @@ jobs:
       - name: Run migrations (creates the hypertable on real TimescaleDB)
         run: uv run alembic upgrade head
 
-      - name: Tests (SQLite + Postgres integration)
+      - name: Tests (SQLite + Postgres + MQTT integration)
         run: uv run pytest -q

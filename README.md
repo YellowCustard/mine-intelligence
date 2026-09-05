@@ -8,14 +8,22 @@ with per-zone rules, a unified alarm queue, haul-cycle analytics (the commercial
 payload — queue time at the face), and a live operations dashboard. See
 [`CLAUDE.md`](./CLAUDE.md) for the full build brief.
 
-## Status — M1 (skeleton & contracts)
+## Status — M1 (skeleton & contracts) · M2 (simulator & MQTT ingest)
 
 - Data contracts published as JSON Schema in [`contracts/`](./contracts) with
   matching Pydantic v2 models.
 - PostgreSQL 16 + TimescaleDB schema via Alembic (positions is a hypertable).
 - FastAPI service: health endpoint, HTTP position ingest (validated, stamped,
   idempotent), and site-scoped read-back.
-- `docker compose up` brings up the database, MQTT broker, MinIO and the API.
+- **Simulator** replaying a realistic shift for ~9 machines (haul trucks with a
+  shared loader so real queue time emerges, an excavator, patrol vehicles, and a
+  light vehicle that wanders into the restricted magazine).
+- **MQTT ingest** with store-and-forward: a crash-safe publisher spool that
+  survives a broker restart, and an ingestor that withholds acknowledgement until
+  a position is durably stored — so a **database restart loses nothing and
+  duplicates nothing** (ingest is idempotent).
+- `docker compose up` brings up the database, MQTT broker, MinIO, the API and the
+  ingestor; `docker compose --profile sim up` adds the simulator.
 
 ## Quickstart
 
@@ -42,6 +50,17 @@ curl "localhost:8000/sites/kn-zw-01/positions?asset_id=HT-102"
 ```
 
 API docs are served at `localhost:8000/docs`.
+
+### Watch the simulated fleet
+
+```bash
+docker compose --profile sim up          # simulator → MQTT → ingestor → DB
+curl "localhost:8000/sites/kn-zw-01/positions?limit=20"
+```
+
+The simulator publishes `asset.position.v1` to `mm/{site_id}/{asset_id}/position`
+at 1 Hz. The ingestor subscribes, validates, stamps `received_at`, and stores
+idempotently — identical at the ingest boundary to a real tracker.
 
 ## Local development
 
@@ -75,5 +94,5 @@ Every event is **advisory**: the platform warns people, it never actuates plant.
 
 ## Roadmap
 
-M1 skeleton ✓ · M2 simulator + MQTT ingest · M3 zones & rules · M4 cycle
+M1 skeleton ✓ · M2 simulator + MQTT ingest ✓ · M3 zones & rules · M4 cycle
 analytics · M5 live dashboard · M6 hardening for site.

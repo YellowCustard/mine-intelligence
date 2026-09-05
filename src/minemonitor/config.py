@@ -18,9 +18,15 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://minemonitor:minemonitor@localhost:5432/minemonitor"
 
-    # Present for later milestones; unused in M1.
+    # MQTT transport (M2).
     mqtt_host: str = "localhost"
     mqtt_port: int = 1883
+    mqtt_topic_prefix: str = "mm"
+    mqtt_ingest_client_id: str = "mm-ingestor"
+    # Publisher-side store-and-forward spool (crash-safe local buffer).
+    spool_path: str = "/tmp/mm-spool.sqlite"
+
+    # Present for later milestones; unused now.
     s3_endpoint: str = "http://localhost:9000"
     s3_bucket: str = "mine-evidence"
 

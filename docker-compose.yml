@@ -51,6 +51,32 @@ services:
     ports:
       - "8000:8000"
 
+  # MQTT ingestor: subscribes to position topics and stores them idempotently.
+  ingestor:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      mqtt:
+        condition: service_started
+    environment:
+      MM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-minemonitor}:${POSTGRES_PASSWORD:-minemonitor}@db:5432/${POSTGRES_DB:-minemonitor}
+      MM_MQTT_HOST: mqtt
+      MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
+    entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.mqtt"]
+
+  # Synthetic fleet. Enable with:  docker compose --profile sim up
+  simulator:
+    build: .
+    profiles: ["sim"]
+    depends_on:
+      mqtt:
+        condition: service_started
+    environment:
+      MM_MQTT_HOST: mqtt
+      MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
+    entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.adapters.simulator"]
+
 volumes:
   db_data:
   mqtt_data:
