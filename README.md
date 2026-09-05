@@ -8,7 +8,7 @@ with per-zone rules, a unified alarm queue, haul-cycle analytics (the commercial
 payload — queue time at the face), and a live operations dashboard. See
 [`CLAUDE.md`](./CLAUDE.md) for the full build brief.
 
-## Status — M1 skeleton · M2 MQTT · M3 zones & rules · M4 cycle analytics · M5 live dashboard
+## Status — M1 skeleton · M2 MQTT · M3 zones & rules · M4 cycle analytics · M5 live dashboard · M6 hardening
 
 - Data contracts published as JSON Schema in [`contracts/`](./contracts) with
   matching Pydantic v2 models.
@@ -43,33 +43,67 @@ payload — queue time at the face), and a live operations dashboard. See
   acknowledgement**. Lat/lon is projected onto the SVG site plan; no hardcoded
   operational data remains, and Phase-1 non-goals (tonnes, fuel) are not shown.
   Served by the API at `/`.
+- **Hardening for site** — **HTTP Basic auth** with a role hierarchy
+  (`viewer` < `supervisor` < `admin`, plus a `device` role for ingest), enforced
+  on every route and **scoped per site** so a site-scoped user cannot read or
+  touch another site. An **append-only audit log** records rule/zone changes,
+  acknowledgements and retention runs. **Per-data-class retention** (positions,
+  metrics, events — each configurable in days, `0` = keep forever) runs as a
+  scheduled deletion job in the ingestor and is itself audited. Backfilled and
+  out-of-order positions are corrected on recompute (analytics are
+  order-independent). Password hashing is PBKDF2-HMAC-SHA256 from the standard
+  library — no new dependency.
 - `docker compose up` brings up the database, MQTT broker, MinIO, the API and the
   ingestor; `docker compose --profile sim up` adds the simulator. The dashboard
-  is at `http://localhost:8000/`.
+  is at `http://localhost:8000/` and now prompts for credentials.
 
 ## Quickstart
 
 ```bash
 cp .env.example .env
+# Set a first-run admin so the dashboard is reachable (or create one later
+# with the CLI — see below):
+#   MM_BOOTSTRAP_ADMIN_USER=admin MM_BOOTSTRAP_ADMIN_PASSWORD=change-me
 docker compose up --build
 ```
 
-Then:
+Then (every route except `/health` needs HTTP Basic credentials):
 
 ```bash
-# Health
+# Health (public)
 curl localhost:8000/health
 
-# Ingest a position (received_at is stamped server-side)
-curl -X POST localhost:8000/ingest/positions -H 'content-type: application/json' -d '{
+# Who am I
+curl -u admin:change-me localhost:8000/me
+
+# Ingest a position — requires a device account (create one, see below).
+# received_at is stamped server-side.
+curl -u dev1:devpass -X POST localhost:8000/ingest/positions \
+  -H 'content-type: application/json' -d '{
   "schema": "asset.position.v1", "site_id": "kn-zw-01", "asset_id": "HT-102",
   "ts": "2026-09-05T11:42:07Z", "lat": -17.8252, "lon": 31.0335,
   "speed_kph": 47.0, "source": "curl"
 }'
 
-# Read it back
-curl "localhost:8000/sites/kn-zw-01/positions?asset_id=HT-102"
+# Read it back (viewer or higher)
+curl -u admin:change-me "localhost:8000/sites/kn-zw-01/positions?asset_id=HT-102"
 ```
+
+### Users and roles (M6)
+
+Roles form a hierarchy — `viewer` < `supervisor` < `admin` — plus a separate
+`device` role that may only ingest. Site-scoped users see a single site; leave
+the site blank for a global user. Create users with the CLI (it reads the
+password from `MM_NEW_USER_PASSWORD` or prompts):
+
+```bash
+docker compose exec api uv run python -m minemonitor.auth.cli alice admin
+docker compose exec api uv run python -m minemonitor.auth.cli dev1 device
+docker compose exec api uv run python -m minemonitor.auth.cli bob viewer --site kn-zw-01
+```
+
+An admin can also create users over the API (`POST /users`) and read the audit
+trail (`GET /sites/{site_id}/audit`).
 
 API docs are served at `localhost:8000/docs`.
 
@@ -117,4 +151,9 @@ Every event is **advisory**: the platform warns people, it never actuates plant.
 ## Roadmap
 
 M1 skeleton ✓ · M2 simulator + MQTT ingest ✓ · M3 zones & rules ✓ · M4 cycle
-analytics ✓ · M5 live dashboard ✓ · M6 hardening for site.
+analytics ✓ · M5 live dashboard ✓ · M6 hardening for site (auth & roles,
+per-site scoping, audit log, per-class retention, backfill correctness,
+one-command deploy) ✓.
+
+Phase 1 is complete. Real tracker hardware (`adapters/teltonika.py`) is the next
+integration — everything it feeds is already proven against the simulator.

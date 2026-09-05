@@ -48,10 +48,17 @@ services:
       MM_MQTT_HOST: mqtt
       MM_S3_ENDPOINT: http://minio:9000
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
+      # First-run admin (M6): created only if the users table is empty. Leave
+      # blank in production and create the first admin with the CLI instead.
+      MM_BOOTSTRAP_ADMIN_USER: ${MM_BOOTSTRAP_ADMIN_USER:-}
+      MM_BOOTSTRAP_ADMIN_PASSWORD: ${MM_BOOTSTRAP_ADMIN_PASSWORD:-}
+      MM_RETAIN_POSITIONS_DAYS: ${MM_RETAIN_POSITIONS_DAYS:-90}
+      MM_RETAIN_METRICS_DAYS: ${MM_RETAIN_METRICS_DAYS:-365}
+      MM_RETAIN_EVENTS_DAYS: ${MM_RETAIN_EVENTS_DAYS:-365}
     ports:
-      # Bind to localhost only — the API has no auth yet (M6). Reach it via an
-      # SSH tunnel, or put it behind nginx + TLS + basic-auth. Override with
-      # MM_API_BIND=0.0.0.0 only once auth is in place.
+      # The API has auth (M6, HTTP Basic), but Basic credentials must ride TLS.
+      # Bind localhost by default and put nginx + TLS in front; set
+      # MM_API_BIND=0.0.0.0 only when that reverse proxy terminates TLS.
       - "${MM_API_BIND:-127.0.0.1}:8000:8000"
 
   # MQTT ingestor: subscribes to position topics and stores them idempotently.
@@ -66,6 +73,11 @@ services:
       MM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-minemonitor}:${POSTGRES_PASSWORD:-minemonitor}@db:5432/${POSTGRES_DB:-minemonitor}
       MM_MQTT_HOST: mqtt
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
+      # The ingestor also runs the scheduled retention deletion job (~daily).
+      MM_RETAIN_POSITIONS_DAYS: ${MM_RETAIN_POSITIONS_DAYS:-90}
+      MM_RETAIN_METRICS_DAYS: ${MM_RETAIN_METRICS_DAYS:-365}
+      MM_RETAIN_EVENTS_DAYS: ${MM_RETAIN_EVENTS_DAYS:-365}
+      MM_RETENTION_INTERVAL_S: ${MM_RETENTION_INTERVAL_S:-86400}
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.mqtt"]
 
   # Synthetic fleet. Enable with:  docker compose --profile sim up

@@ -33,10 +33,13 @@ def test_state_snapshot_shape(client: TestClient) -> None:
     assert body["cycles"]["cycles"] == 0
 
 
-def test_dashboard_is_served() -> None:
-    from minemonitor.api.main import create_app
+def test_dashboard_requires_auth_then_serves(client: TestClient, db_session) -> None:
+    from tests.conftest import make_client
 
-    with TestClient(create_app()) as c:
-        resp = c.get("/")
-        assert resp.status_code == 200
-        assert "Mine Monitor" in resp.text
+    # Unauthenticated: the dashboard prompts for credentials.
+    anon = make_client(db_session, None)
+    assert anon.get("/").status_code == 401
+    # Authenticated (admin) client from the fixture serves the page.
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "Mine Monitor" in resp.text

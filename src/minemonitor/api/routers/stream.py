@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from minemonitor.auth.deps import require_viewer
 from minemonitor.cycles.shifts import shift_bounds
 from minemonitor.events.repository import list_events
 from minemonitor.storage.db import get_db, get_session_factory
@@ -138,13 +139,13 @@ def _snapshot(session: Session, site_id: str, *, include_zones: bool) -> dict[st
     return snap
 
 
-@router.get("/sites/{site_id}/state")
+@router.get("/sites/{site_id}/state", dependencies=[Depends(require_viewer)])
 def state(site_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     """One-shot snapshot for initial dashboard load (includes zones)."""
     return _snapshot(db, site_id, include_zones=True)
 
 
-@router.get("/sites/{site_id}/stream")
+@router.get("/sites/{site_id}/stream", dependencies=[Depends(require_viewer)])
 def stream(site_id: str, poll_s: float = Query(default=2.0, ge=0.5, le=30)) -> StreamingResponse:
     """SSE stream of live state (assets, events, cycle summary)."""
 

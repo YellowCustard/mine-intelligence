@@ -44,9 +44,12 @@ done
 
 echo
 echo "==> Up. The dashboard is served by the API on port 8000 (localhost on the VPS)."
-echo "    Do NOT expose port 8000 to the public internet yet — the API has no auth (M6)."
+echo "    The API has HTTP Basic auth (M6). If you did not set MM_BOOTSTRAP_ADMIN_* in"
+echo "    .env, create the first admin now:"
+echo "        docker compose exec api uv run python -m minemonitor.auth.cli admin admin"
+echo "    Basic credentials must ride TLS — do NOT expose plain port 8000 publicly."
 echo "    View it safely with an SSH tunnel from your laptop:"
 echo "        ssh -L 8000:127.0.0.1:8000 <user>@<vps-host>"
 echo "    then open http://localhost:8000/"
 echo
-echo "    For a public URL, put it behind nginx + TLS with HTTP basic-auth (see deploy/DEPLOY.md)."
+echo "    For a public URL, put it behind nginx + TLS (see deploy/DEPLOY.md)."

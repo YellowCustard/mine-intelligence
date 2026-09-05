@@ -33,7 +33,14 @@ cp .env.example .env
 # EDIT .env — at minimum change:
 #   POSTGRES_PASSWORD    (database password)
 #   MINIO_ROOT_PASSWORD  (object-store password)
+# And set a first-run admin so the dashboard is reachable on first boot:
+#   MM_BOOTSTRAP_ADMIN_USER=admin
+#   MM_BOOTSTRAP_ADMIN_PASSWORD=<a strong password>
 ```
+
+The bootstrap admin is created **only if the users table is empty**. Once you
+have logged in and created real users (below), blank both values and redeploy so
+no password lives in `.env`.
 
 ## 4. Bring it up
 
@@ -47,10 +54,26 @@ runs the Alembic migrations on start), and — with `--demo` — the `simulator`
 
 The API (and the dashboard at `/`) listens on **127.0.0.1:8000** on the VPS.
 
+## 4a. Create users (M6)
+
+Log in as the bootstrap admin, then create real accounts. Roles are a hierarchy
+(`viewer` < `supervisor` < `admin`) plus a `device` role that may only ingest;
+add `--site <id>` to scope a user to one site:
+
+```bash
+docker compose exec api uv run python -m minemonitor.auth.cli alice admin
+docker compose exec api uv run python -m minemonitor.auth.cli dev1 device
+docker compose exec api uv run python -m minemonitor.auth.cli bob viewer --site kn-zw-01
+```
+
+The CLI prompts for a password (or reads `MM_NEW_USER_PASSWORD`). Trackers/adapters
+must authenticate as a `device` user to POST positions.
+
 ## 5. View it — safely
 
-The API has **no authentication yet** (that is milestone M6), so do **not** expose
-port 8000 to the public internet. Two safe options:
+The API now has **HTTP Basic auth with roles and per-site scoping** (M6). Basic
+credentials are only as safe as the transport, so still do **not** expose plain
+port 8000 to the public internet — put TLS in front. Two safe options:
 
 **a) SSH tunnel (simplest, nothing to configure):**
 ```bash
@@ -59,17 +82,17 @@ ssh -L 8000:127.0.0.1:8000 <user>@<vps-host>
 # then open http://localhost:8000/
 ```
 
-**b) Public URL behind nginx + TLS + basic-auth:** put nginx in front, terminate
-Let's Encrypt TLS, add HTTP basic-auth, and `proxy_pass` to `127.0.0.1:8000`.
-Note SSE needs buffering off:
+**b) Public URL behind nginx + TLS:** put nginx in front, terminate Let's Encrypt
+TLS, and `proxy_pass` to `127.0.0.1:8000`. The **application** now handles login
+(HTTP Basic with roles), so nginx only needs to provide TLS — do not add a second
+`auth_basic` layer or the browser will prompt twice. SSE needs buffering off:
 ```nginx
 server {
   server_name mine.example.com;
-  auth_basic "Mine Monitor";
-  auth_basic_user_file /etc/nginx/.htpasswd;   # created with: htpasswd -c ...
   location / {
     proxy_pass http://127.0.0.1:8000;
     proxy_set_header Host $host;
+    proxy_set_header Authorization $http_authorization;   # pass Basic creds through
     proxy_buffering off;                 # required for Server-Sent Events
     proxy_read_timeout 1h;
   }
@@ -94,18 +117,30 @@ docker compose logs -f ingestor   # ingest + periodic cycle recompute
 docker compose down               # stop (keeps data volumes)
 ```
 
+**Retention & audit (M6):** the ingestor runs a per-data-class deletion job (~daily;
+positions/metrics/events, each configurable in days via `MM_RETAIN_*`, `0` = keep
+forever). An admin can trigger it on demand with `POST /admin/retention/run` and
+read the audit trail at `GET /sites/{site_id}/audit`.
+
 **Backup the database:**
 ```bash
-docker compose exec db pg_dump -U minemonitor minemonitor > backup_$(date +%F).sql
+bash deploy/backup.sh                 # writes backups/minemonitor_<timestamp>.sql.gz
 ```
 
-**Restore onto a clean box:** `docker compose up -d db`, wait for healthy, then
-`cat backup.sql | docker compose exec -T db psql -U minemonitor minemonitor`.
+**Restore onto a clean box** (M6 acceptance — restore from the compose file + a dump):
+```bash
+cp .env.example .env && $EDITOR .env  # set the same passwords as the source box
+bash deploy/restore.sh backups/minemonitor_<timestamp>.sql.gz
+```
+`restore.sh` brings up `db`, waits for it to be healthy, loads the dump, then starts
+the rest of the stack. (Both scripts wrap `pg_dump`/`psql` and honour the
+`POSTGRES_*` values in `.env`.)
 
 ## Security checklist before any public exposure
 
 - [ ] Changed `POSTGRES_PASSWORD` and `MINIO_ROOT_PASSWORD` in `.env`.
-- [ ] API reachable only via SSH tunnel **or** nginx with TLS + basic-auth.
+- [ ] Created real admin/user accounts, then blanked `MM_BOOTSTRAP_ADMIN_*`.
+- [ ] API reachable only via SSH tunnel **or** nginx with TLS in front (the app
+      provides login; TLS protects the Basic credentials in transit).
 - [ ] Firewall (ufw) allows only 22/80/443; **not** 8000/5432/1883/9000.
-- [ ] Application auth/roles land in **M6** — treat this as an internal deployment
-      until then.
+- [ ] Retention days (`MM_RETAIN_*`) set to the mine's agreed policy.

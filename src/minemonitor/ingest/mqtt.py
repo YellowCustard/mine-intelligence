@@ -149,6 +149,8 @@ class MqttIngestor:
         self._offline_threshold_s = s.offline_threshold_s
         self._offline_interval_s = s.offline_check_interval_s
         self._site_id = s.default_site_id
+        self._retention_interval_s = s.retention_interval_s
+        self._last_retention = 0.0
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
         topic = f"{self.prefix}/+/+/position"
@@ -202,6 +204,7 @@ class MqttIngestor:
         analytics to ingest.
         """
         from minemonitor.cycles.recompute import recompute
+        from minemonitor.retention import run_from_config
         from minemonitor.rules.offline import detect_offline
 
         while not self._stop.wait(self._offline_interval_s):
@@ -216,6 +219,12 @@ class MqttIngestor:
                         extra={"site_id": ev.site_id, "asset_id": ev.asset_id},
                     )
                 recompute(session, self._site_id)
+                # Run the retention deletion job roughly daily (brief §4).
+                now = time.monotonic()
+                if now - self._last_retention >= self._retention_interval_s:
+                    deleted = run_from_config(session)
+                    self._last_retention = now
+                    log.info("retention run", extra={"deleted": deleted})
             except Exception as exc:  # noqa: BLE001 - transient DB errors; retry next tick
                 session.rollback()
                 log.warning("maintenance tick failed", extra={"error": str(exc)})

@@ -44,6 +44,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "TID"]
 [tool.ruff.lint.per-file-ignores]
 # FastAPI's Depends()/Query() in argument defaults is the intended idiom.
 "src/minemonitor/api/**" = ["B008"]
+"src/minemonitor/auth/deps.py" = ["B008"]
 # Contract tests deliberately assert that validation rejects bad input at all.
 "tests/test_contracts.py" = ["B017"]
 

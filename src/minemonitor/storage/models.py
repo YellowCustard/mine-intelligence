@@ -187,3 +187,38 @@ class AssetMetrics(Base):
     mean_speed_kph: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     zone_dwell_s: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False, default=dict)
     loads_completed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class User(Base):
+    """An operator/supervisor/admin account for the API and dashboard.
+
+    ``site_id`` scopes a user to one site; NULL means all sites (a global admin).
+    The mine is the data controller — accounts are per site and auditable.
+    """
+
+    __tablename__ = "users"
+
+    username: Mapped[str] = mapped_column(String, primary_key=True)
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False)  # viewer|supervisor|admin|device
+    site_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AuditLog(Base):
+    """Append-only audit trail: rule/zone changes, acks, auth and data-access.
+
+    Personal-data access is logged here too once the operator table lands
+    (brief §4); the write helper is already in place.
+    """
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    actor: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    entity_type: Mapped[str] = mapped_column(String, nullable=False)
+    entity_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    site_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
