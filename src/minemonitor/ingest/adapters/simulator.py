@@ -37,10 +37,14 @@ def _pt(north_m: float, east_m: float) -> tuple[float, float]:
 
 # Named locations (metres north/east of the base anchor).
 FACE = _pt(0, 0)  # pit face — load point
+FACE_QUEUE = _pt(-15, 0)  # staging line: trucks wait here (still in the load zone)
+FACE_LOAD = FACE  # loader spot: trucks spot forward to here to be loaded
 ROM = _pt(600, 200)  # ROM pad / crusher — ore dump
 WASTE = _pt(-400, 800)  # waste dump
 MAGAZINE = _pt(200, -500)  # restricted: explosives magazine
 WORKSHOP = _pt(-600, -200)  # workshop / muster
+
+SPOT_KPH = 8.0  # slow crawl from the queue up to the loader
 
 
 def _move_towards(
@@ -101,6 +105,9 @@ class Simulator(DeviceAdapter):
         self._load_queue: list[str] = []
         self._loading: str | None = None
         self._load_finish: datetime | None = None
+        # Ground truth for M4 validation: one entry per completed queue episode,
+        # as (asset_id, start_ts, end_ts, queue_s).
+        self.queue_episodes: list[tuple[str, datetime, datetime, float]] = []
 
         self.assets: dict[str, _Asset] = {}
         self._build_fleet()
@@ -108,22 +115,21 @@ class Simulator(DeviceAdapter):
     # -- fleet construction -------------------------------------------------
 
     def _build_fleet(self) -> None:
-        # 5 haul trucks, staggered around the cycle so a queue forms at the face.
-        stagger = ["RETURNING", "HAULING", "RETURNING", "LOADING_APPROACH", "HAULING"]
-        for i, phase in enumerate(stagger, start=101):
-            start_pt = FACE if phase.startswith("RETURN") or "LOAD" in phase else ROM
+        # 5 haul trucks spread along the return leg (ROM -> face) so they arrive
+        # at the face staggered and a real queue forms. Starting them all mid-haul
+        # (not mid-queue) keeps every queue episode complete and measurable.
+        fractions = [0.0, 0.2, 0.45, 0.7, 0.9]  # 0 = at ROM, 1 = at the face queue
+        for i, frac in enumerate(fractions, start=101):
+            lat = ROM[0] + (FACE_QUEUE[0] - ROM[0]) * frac
+            lon = ROM[1] + (FACE_QUEUE[1] - ROM[1]) * frac
             self.assets[f"HT-{i}"] = _Asset(
                 asset_id=f"HT-{i}",
                 asset_class="haul_truck",
-                lat=start_pt[0] + self._jit(),
-                lon=start_pt[1] + self._jit(),
+                lat=lat + self._jit(),
+                lon=lon + self._jit(),
                 speed_kph=28.0,
-                state="RETURNING_EMPTY" if start_pt is not FACE else "QUEUING",
+                state="RETURNING_EMPTY",
             )
-        # Trucks that begin at the face queue immediately.
-        for a in self.assets.values():
-            if a.state == "QUEUING":
-                self._load_queue.append(a.asset_id)
 
         # Excavator working the face — small local shuffles.
         self.assets["EX-01"] = _Asset(
@@ -191,6 +197,7 @@ class Simulator(DeviceAdapter):
         return out
 
     def _service_loader(self) -> None:
+        # Free the loader when the current truck has finished loading.
         if (
             self._loading is not None
             and self._load_finish is not None
@@ -198,27 +205,41 @@ class Simulator(DeviceAdapter):
         ):
             self._loading = None
             self._load_finish = None
+        # Assign the loader to the next queued truck. The load timer starts only
+        # when that truck reaches the loader spot (set in the LOADING branch).
         if self._loading is None and self._load_queue:
             self._loading = self._load_queue.pop(0)
-            self._load_finish = self.now + timedelta(seconds=self.load_s)
+            self._load_finish = None
 
     def _step_truck(self, a: _Asset) -> None:
         if a.state == "RETURNING_EMPTY":
             a.ignition = True
             a.lat, a.lon, a.heading, arrived = _move_towards(
-                a.lat, a.lon, FACE, self._speed_mps(a.speed_kph), self.tick_s
+                a.lat, a.lon, FACE_QUEUE, self._speed_mps(a.speed_kph), self.tick_s
             )
             if arrived:
                 a.state = "QUEUING"
                 a.queue_since = self.now
                 self._load_queue.append(a.asset_id)
         elif a.state == "QUEUING":
-            a.ignition = True  # stationary, engine on — this is queue time
+            a.ignition = True  # stationary at the staging line — this is queue time
             if self._loading == a.asset_id:
                 if a.queue_since is not None:
-                    a.queue_total_s += (self.now - a.queue_since).total_seconds()
+                    q = (self.now - a.queue_since).total_seconds()
+                    a.queue_total_s += q
+                    self.queue_episodes.append((a.asset_id, a.queue_since, self.now, q))
                     a.queue_since = None
+                a.state = "SPOTTING"
+        elif a.state == "SPOTTING":
+            # Crawl forward from the queue to the loader — a visible movement that
+            # marks the end of queuing and the start of loading.
+            a.ignition = True
+            a.lat, a.lon, a.heading, arrived = _move_towards(
+                a.lat, a.lon, FACE_LOAD, self._speed_mps(SPOT_KPH), self.tick_s
+            )
+            if arrived:
                 a.state = "LOADING"
+                self._load_finish = self.now + timedelta(seconds=self.load_s)
         elif a.state == "LOADING":
             a.ignition = True
             if self._loading != a.asset_id:  # loader finished with us
@@ -254,8 +275,10 @@ class Simulator(DeviceAdapter):
             a.wp_idx = (a.wp_idx + 1) % len(a.waypoints)
 
     def _emit(self, a: _Asset) -> PositionIngest:
-        moving = a.state in {"RETURNING_EMPTY", "HAULING_LOADED", "PATROL", "WORKING"}
+        moving = a.state in {"RETURNING_EMPTY", "HAULING_LOADED", "PATROL", "WORKING", "SPOTTING"}
         speed = a.speed_kph if a.state in {"RETURNING_EMPTY", "HAULING_LOADED", "PATROL"} else 0.0
+        if a.state == "SPOTTING":
+            speed = SPOT_KPH
         if a.asset_class == "excavator":
             speed = self._rng.uniform(0, 3)
         return PositionIngest(

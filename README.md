@@ -8,7 +8,7 @@ with per-zone rules, a unified alarm queue, haul-cycle analytics (the commercial
 payload — queue time at the face), and a live operations dashboard. See
 [`CLAUDE.md`](./CLAUDE.md) for the full build brief.
 
-## Status — M1 (skeleton) · M2 (simulator & MQTT) · M3 (zones & rules)
+## Status — M1 skeleton · M2 MQTT ingest · M3 zones & rules · M4 cycle analytics
 
 - Data contracts published as JSON Schema in [`contracts/`](./contracts) with
   matching Pydantic v2 models.
@@ -28,6 +28,14 @@ payload — queue time at the face), and a live operations dashboard. See
   (`restricted`, `speed_limited`, `dwell`) plus a periodic `asset_offline` check
   that distinguishes offline from parked. Breaches land in the unified alarm queue
   as `event.v1`, with an acknowledgement workflow. Zone CRUD via the API.
+- **Haul-cycle analytics** — a state machine driven by zone transitions
+  (`AT_FACE → HAULING_LOADED → AT_DUMP → RETURNING_EMPTY`) computes per-cycle
+  segment durations and the headline **queue time at the face**, recomputable
+  from stored positions. Per-asset `asset.metrics.v1` 5-minute buckets (distance,
+  moving/idle, speeds, zone dwell, loads) and a per-shift summary (cycle count,
+  mean cycle time, segment breakdown incl. queue %). No target is ever hardcoded —
+  we report this mine's observed numbers. API: cycles, shift-summary, metrics, and
+  an idempotent recompute.
 - `docker compose up` brings up the database, MQTT broker, MinIO, the API and the
   ingestor; `docker compose --profile sim up` adds the simulator.
 
@@ -101,4 +109,4 @@ Every event is **advisory**: the platform warns people, it never actuates plant.
 ## Roadmap
 
 M1 skeleton ✓ · M2 simulator + MQTT ingest ✓ · M3 zones & rules ✓ · M4 cycle
-analytics · M5 live dashboard · M6 hardening for site.
+analytics ✓ · M5 live dashboard · M6 hardening for site.
