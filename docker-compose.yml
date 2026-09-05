@@ -1,0 +1,57 @@
+# Mine Monitor — full stack. Must run entirely on one box at the mine (brief §3).
+# `docker compose up` brings up the database, broker, object store and API.
+
+services:
+  db:
+    image: timescale/timescaledb:2.17.2-pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-minemonitor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minemonitor}
+      POSTGRES_DB: ${POSTGRES_DB:-minemonitor}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-minemonitor}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mqtt_data:/mosquitto/data
+
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-minemonitor}:${POSTGRES_PASSWORD:-minemonitor}@db:5432/${POSTGRES_DB:-minemonitor}
+      MM_MQTT_HOST: mqtt
+      MM_S3_ENDPOINT: http://minio:9000
+      MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+
+volumes:
+  db_data:
+  mqtt_data:
+  minio_data:

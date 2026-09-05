@@ -1,0 +1,31 @@
+"""Application configuration, read from the environment (12-factor)."""
+
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """All runtime configuration. Documented in ``.env.example``."""
+
+    model_config = SettingsConfigDict(env_prefix="MM_", env_file=".env", extra="ignore")
+
+    env: str = "dev"
+    log_level: str = "INFO"
+    default_site_tz: str = "Africa/Harare"
+
+    database_url: str = "postgresql+psycopg://minemonitor:minemonitor@localhost:5432/minemonitor"
+
+    # Present for later milestones; unused in M1.
+    mqtt_host: str = "localhost"
+    mqtt_port: int = 1883
+    s3_endpoint: str = "http://localhost:9000"
+    s3_bucket: str = "mine-evidence"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Cached settings singleton."""
+    return Settings()

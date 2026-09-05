@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/event.v1.json",
+  "title": "event.v1",
+  "description": "Anything worth a human's attention. Every source (geofence, vision, gate) emits this shape into one alarm queue.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "event_id",
+    "site_id",
+    "ts",
+    "type",
+    "severity",
+    "source",
+    "summary",
+    "advisory",
+    "state"
+  ],
+  "properties": {
+    "schema": { "const": "event.v1" },
+    "event_id": { "type": "string", "minLength": 1, "description": "ULID." },
+    "site_id": { "type": "string", "minLength": 1 },
+    "ts": { "type": "string", "format": "date-time" },
+    "type": {
+      "type": "string",
+      "description": "Phase 1: zone_breach, overspeed, zone_dwell, asset_offline, geofence_exit. Later sources add more.",
+      "enum": [
+        "zone_breach",
+        "overspeed",
+        "zone_dwell",
+        "asset_offline",
+        "geofence_exit",
+        "proximity",
+        "bog_precursor",
+        "belt_state",
+        "access_granted",
+        "access_denied"
+      ]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["info", "warning", "critical"]
+    },
+    "asset_id": { "type": ["string", "null"] },
+    "zone_id": { "type": ["string", "null"] },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Sensing modality, e.g. 'gnss_geofence', 'vision:cam-01', 'access:gate-1'."
+    },
+    "summary": { "type": "string", "minLength": 1 },
+    "detail": { "type": ["object", "null"] },
+    "evidence": { "type": ["object", "null"] },
+    "advisory": {
+      "const": true,
+      "description": "Always true. The platform warns people; it never actuates plant."
+    },
+    "state": {
+      "type": "string",
+      "enum": ["open", "acknowledged", "resolved"]
+    },
+    "acknowledged_by": { "type": ["string", "null"] },
+    "acknowledged_at": { "type": ["string", "null"], "format": "date-time" }
+  }
+}

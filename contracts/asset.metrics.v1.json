@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/asset.metrics.v1.json",
+  "title": "asset.metrics.v1",
+  "description": "Per-asset rollup over a fixed time bucket (default 5 min). Derived from positions, recomputable, never hand-edited.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "site_id",
+    "asset_id",
+    "bucket_start",
+    "bucket_end"
+  ],
+  "properties": {
+    "schema": { "const": "asset.metrics.v1" },
+    "site_id": { "type": "string", "minLength": 1 },
+    "asset_id": { "type": "string", "minLength": 1 },
+    "bucket_start": { "type": "string", "format": "date-time" },
+    "bucket_end": { "type": "string", "format": "date-time" },
+    "distance_m": { "type": ["number", "null"], "minimum": 0 },
+    "moving_time_s": { "type": ["number", "null"], "minimum": 0 },
+    "idle_time_s": { "type": ["number", "null"], "minimum": 0 },
+    "max_speed_kph": { "type": ["number", "null"], "minimum": 0 },
+    "mean_speed_kph": { "type": ["number", "null"], "minimum": 0 },
+    "zone_dwell_s": {
+      "type": ["object", "null"],
+      "description": "Map of zone_id -> dwell seconds in this bucket.",
+      "additionalProperties": { "type": "number", "minimum": 0 }
+    },
+    "loads_completed": { "type": ["integer", "null"], "minimum": 0 }
+  }
+}
