@@ -114,3 +114,76 @@ class Event(Base):
     state: Mapped[str] = mapped_column(String, nullable=False, default="open")
     acknowledged_by: Mapped[str | None] = mapped_column(String, nullable=True)
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AssetZoneState(Base):
+    """Crash-safe per-(asset, zone) state for the debounce/hysteresis engine.
+
+    Kept in the database, not in memory, so an unclean restart resumes without
+    re-flapping or losing an in-progress dwell/overspeed episode (brief §3).
+    """
+
+    __tablename__ = "asset_zone_state"
+    __table_args__ = (
+        PrimaryKeyConstraint("site_id", "asset_id", "zone_id", name="pk_asset_zone_state"),
+    )
+
+    site_id: Mapped[str] = mapped_column(String, nullable=False)
+    asset_id: Mapped[str] = mapped_column(String, nullable=False)
+    zone_id: Mapped[str] = mapped_column(String, nullable=False)
+    # Confirmed membership (post-debounce), and the debounce counters.
+    inside: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    consec_in: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    consec_out: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    entered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Rule episode state, so each rule fires once per episode, not per fix.
+    overspeed_consec: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    overspeed_fired: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    stationary_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    dwell_fired: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Last processed device time — later/out-of-order fixes are skipped for live
+    # rule evaluation (they remain stored for retrospective recompute).
+    last_ts: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class HaulCycle(Base):
+    """One computed haul cycle. Derived from positions; recomputable (brief §9)."""
+
+    __tablename__ = "haul_cycles"
+    __table_args__ = (
+        PrimaryKeyConstraint("site_id", "asset_id", "start_ts", name="pk_haul_cycles"),
+    )
+
+    site_id: Mapped[str] = mapped_column(String, nullable=False)
+    asset_id: Mapped[str] = mapped_column(String, nullable=False)
+    start_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    cycle_time_s: Mapped[float] = mapped_column(Float, nullable=False)
+    queue_s: Mapped[float] = mapped_column(Float, nullable=False)
+    load_s: Mapped[float] = mapped_column(Float, nullable=False)
+    haul_s: Mapped[float] = mapped_column(Float, nullable=False)
+    dump_s: Mapped[float] = mapped_column(Float, nullable=False)
+    return_s: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class AssetMetrics(Base):
+    """Per-asset rollup over a fixed bucket (asset.metrics.v1). Hypertable on bucket_start."""
+
+    __tablename__ = "asset_metrics"
+    __table_args__ = (
+        PrimaryKeyConstraint("site_id", "asset_id", "bucket_start", name="pk_asset_metrics"),
+    )
+
+    site_id: Mapped[str] = mapped_column(String, nullable=False)
+    asset_id: Mapped[str] = mapped_column(String, nullable=False)
+    bucket_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    bucket_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    distance_m: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    moving_time_s: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    idle_time_s: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    max_speed_kph: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    mean_speed_kph: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    zone_dwell_s: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False, default=dict)
+    loads_completed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

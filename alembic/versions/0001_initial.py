@@ -24,7 +24,20 @@ _PLACEHOLDER_SITE = "kn-zw-01"
 
 
 def upgrade() -> None:
-    op.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE")
+    # Enable TimescaleDB where it is available (the compose image ships it). On a
+    # plain PostgreSQL (CI runner, dev box) the extension may be absent — warn and
+    # carry on so the rest of the schema still applies; positions then falls back
+    # to a plain table below.
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+        EXCEPTION WHEN OTHERS THEN
+            RAISE WARNING 'timescaledb unavailable (%): positions is a plain table', SQLERRM;
+        END$$;
+        """
+    )
 
     op.create_table(
         "sites",
@@ -76,8 +89,19 @@ def upgrade() -> None:
         sa.Column("source", sa.String(), nullable=True),
         sa.PrimaryKeyConstraint("site_id", "asset_id", "ts", name="pk_positions"),
     )
-    # Convert positions into a TimescaleDB hypertable partitioned on ts.
-    op.execute("SELECT create_hypertable('positions', 'ts', if_not_exists => TRUE)")
+    # Convert positions into a TimescaleDB hypertable partitioned on ts — but only
+    # if the extension is installed. The composite PK (site_id, asset_id, ts)
+    # includes the partition column, which Timescale requires.
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+                PERFORM create_hypertable('positions', 'ts', if_not_exists => TRUE);
+            END IF;
+        END$$;
+        """
+    )
     op.create_index("ix_positions_site_asset", "positions", ["site_id", "asset_id"])
 
     op.create_table(
