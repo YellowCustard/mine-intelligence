@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      # Real TimescaleDB so the migration creates an actual hypertable and the
+      # Postgres integration tests exercise the dialect the mine runs on.
+      timescaledb:
+        image: timescale/timescaledb:2.17.2-pg16
+        env:
+          POSTGRES_USER: minemonitor
+          POSTGRES_PASSWORD: minemonitor
+          POSTGRES_DB: minemonitor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U minemonitor"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      MM_DATABASE_URL: postgresql+psycopg://minemonitor:minemonitor@localhost:5432/minemonitor
+      MM_TEST_DATABASE_URL: postgresql+psycopg://minemonitor:minemonitor@localhost:5432/minemonitor
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.8.17"
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Run migrations (creates the hypertable on real TimescaleDB)
+        run: uv run alembic upgrade head
+
+      - name: Tests (SQLite + Postgres integration)
+        run: uv run pytest -q

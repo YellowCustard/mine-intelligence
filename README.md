@@ -51,8 +51,17 @@ uv run ruff check .
 uv run pytest
 ```
 
-Tests run on SQLite for portability; the Postgres/TimescaleDB-specific behaviour
-(hypertable, conflict handling) is exercised against the compose stack.
+Tests run on SQLite for portability. The Postgres-specific behaviour (idempotent
+`ON CONFLICT` insert, JSONB, tz-aware round-trip) is covered by integration tests
+that run when a database URL is provided:
+
+```bash
+MM_TEST_DATABASE_URL=postgresql+psycopg://minemonitor:minemonitor@localhost:5432/minemonitor \
+  uv run pytest
+```
+
+CI runs the full suite against a real TimescaleDB service, including the
+migration that creates the `positions` hypertable.
 
 ## Contracts
 

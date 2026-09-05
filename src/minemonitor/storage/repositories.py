@@ -38,10 +38,18 @@ def insert_position(session: Session, pos: AssetPositionV1) -> bool:
         "source": pos.source,
     }
     insert = pg_insert if session.bind.dialect.name == "postgresql" else sqlite_insert
-    stmt = insert(Position).values(**values).on_conflict_do_nothing(index_elements=_CONFLICT_KEYS)
-    result = session.execute(stmt)
+    # RETURNING tells us whether a row was actually inserted: an insert yields the
+    # row, a conflict yields nothing. rowcount is unreliable here — psycopg3
+    # reports -1 for INSERT ... ON CONFLICT DO NOTHING.
+    stmt = (
+        insert(Position)
+        .values(**values)
+        .on_conflict_do_nothing(index_elements=_CONFLICT_KEYS)
+        .returning(Position.ts)
+    )
+    inserted = session.execute(stmt).first() is not None
     session.commit()
-    return (result.rowcount or 0) > 0
+    return inserted
 
 
 def list_positions(
