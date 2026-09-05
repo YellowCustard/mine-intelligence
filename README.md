@@ -1,1 +1,1 @@
-# mine-intelligence-
+# mine-intelligence
