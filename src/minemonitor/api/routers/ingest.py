@@ -12,7 +12,7 @@ import logging
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from minemonitor.ingest.service import PositionIngest, store_position
+from minemonitor.ingest.service import PositionIngest, store_and_process
 from minemonitor.storage.db import get_db
 from minemonitor.storage.repositories import list_positions
 
@@ -22,8 +22,8 @@ log = logging.getLogger("minemonitor.ingest")
 
 @router.post("/ingest/positions", status_code=202)
 def ingest_position(payload: PositionIngest, db: Session = Depends(get_db)) -> dict[str, object]:
-    """Validate, stamp and idempotently store a single position."""
-    created = store_position(db, payload)
+    """Validate, stamp, store, and run zone/rule processing for a position."""
+    created, events = store_and_process(db, payload)
     log.info(
         "position ingested",
         extra={
@@ -31,9 +31,10 @@ def ingest_position(payload: PositionIngest, db: Session = Depends(get_db)) -> d
             "asset_id": payload.asset_id,
             "source": "http",
             "position_created": created,
+            "events": len(events),
         },
     )
-    return {"stored": True, "created": created}
+    return {"stored": True, "created": created, "events": len(events)}
 
 
 @router.get("/sites/{site_id}/positions")

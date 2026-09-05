@@ -22,7 +22,7 @@ import time
 import paho.mqtt.client as mqtt
 
 from minemonitor.config import get_settings
-from minemonitor.ingest.service import PositionIngest, store_position
+from minemonitor.ingest.service import PositionIngest, store_and_process
 from minemonitor.ingest.spool import Spool
 from minemonitor.storage.db import get_session_factory
 
@@ -145,6 +145,10 @@ class MqttIngestor:
         self._client.on_message = self._on_message
         self._stop = threading.Event()
         self.stored_count = 0
+        self._offline_thread: threading.Thread | None = None
+        self._offline_threshold_s = s.offline_threshold_s
+        self._offline_interval_s = s.offline_check_interval_s
+        self._site_id = s.default_site_id
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
         topic = f"{self.prefix}/+/+/position"
@@ -168,7 +172,7 @@ class MqttIngestor:
         while not self._stop.is_set():
             session = self._session_factory()
             try:
-                created = store_position(session, payload)
+                created, events = store_and_process(session, payload)
                 log.info(
                     "position ingested",
                     extra={
@@ -176,6 +180,7 @@ class MqttIngestor:
                         "asset_id": payload.asset_id,
                         "source": "mqtt",
                         "position_created": created,
+                        "events": len(events),
                     },
                 )
                 return
@@ -189,9 +194,32 @@ class MqttIngestor:
             finally:
                 session.close()
 
+    def _offline_loop(self) -> None:
+        """Periodically scan for assets that have gone silent while active."""
+        from minemonitor.rules.offline import detect_offline
+
+        while not self._stop.wait(self._offline_interval_s):
+            session = self._session_factory()
+            try:
+                events = detect_offline(
+                    session, self._site_id, threshold_s=self._offline_threshold_s
+                )
+                for ev in events:
+                    log.info(
+                        "asset offline",
+                        extra={"site_id": ev.site_id, "asset_id": ev.asset_id},
+                    )
+            except Exception as exc:  # noqa: BLE001 - transient DB errors; retry next tick
+                session.rollback()
+                log.warning("offline check failed", extra={"error": str(exc)})
+            finally:
+                session.close()
+
     def start(self) -> None:
         self._client.connect(self.host, self.port)
         self._client.loop_start()
+        self._offline_thread = threading.Thread(target=self._offline_loop, daemon=True)
+        self._offline_thread.start()
 
     def run_forever(self) -> None:
         self.start()
@@ -203,6 +231,8 @@ class MqttIngestor:
 
     def stop(self) -> None:
         self._stop.set()
+        if self._offline_thread is not None:
+            self._offline_thread.join(timeout=2.0)
         self._client.loop_stop()
         self._client.disconnect()
 

@@ -114,3 +114,35 @@ class Event(Base):
     state: Mapped[str] = mapped_column(String, nullable=False, default="open")
     acknowledged_by: Mapped[str | None] = mapped_column(String, nullable=True)
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AssetZoneState(Base):
+    """Crash-safe per-(asset, zone) state for the debounce/hysteresis engine.
+
+    Kept in the database, not in memory, so an unclean restart resumes without
+    re-flapping or losing an in-progress dwell/overspeed episode (brief §3).
+    """
+
+    __tablename__ = "asset_zone_state"
+    __table_args__ = (
+        PrimaryKeyConstraint("site_id", "asset_id", "zone_id", name="pk_asset_zone_state"),
+    )
+
+    site_id: Mapped[str] = mapped_column(String, nullable=False)
+    asset_id: Mapped[str] = mapped_column(String, nullable=False)
+    zone_id: Mapped[str] = mapped_column(String, nullable=False)
+    # Confirmed membership (post-debounce), and the debounce counters.
+    inside: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    consec_in: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    consec_out: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    entered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Rule episode state, so each rule fires once per episode, not per fix.
+    overspeed_consec: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    overspeed_fired: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    stationary_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    dwell_fired: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Last processed device time — later/out-of-order fixes are skipped for live
+    # rule evaluation (they remain stored for retrospective recompute).
+    last_ts: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

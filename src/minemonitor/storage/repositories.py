@@ -14,13 +14,16 @@ from minemonitor.storage.models import Position
 _CONFLICT_KEYS = ["site_id", "asset_id", "ts"]
 
 
-def insert_position(session: Session, pos: AssetPositionV1) -> bool:
+def insert_position(session: Session, pos: AssetPositionV1, *, commit: bool = True) -> bool:
     """Idempotently insert a position.
 
     Returns ``True`` if a new row was written, ``False`` if it already existed
     (same ``site_id``/``asset_id``/``ts``). Replaying a position never
     duplicates it (brief §12). Dialect-aware so the same path runs on Postgres
     (production) and SQLite (tests).
+
+    ``commit=False`` leaves the transaction open so the caller can insert the
+    position and process its rule events atomically in one commit.
     """
     values = {
         "site_id": pos.site_id,
@@ -48,7 +51,8 @@ def insert_position(session: Session, pos: AssetPositionV1) -> bool:
         .returning(Position.ts)
     )
     inserted = session.execute(stmt).first() is not None
-    session.commit()
+    if commit:
+        session.commit()
     return inserted
 
 

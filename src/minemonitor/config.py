@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # Publisher-side store-and-forward spool (crash-safe local buffer).
     spool_path: str = "/tmp/mm-spool.sqlite"
 
+    # Rules.
+    offline_threshold_s: int = 600  # silent this long (while active) = offline
+    offline_check_interval_s: int = 60  # how often the ingestor scans for offline
+    default_site_id: str = "kn-zw-01"
+
     # Present for later milestones; unused now.
     s3_endpoint: str = "http://localhost:9000"
     s3_bucket: str = "mine-evidence"

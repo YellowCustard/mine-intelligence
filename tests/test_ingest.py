@@ -27,7 +27,9 @@ def test_health_ok(client: TestClient) -> None:
 def test_post_then_read_back(client: TestClient) -> None:
     post = client.post("/ingest/positions", json=_POSITION)
     assert post.status_code == 202
-    assert post.json() == {"stored": True, "created": True}
+    body = post.json()
+    assert body["stored"] is True
+    assert body["created"] is True
 
     read = client.get("/sites/kn-zw-01/positions", params={"asset_id": "HT-102"})
     assert read.status_code == 200

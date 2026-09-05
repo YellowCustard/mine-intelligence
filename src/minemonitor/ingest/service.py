@@ -52,3 +52,18 @@ def to_canonical(payload: PositionIngest) -> AssetPositionV1:
 def store_position(session: Session, payload: PositionIngest) -> bool:
     """Validate-and-store a device position. Returns True if newly inserted."""
     return insert_position(session, to_canonical(payload))
+
+
+def store_and_process(session: Session, payload: PositionIngest) -> tuple[bool, list]:
+    """Store a position and run zone/rule processing in one transaction.
+
+    Returns ``(created, events)``. The position insert and any events it raises
+    commit together, so a crash cannot store a position while losing its events.
+    """
+    from minemonitor.pipeline import process_position
+
+    canonical = to_canonical(payload)
+    created = insert_position(session, canonical, commit=False)
+    events = process_position(session, canonical, created)
+    session.commit()
+    return created, events

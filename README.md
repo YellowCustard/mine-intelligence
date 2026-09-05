@@ -8,7 +8,7 @@ with per-zone rules, a unified alarm queue, haul-cycle analytics (the commercial
 payload — queue time at the face), and a live operations dashboard. See
 [`CLAUDE.md`](./CLAUDE.md) for the full build brief.
 
-## Status — M1 (skeleton & contracts) · M2 (simulator & MQTT ingest)
+## Status — M1 (skeleton) · M2 (simulator & MQTT) · M3 (zones & rules)
 
 - Data contracts published as JSON Schema in [`contracts/`](./contracts) with
   matching Pydantic v2 models.
@@ -22,6 +22,12 @@ payload — queue time at the face), and a live operations dashboard. See
   survives a broker restart, and an ingestor that withholds acknowledgement until
   a position is durably stored — so a **database restart loses nothing and
   duplicates nothing** (ingest is idempotent).
+- **Zones & rules** — GeoJSON polygons per site with point-in-polygon plus
+  **debounce and hysteresis** (N consecutive fixes to enter, a metre buffer to
+  exit) so GNSS jitter never produces an alarm storm. Rules are data on the zone
+  (`restricted`, `speed_limited`, `dwell`) plus a periodic `asset_offline` check
+  that distinguishes offline from parked. Breaches land in the unified alarm queue
+  as `event.v1`, with an acknowledgement workflow. Zone CRUD via the API.
 - `docker compose up` brings up the database, MQTT broker, MinIO, the API and the
   ingestor; `docker compose --profile sim up` adds the simulator.
 
@@ -94,5 +100,5 @@ Every event is **advisory**: the platform warns people, it never actuates plant.
 
 ## Roadmap
 
-M1 skeleton ✓ · M2 simulator + MQTT ingest ✓ · M3 zones & rules · M4 cycle
+M1 skeleton ✓ · M2 simulator + MQTT ingest ✓ · M3 zones & rules ✓ · M4 cycle
 analytics · M5 live dashboard · M6 hardening for site.
