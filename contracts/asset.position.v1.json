@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/asset.position.v1.json",
+  "title": "asset.position.v1",
+  "description": "Raw GNSS telemetry from a machine. High volume. Emitted at ~1 Hz.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "site_id",
+    "asset_id",
+    "ts",
+    "lat",
+    "lon",
+    "received_at"
+  ],
+  "properties": {
+    "schema": { "const": "asset.position.v1" },
+    "site_id": { "type": "string", "minLength": 1 },
+    "asset_id": { "type": "string", "minLength": 1 },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Device time (UTC). Paired with received_at to detect buffered backfill."
+    },
+    "received_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Server ingest time (UTC). Set at the ingest boundary, never by the device."
+    },
+    "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+    "lon": { "type": "number", "minimum": -180, "maximum": 180 },
+    "altitude_m": { "type": ["number", "null"] },
+    "speed_kph": { "type": ["number", "null"], "minimum": 0 },
+    "heading_deg": { "type": ["number", "null"], "minimum": 0, "maximum": 360 },
+    "hdop": { "type": ["number", "null"], "minimum": 0 },
+    "satellites": { "type": ["integer", "null"], "minimum": 0 },
+    "ignition": { "type": ["boolean", "null"] },
+    "source": {
+      "type": ["string", "null"],
+      "description": "Sensing modality, e.g. 'teltonika:fmb920' or 'simulator'."
+    }
+  }
+}
