@@ -25,18 +25,34 @@ from minemonitor.zones.repository import upsert_zone
 
 def _fresh_session() -> Session:
     engine = create_engine(
-        "sqlite://", future=True,
-        connect_args={"check_same_thread": False}, poolclass=StaticPool,
+        "sqlite://",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
     s = sessionmaker(bind=engine, expire_on_commit=False, future=True)()
     s.add(Site(site_id="kn-zw-01", name="T", timezone="Africa/Harare"))
     s.commit()
     s.add(Asset(asset_id="HT-101", site_id="kn-zw-01", asset_class="haul_truck"))
-    upsert_zone(s, site_id="kn-zw-01", zone_id="pit-face", name="F", kind="loading",
-                geometry=box_polygon(FACE[0], FACE[1], 70), rules={})
-    upsert_zone(s, site_id="kn-zw-01", zone_id="rom-pad", name="R", kind="unloading",
-                geometry=box_polygon(ROM[0], ROM[1], 70), rules={})
+    upsert_zone(
+        s,
+        site_id="kn-zw-01",
+        zone_id="pit-face",
+        name="F",
+        kind="loading",
+        geometry=box_polygon(FACE[0], FACE[1], 70),
+        rules={},
+    )
+    upsert_zone(
+        s,
+        site_id="kn-zw-01",
+        zone_id="rom-pad",
+        name="R",
+        kind="unloading",
+        geometry=box_polygon(ROM[0], ROM[1], 70),
+        rules={},
+    )
     s.commit()
     return s
 

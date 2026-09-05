@@ -9,8 +9,13 @@ from minemonitor.auth.service import create_user
 from tests.conftest import ADMIN, DEVICE, SUPERVISOR, VIEWER, make_client
 
 _POS = {
-    "schema": "asset.position.v1", "site_id": "kn-zw-01", "asset_id": "HT-102",
-    "ts": "2026-09-05T11:42:07Z", "lat": -17.8252, "lon": 31.0335, "source": "test",
+    "schema": "asset.position.v1",
+    "site_id": "kn-zw-01",
+    "asset_id": "HT-102",
+    "ts": "2026-09-05T11:42:07Z",
+    "lat": -17.8252,
+    "lon": 31.0335,
+    "source": "test",
 }
 
 
@@ -59,7 +64,9 @@ def test_device_ingest_gate(db_session: Session) -> None:
 def test_admin_can_write(db_session: Session) -> None:
     c = make_client(db_session, ADMIN)
     zone = {
-        "zone_id": "r1", "name": "Mag", "kind": "restricted",
+        "zone_id": "r1",
+        "name": "Mag",
+        "kind": "restricted",
         "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [0, 1], [1, 1], [0, 0]]]},
         "rules": {"authorized_classes": []},
     }
@@ -67,8 +74,13 @@ def test_admin_can_write(db_session: Session) -> None:
 
 
 def test_site_scoped_user_cannot_cross_sites(db_session: Session) -> None:
-    create_user(db_session, username="other-viewer", password="testpass123",
-                role="viewer", site_id="other-site")
+    create_user(
+        db_session,
+        username="other-viewer",
+        password="testpass123",
+        role="viewer",
+        site_id="other-site",
+    )
     db_session.commit()
     c = make_client(db_session, ("other-viewer", "testpass123"))
     assert c.get("/sites/other-site/state").status_code == 200

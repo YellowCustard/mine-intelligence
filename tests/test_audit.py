@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 from minemonitor.storage.models import Event
 
 _ZONE = {
-    "zone_id": "r1", "name": "Magazine", "kind": "restricted",
+    "zone_id": "r1",
+    "name": "Magazine",
+    "kind": "restricted",
     "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [0, 1], [1, 1], [1, 0], [0, 0]]]},
     "rules": {"authorized_classes": []},
 }
@@ -28,9 +30,15 @@ def test_zone_change_is_audited(client: TestClient) -> None:
 def test_ack_is_audited(client: TestClient, db_session: Session) -> None:
     db_session.add(
         Event(
-            event_id="evt-1", site_id="kn-zw-01", ts=datetime.now(UTC), type="zone_breach",
-            severity="critical", source="gnss_geofence", summary="LV-07 in magazine",
-            advisory=True, state="open",
+            event_id="evt-1",
+            site_id="kn-zw-01",
+            ts=datetime.now(UTC),
+            type="zone_breach",
+            severity="critical",
+            source="gnss_geofence",
+            summary="LV-07 in magazine",
+            advisory=True,
+            state="open",
         )
     )
     db_session.commit()
