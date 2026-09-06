@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # A background worker's heartbeat older than this marks it stale in /health.
     heartbeat_stale_s: int = 180
 
+    # Teltonika TCP listener (M7). Trackers speak Codec 8/8E over raw TCP; the
+    # listener decodes and republishes into MQTT like any other adapter.
+    teltonika_host: str = "0.0.0.0"  # noqa: S104 - a device listener binds all interfaces
+    teltonika_port: int = 5027
+
     # Present for later milestones; unused now.
     s3_endpoint: str = "http://localhost:9000"
     s3_bucket: str = "mine-evidence"

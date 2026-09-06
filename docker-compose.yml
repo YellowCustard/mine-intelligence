@@ -107,6 +107,25 @@ services:
       retries: 3
       start_period: 90s
 
+  # Teltonika TCP listener (M7). Decodes Codec 8/8E from real trackers and
+  # republishes into MQTT, so live data drives the same rules/cycles/alarms as the
+  # simulator. Opt-in until trackers are on site:  docker compose --profile trackers up -d
+  teltonika:
+    build: .
+    profiles: ["trackers"]
+    restart: unless-stopped
+    depends_on:
+      mqtt:
+        condition: service_started
+    environment:
+      MM_MQTT_HOST: mqtt
+      MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
+      MM_DEFAULT_SITE_ID: ${MM_DEFAULT_SITE_ID:-kn-zw-01}
+      MM_TELTONIKA_PORT: ${MM_TELTONIKA_PORT:-5027}
+    ports:
+      - "${MM_TELTONIKA_BIND:-0.0.0.0}:${MM_TELTONIKA_PORT:-5027}:${MM_TELTONIKA_PORT:-5027}"
+    entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.adapters.teltonika"]
+
   # Synthetic fleet. Enable with:  docker compose --profile sim up
   simulator:
     build: .

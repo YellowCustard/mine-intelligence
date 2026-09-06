@@ -104,9 +104,13 @@ Then `certbot --nginx -d mine.example.com`.
 
 - **Demo:** the `simulator` service publishes a synthetic fleet over MQTT — this is
   what fills the dashboard today (no hardware needed).
-- **Real trackers (later):** stop the simulator (`docker compose stop simulator`)
-  and point trackers/adapters at the broker; nothing else changes at the ingest
-  boundary.
+- **Real trackers (M7):** stop the simulator (`docker compose stop simulator`) and
+  bring up the Teltonika listener — `docker compose --profile trackers up -d` —
+  then point trackers at `<host>:5027` (Codec 8/8E over TCP). It decodes and
+  republishes into MQTT, so nothing else changes at the ingest boundary. Open
+  5027/tcp only to the tracker network, never the public internet. The
+  IMEI→asset mapping is a placeholder (`teltonika-<imei>`) until the fleet list
+  is confirmed.
 
 ## 7. Operate
 
