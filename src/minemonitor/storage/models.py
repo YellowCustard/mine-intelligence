@@ -98,6 +98,27 @@ class Zone(Base):
     rules: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False, default=dict)
 
 
+class ShiftDefinition(Base):
+    """A configurable shift for a site — the primary operational unit.
+
+    Shift *instances* are derived, never stored: given these definitions and a
+    timestamp, the operations layer resolves which shift a moment falls in and
+    its ``[start, end)`` window (crossing midnight where needed). Editing a
+    definition only changes how future windows resolve; it never rewrites the
+    immutable telemetry those windows summarise. Times are local to the site's
+    timezone (``Site.timezone``).
+    """
+
+    __tablename__ = "shift_definitions"
+    __table_args__ = (PrimaryKeyConstraint("site_id", "name", name="pk_shift_definitions"),)
+
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), index=True)
+    name: Mapped[str] = mapped_column(String)  # e.g. "day", "night"
+    start_hour_local: Mapped[int] = mapped_column(Integer, nullable=False)  # 0–23
+    duration_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
 class Position(Base):
     """Raw GNSS telemetry. Backed by a TimescaleDB hypertable on ``ts``.
 
