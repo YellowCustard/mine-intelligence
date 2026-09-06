@@ -24,6 +24,8 @@ dev = [
     "httpx>=0.27",
     "jsonschema>=4.23",
     "ruff>=0.6",
+    "mypy>=1.11",
+    "pip-audit>=2.7",
 ]
 
 [build-system]
@@ -51,3 +53,26 @@ select = ["E", "F", "I", "UP", "B", "SIM", "TID"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+ignore_missing_imports = true
+# Pragmatic first pass: check what is annotated, don't demand full strictness yet.
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+# Pre-existing modules with known type gaps (SQLAlchemy Result typing, Fix/Position
+# duck-typing, Literal narrowing). Grandfathered so the guardrail lands green now;
+# tightened in Phase 3 of the post-Phase-1 roadmap.
+[[tool.mypy.overrides]]
+module = [
+    "minemonitor.ingest.spool",
+    "minemonitor.cycles.metrics",
+    "minemonitor.cycles.recompute",
+    "minemonitor.storage.repositories",
+    "minemonitor.retention",
+    "minemonitor.rules.evaluate",
+]
+ignore_errors = true

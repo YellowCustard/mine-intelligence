@@ -1,9 +1,9 @@
 """Append-only audit logging (brief §4).
 
-Records rule/zone changes, acknowledgements, auth events and — once the operator
-table exists — access to personal data. Callers pass an open session; the row is
-added but not committed here, so the audit entry commits with the action it
-records (or not at all).
+Records rule/zone changes, acknowledgements, retention runs, and access to
+personal data (operator reads, exports and erasures). Callers pass an open
+session; the row is added but not committed here, so the audit entry commits with
+the action it records (or not at all).
 """
 
 from __future__ import annotations

@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     retain_positions_days: int = 90
     retain_metrics_days: int = 365
     retain_events_days: int = 365
+    # Audit trail is retained longer than the data it describes — accountability
+    # outlives the records (brief §4). 0 = keep forever.
+    retain_audit_days: int = 730
     retention_interval_s: int = 86_400  # the ingestor runs retention ~daily
 
     # Bootstrap admin — created on start ONLY if the users table is empty, so a

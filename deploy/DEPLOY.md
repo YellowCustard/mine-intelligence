@@ -117,10 +117,17 @@ docker compose logs -f ingestor   # ingest + periodic cycle recompute
 docker compose down               # stop (keeps data volumes)
 ```
 
-**Retention & audit (M6):** the ingestor runs a per-data-class deletion job (~daily;
-positions/metrics/events, each configurable in days via `MM_RETAIN_*`, `0` = keep
-forever). An admin can trigger it on demand with `POST /admin/retention/run` and
-read the audit trail at `GET /sites/{site_id}/audit`.
+**Retention & audit:** the ingestor runs a per-data-class deletion job (~daily;
+positions / metrics+cycles / events / audit trail, each configurable in days via
+`MM_RETAIN_*`, `0` = keep forever). An admin can trigger it on demand with
+`POST /admin/retention/run` and read the audit trail at
+`GET /sites/{site_id}/audit`.
+
+**Personal data (brief §4):** all operator PII lives in the `operators` table;
+events and cycles reference an operator only by opaque id. Handle a data-subject
+request with `GET /sites/{id}/operators/{op}/export` (access) and
+`DELETE /sites/{id}/operators/{op}` (erasure — tombstones the PII, keeps history
+valid). Every read of a personal record is audited. No biometric data is stored.
 
 **Backup the database:**
 ```bash

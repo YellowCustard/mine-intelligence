@@ -62,6 +62,12 @@ jobs:
       - name: Format check
         run: uv run ruff format --check .
 
+      - name: Type check
+        run: uv run mypy src
+
+      - name: Dependency audit
+        run: uv run pip-audit
+
       - name: Run migrations (creates the hypertable on real TimescaleDB)
         run: uv run alembic upgrade head
 

@@ -54,6 +54,34 @@ class Asset(Base):
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+class Operator(Base):
+    """A person who operates a machine — the single home for personal data.
+
+    Brief §4: operator identity is a foreign key, never a name in an event
+    payload, so personal data lives in **one** table that can be exported or
+    erased on request without rewriting history. ``operator_id`` is an opaque
+    reference (never a name); the human-readable fields here are the only PII in
+    the database. **No biometric or face data, ever** — that stays in the vendor
+    gate appliance on the mine's own network.
+
+    Erasure is a tombstone: the PII columns are nulled and ``erased_at`` is set,
+    while the opaque id (and every historical foreign key that points at it) is
+    preserved — so a data-subject deletion never corrupts derived analytics.
+    """
+
+    __tablename__ = "operators"
+
+    # Opaque, globally-unique reference — never a name.
+    operator_id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False, index=True)
+    # Personal data — nullable so erasure can tombstone them in place.
+    display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    employee_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    contact: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    erased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Zone(Base):
     """A geofenced zone. Polygon stored as GeoJSON in JSONB (PostGIS deferred)."""
 
@@ -106,6 +134,10 @@ class Event(Base):
     severity: Mapped[str] = mapped_column(String, nullable=False)
     asset_id: Mapped[str | None] = mapped_column(String, nullable=True)
     zone_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Operator identity is a foreign key, never a name in the payload (brief §4).
+    operator_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operators.operator_id"), nullable=True, index=True
+    )
     source: Mapped[str] = mapped_column(String, nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     detail: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
@@ -158,6 +190,10 @@ class HaulCycle(Base):
 
     site_id: Mapped[str] = mapped_column(String, nullable=False)
     asset_id: Mapped[str] = mapped_column(String, nullable=False)
+    # The operator who drove this cycle, by opaque reference (brief §4).
+    operator_id: Mapped[str | None] = mapped_column(
+        ForeignKey("operators.operator_id"), nullable=True, index=True
+    )
     start_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     end_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     cycle_time_s: Mapped[float] = mapped_column(Float, nullable=False)
@@ -206,10 +242,8 @@ class User(Base):
 
 
 class AuditLog(Base):
-    """Append-only audit trail: rule/zone changes, acks, auth and data-access.
-
-    Personal-data access is logged here too once the operator table lands
-    (brief §4); the write helper is already in place.
+    """Append-only audit trail: rule/zone changes, acks, retention runs, and
+    access to personal data (operator reads, exports and erasures) — brief §4.
     """
 
     __tablename__ = "audit_log"

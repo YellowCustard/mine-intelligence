@@ -94,3 +94,37 @@ def test_events_retention_and_audit_written(session: Session) -> None:
     )
     assert len(audits) == 1
     assert audits[0].detail["deleted"]["events"] == 1
+
+
+def _audit(s: Session, days_ago: float) -> None:
+    s.add(
+        AuditLog(
+            id=f"a{days_ago}",
+            ts=_NOW - timedelta(days=days_ago),
+            actor="system",
+            action="test.event",
+            entity_type="test",
+        )
+    )
+
+
+def test_audit_log_is_pruned_but_run_record_survives(session: Session) -> None:
+    _audit(session, days_ago=800)  # older than the 730d audit window
+    _audit(session, days_ago=5)  # recent
+    session.commit()
+    deleted = run_retention(
+        session, now=_NOW, positions_days=90, metrics_days=365, events_days=365, audit_days=730
+    )
+    assert deleted["audit_log"] == 1  # only the old audit row
+    # Survivors: the recent audit row + the run's own retention.run record.
+    remaining = session.execute(select(func.count()).select_from(AuditLog)).scalar_one()
+    assert remaining == 2
+
+
+def test_audit_zero_days_keeps_forever(session: Session) -> None:
+    _audit(session, days_ago=5000)
+    session.commit()
+    deleted = run_retention(
+        session, now=_NOW, positions_days=0, metrics_days=0, events_days=0, audit_days=0
+    )
+    assert deleted["audit_log"] == 0

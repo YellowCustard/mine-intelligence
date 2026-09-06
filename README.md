@@ -105,6 +105,29 @@ docker compose exec api uv run python -m minemonitor.auth.cli bob viewer --site 
 An admin can also create users over the API (`POST /users`) and read the audit
 trail (`GET /sites/{site_id}/audit`).
 
+### Operators & data-subject rights (personal data, brief §4)
+
+Operator identity is a **foreign key, never a name in a payload**. All personal
+data lives in the single `operators` table; events and haul cycles reference an
+operator only by an opaque `operator_id`. This is the surface a Cyber & Data
+Protection Act / SI 155 request runs through, and every read of a personal record
+is audited:
+
+```bash
+# admin only, path-scoped to the site
+curl -u admin:… -X POST localhost:8000/sites/kn-zw-01/operators \
+  -H 'content-type: application/json' -d '{"display_name":"…","employee_ref":"…"}'
+curl -u admin:… localhost:8000/sites/kn-zw-01/operators/<id>/export   # data-subject access
+curl -u admin:… -X DELETE localhost:8000/sites/kn-zw-01/operators/<id>  # erasure
+```
+
+Erasure is a **tombstone**: the personal columns are nulled and `erased_at`
+stamped, while the opaque id and every historical foreign key are preserved — a
+deletion of the person never rewrites the operational record. Retention now
+covers the audit trail too (`MM_RETAIN_AUDIT_DAYS`, kept longer than the data it
+describes). No biometric or face data is ever stored — that stays in the vendor
+gate appliance.
+
 API docs are served at `localhost:8000/docs`.
 
 ### Watch the simulated fleet
@@ -136,7 +159,14 @@ MM_TEST_DATABASE_URL=postgresql+psycopg://minemonitor:minemonitor@localhost:5432
 ```
 
 CI runs the full suite against a real TimescaleDB service, including the
-migration that creates the `positions` hypertable.
+migration that creates the `positions` hypertable. It also runs `ruff`, a `mypy`
+type check, and a `pip-audit` dependency scan:
+
+```bash
+uv run ruff check . && uv run ruff format --check .
+uv run mypy src
+uv run pip-audit
+```
 
 ## Contracts
 
@@ -155,5 +185,9 @@ analytics ✓ · M5 live dashboard ✓ · M6 hardening for site (auth & roles,
 per-site scoping, audit log, per-class retention, backfill correctness,
 one-command deploy) ✓.
 
-Phase 1 is complete. Real tracker hardware (`adapters/teltonika.py`) is the next
-integration — everything it feeds is already proven against the simulator.
+Phase 1 (M1–M6) is complete. Post-Phase-1 work is tracked as a four-phase
+roadmap: **compliance / data-protection** (operator personal-data model, export &
+erasure, audit-log retention — landed), then ops readiness & auth hardening,
+quality & CI (mypy and pip-audit now gate CI), and finally real tracker hardware
+(`adapters/teltonika.py`) — everything it feeds is already proven against the
+simulator.
