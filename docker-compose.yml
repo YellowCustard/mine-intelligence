@@ -1,9 +1,13 @@
 # Mine Monitor — full stack. Must run entirely on one box at the mine (brief §3).
 # `docker compose up` brings up the database, broker, object store and API.
+#
+# Power and network will fail at a remote site (brief §3), so every long-running
+# service restarts unless explicitly stopped, and each has a healthcheck.
 
 services:
   db:
     image: timescale/timescaledb:2.17.2-pg16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-minemonitor}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minemonitor}
@@ -20,14 +24,21 @@ services:
 
   mqtt:
     image: eclipse-mosquitto:2
+    restart: unless-stopped
     ports:
       - "1883:1883"
     volumes:
       - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mqtt_data:/mosquitto/data
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -t healthcheck -m ok || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   minio:
     image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
@@ -40,6 +51,7 @@ services:
 
   api:
     build: .
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
@@ -55,6 +67,11 @@ services:
       MM_RETAIN_POSITIONS_DAYS: ${MM_RETAIN_POSITIONS_DAYS:-90}
       MM_RETAIN_METRICS_DAYS: ${MM_RETAIN_METRICS_DAYS:-365}
       MM_RETAIN_EVENTS_DAYS: ${MM_RETAIN_EVENTS_DAYS:-365}
+      MM_RETAIN_AUDIT_DAYS: ${MM_RETAIN_AUDIT_DAYS:-730}
+      # Auth hardening (Phase 2). Tunable per site.
+      MM_LOGIN_MAX_FAILURES: ${MM_LOGIN_MAX_FAILURES:-5}
+      MM_LOGIN_LOCKOUT_MINUTES: ${MM_LOGIN_LOCKOUT_MINUTES:-15}
+      MM_HEARTBEAT_STALE_S: ${MM_HEARTBEAT_STALE_S:-180}
     ports:
       # The API has auth (M6, HTTP Basic), but Basic credentials must ride TLS.
       # Bind localhost by default and put nginx + TLS in front; set
@@ -64,6 +81,7 @@ services:
   # MQTT ingestor: subscribes to position topics and stores them idempotently.
   ingestor:
     build: .
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
@@ -77,13 +95,23 @@ services:
       MM_RETAIN_POSITIONS_DAYS: ${MM_RETAIN_POSITIONS_DAYS:-90}
       MM_RETAIN_METRICS_DAYS: ${MM_RETAIN_METRICS_DAYS:-365}
       MM_RETAIN_EVENTS_DAYS: ${MM_RETAIN_EVENTS_DAYS:-365}
+      MM_RETAIN_AUDIT_DAYS: ${MM_RETAIN_AUDIT_DAYS:-730}
       MM_RETENTION_INTERVAL_S: ${MM_RETENTION_INTERVAL_S:-86400}
+      MM_HEARTBEAT_STALE_S: ${MM_HEARTBEAT_STALE_S:-180}
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.mqtt"]
+    healthcheck:
+      # The ingestor has no HTTP endpoint; it is healthy while its heartbeat is fresh.
+      test: ["CMD", "uv", "run", "python", "-m", "minemonitor.healthcheck"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 90s
 
   # Synthetic fleet. Enable with:  docker compose --profile sim up
   simulator:
     build: .
     profiles: ["sim"]
+    restart: unless-stopped
     depends_on:
       mqtt:
         condition: service_started
@@ -91,6 +119,38 @@ services:
       MM_MQTT_HOST: mqtt
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.adapters.simulator"]
+
+  # Scheduled database backup. Enable with:  docker compose --profile backup up -d
+  # Dumps to ./backups on an interval and prunes old dumps. Restore with
+  # deploy/restore.sh (see deploy/DEPLOY.md).
+  backup:
+    image: timescale/timescaledb:2.17.2-pg16
+    profiles: ["backup"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-minemonitor}
+      POSTGRES_USER: ${POSTGRES_USER:-minemonitor}
+      POSTGRES_DB: ${POSTGRES_DB:-minemonitor}
+      MM_BACKUP_INTERVAL_S: ${MM_BACKUP_INTERVAL_S:-86400}
+      MM_BACKUP_KEEP_DAYS: ${MM_BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          ts=$$(date +%Y%m%d_%H%M%S)
+          if pg_dump -h db -U "$$POSTGRES_USER" "$$POSTGRES_DB" | gzip > "/backups/minemonitor_$$ts.sql.gz"; then
+            echo "backup written: minemonitor_$$ts.sql.gz"
+          else
+            echo "backup FAILED at $$ts"
+          fi
+          find /backups -name 'minemonitor_*.sql.gz' -mtime "+$$MM_BACKUP_KEEP_DAYS" -delete 2>/dev/null || true
+          sleep "$$MM_BACKUP_INTERVAL_S"
+        done
 
 volumes:
   db_data:

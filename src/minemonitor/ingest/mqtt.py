@@ -203,6 +203,7 @@ class MqttIngestor:
         brief §9), so the dashboard's cycle chart stays fresh without coupling
         analytics to ingest.
         """
+        from minemonitor import heartbeat
         from minemonitor.cycles.recompute import recompute
         from minemonitor.retention import run_from_config
         from minemonitor.rules.offline import detect_offline
@@ -210,6 +211,9 @@ class MqttIngestor:
         while not self._stop.wait(self._offline_interval_s):
             session = self._session_factory()
             try:
+                # Liveness first, so a later step failing still records we ran.
+                heartbeat.beat(session, heartbeat.INGESTOR)
+                session.commit()
                 events = detect_offline(
                     session, self._site_id, threshold_s=self._offline_threshold_s
                 )
@@ -234,8 +238,22 @@ class MqttIngestor:
     def start(self) -> None:
         self._client.connect(self.host, self.port)
         self._client.loop_start()
+        self._beat_once()  # an immediate heartbeat so /health is green before the first tick
         self._offline_thread = threading.Thread(target=self._offline_loop, daemon=True)
         self._offline_thread.start()
+
+    def _beat_once(self) -> None:
+        from minemonitor import heartbeat
+
+        session = self._session_factory()
+        try:
+            heartbeat.beat(session, heartbeat.INGESTOR)
+            session.commit()
+        except Exception as exc:  # noqa: BLE001 - non-fatal; the loop will retry
+            session.rollback()
+            log.warning("initial heartbeat failed", extra={"error": str(exc)})
+        finally:
+            session.close()
 
     def run_forever(self) -> None:
         self.start()

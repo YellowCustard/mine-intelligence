@@ -46,6 +46,16 @@ class Settings(BaseSettings):
     bootstrap_admin_user: str = ""
     bootstrap_admin_password: str = ""
 
+    # Auth hardening. Lock an account after N consecutive failures for M minutes;
+    # a short in-process cache avoids re-deriving PBKDF2 on every request (SSE
+    # reconnects poll continuously) while keeping lockout authoritative.
+    login_max_failures: int = 5
+    login_lockout_minutes: int = 15
+    auth_verify_cache_ttl_s: int = 30
+
+    # A background worker's heartbeat older than this marks it stale in /health.
+    heartbeat_stale_s: int = 180
+
     # Present for later milestones; unused now.
     s3_endpoint: str = "http://localhost:9000"
     s3_bucket: str = "mine-evidence"

@@ -241,9 +241,40 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class AuthLockout(Base):
+    """Failed-login state per user, crash-safe in the database (brief §3).
+
+    Brute-force protection: after N consecutive failures an account is locked
+    until ``locked_until``. Kept in the DB, not in memory, so a restart does not
+    reset an attacker's progress or wrongly free a locked account.
+    """
+
+    __tablename__ = "auth_lockout"
+
+    username: Mapped[str] = mapped_column(String, primary_key=True)
+    failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ServiceHeartbeat(Base):
+    """Liveness heartbeat for background workers (the ingestor).
+
+    The worker upserts its timestamp each maintenance tick; ``/health`` reads it
+    to tell a stuck or dead ingestor from a healthy one — the offline-detection
+    and retention jobs are otherwise invisible to an HTTP health check.
+    """
+
+    __tablename__ = "service_heartbeat"
+
+    service: Mapped[str] = mapped_column(String, primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class AuditLog(Base):
-    """Append-only audit trail: rule/zone changes, acks, retention runs, and
-    access to personal data (operator reads, exports and erasures) — brief §4.
+    """Append-only audit trail: rule/zone changes, acks, retention runs, auth
+    failures/lockouts, and access to personal data (operator reads, exports and
+    erasures) — brief §4.
     """
 
     __tablename__ = "audit_log"

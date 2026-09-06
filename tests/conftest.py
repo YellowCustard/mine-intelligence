@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from minemonitor.api.main import create_app
+from minemonitor.auth import cache
 from minemonitor.auth.service import create_user
 from minemonitor.storage.db import get_db
 from minemonitor.storage.models import Asset, Base, Site
@@ -43,6 +44,8 @@ def db_session() -> Iterator[Session]:
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
+    # The verify cache is process-global; clear it so tests don't share auth state.
+    cache.clear_all()
     factory = sessionmaker(bind=engine, expire_on_commit=False, future=True)
     session = factory()
     session.add(Site(site_id="kn-zw-01", name="Test Site", timezone="Africa/Harare"))

@@ -130,6 +130,24 @@ gate appliance.
 
 API docs are served at `localhost:8000/docs`.
 
+### Health & resilience (Phase 2)
+
+- `GET /healthz` — **liveness**: 200 while the API and its database are up (the
+  api container's healthcheck).
+- `GET /health` — **full-system**: also reports MQTT reachability and the
+  ingestor's heartbeat, and returns 503 when any is down, so a stuck ingestor or
+  dead broker is visible. The ingestor (no HTTP surface) is healthchecked with
+  `python -m minemonitor.healthcheck`, which passes while its heartbeat is fresh.
+- Every long-running compose service has `restart: unless-stopped` and a
+  healthcheck (power and network *will* fail at a remote site).
+- **Auth hardening:** an account locks after `MM_LOGIN_MAX_FAILURES` consecutive
+  failures for `MM_LOGIN_LOCKOUT_MINUTES` (crash-safe in the DB); failures and
+  lockouts are audited. A short verify cache avoids re-deriving PBKDF2 on every
+  request (the SSE stream reconnects and polls continuously) without weakening
+  lockout — a locked account is refused even on a cache hit.
+- **Scheduled backups:** `docker compose --profile backup up -d` dumps the
+  database to `./backups` on an interval and prunes old dumps.
+
 ### Watch the simulated fleet
 
 ```bash
@@ -187,7 +205,9 @@ one-command deploy) ✓.
 
 Phase 1 (M1–M6) is complete. Post-Phase-1 work is tracked as a four-phase
 roadmap: **compliance / data-protection** (operator personal-data model, export &
-erasure, audit-log retention — landed), then ops readiness & auth hardening,
-quality & CI (mypy and pip-audit now gate CI), and finally real tracker hardware
-(`adapters/teltonika.py`) — everything it feeds is already proven against the
-simulator.
+erasure, audit-log retention — landed); **ops readiness & auth hardening**
+(restart policies, health probes, ingestor heartbeat, login lockout, scheduled
+backups — landed); then quality & CI (mypy and pip-audit already gate CI; more
+test coverage and a Playwright dashboard smoke test to come), and finally real
+tracker hardware (`adapters/teltonika.py`) — everything it feeds is already
+proven against the simulator.
