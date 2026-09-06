@@ -155,6 +155,22 @@ docker compose --profile sim up          # simulator → MQTT → ingestor → D
 curl "localhost:8000/sites/kn-zw-01/positions?limit=20"
 ```
 
+### Real trackers (M7 — Teltonika)
+
+`adapters/teltonika.py` is a **Codec 8 / 8E** TCP listener for real GNSS trackers.
+It does the IMEI handshake, decodes AVL packets (CRC-checked; malformed frames are
+dropped unacknowledged so the device redelivers), and republishes each fix into
+MQTT — so live hardware drives the **same** rules, cycles and alarms as the
+simulator, indistinguishable at the ingest boundary. Enable it when trackers are
+on site:
+
+```bash
+docker compose --profile trackers up -d    # listens on MM_TELTONIKA_PORT (default 5027)
+```
+
+Point trackers at `<host>:5027`. The IMEI→asset mapping is currently a placeholder
+(`teltonika-<imei>`) pending the real fleet list (brief §14).
+
 The simulator publishes `asset.position.v1` to `mm/{site_id}/{asset_id}/position`
 at 1 Hz. The ingestor subscribes, validates, stamps `received_at`, and stores
 idempotently — identical at the ingest boundary to a real tracker.
@@ -224,5 +240,10 @@ erasure, audit-log retention — landed); **ops readiness & auth hardening**
 (restart policies, health probes, ingestor heartbeat, login lockout, scheduled
 backups — landed); **quality & CI** (mypy, pip-audit, coverage floor, Docker
 build, filled HTTP/CLI/SSE test gaps and a Chromium dashboard smoke test —
-landed); and finally real tracker hardware (`adapters/teltonika.py`) —
-everything it feeds is already proven against the simulator.
+landed); and **M7 real tracker hardware** — a Teltonika Codec 8/8E TCP listener
+(`adapters/teltonika.py`) that feeds the same already-proven pipeline as the
+simulator (landed).
+
+All four post-Phase-1 phases are complete. Remaining M7 work is on-site
+integration once the open questions in §14 (fleet list, connectivity, on-prem)
+are answered — the codec and listener are built and tested against the spec.
