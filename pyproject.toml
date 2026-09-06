@@ -26,6 +26,12 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "pip-audit>=2.7",
+    "pytest-cov>=5.0",
+]
+# Browser end-to-end (the dashboard smoke test). Kept out of `dev` so the main
+# test job and the deploy image stay lean; installed only where the test runs.
+browser = [
+    "playwright>=1.40",
 ]
 
 [build-system]
@@ -53,6 +59,16 @@ select = ["E", "F", "I", "UP", "B", "SIM", "TID"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["minemonitor"]
+omit = ["*/__init__.py"]
+
+[tool.coverage.report]
+# Floor sits below the observed level (85% SQLite-only, higher in CI where the
+# Postgres/MQTT integration tests run) so it gates without being brittle.
+fail_under = 80
+show_missing = true
 
 [tool.mypy]
 python_version = "3.11"

@@ -15,6 +15,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     PrimaryKeyConstraint,
     String,
@@ -126,6 +127,9 @@ class Event(Base):
     """An ``event.v1`` row — the unified alarm queue."""
 
     __tablename__ = "events"
+    # The alarm queue is read as "this site's events, newest first" on every
+    # dashboard poll — a composite index keeps that ordered scan off the heap.
+    __table_args__ = (Index("ix_events_site_ts", "site_id", "ts"),)
 
     event_id: Mapped[str] = mapped_column(String, primary_key=True)
     site_id: Mapped[str] = mapped_column(String, nullable=False, index=True)

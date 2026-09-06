@@ -178,13 +178,28 @@ MM_TEST_DATABASE_URL=postgresql+psycopg://minemonitor:minemonitor@localhost:5432
 
 CI runs the full suite against a real TimescaleDB service, including the
 migration that creates the `positions` hypertable. It also runs `ruff`, a `mypy`
-type check, and a `pip-audit` dependency scan:
+type check, a `pip-audit` dependency scan, coverage (floor **80%**), a Docker
+image build, and a **browser dashboard smoke test**:
 
 ```bash
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src
 uv run pip-audit
+uv run pytest --cov=minemonitor          # coverage report + floor
 ```
+
+The dashboard smoke test drives the real page in Chromium (loads `/` with Basic
+auth, checks live zones/assets/alarms render, acknowledges an alarm). It is gated
+so it only runs where a browser is available:
+
+```bash
+uv sync --extra browser
+uv run playwright install chromium       # not needed if a Chromium build is present
+MM_TEST_BROWSER=1 uv run pytest tests/test_dashboard_browser.py
+```
+
+Postgres is the production database; a `sqlite://` URL is also accepted for a
+quick local run (`MM_DATABASE_URL=sqlite:///dev.db uv run uvicorn minemonitor.api.main:app`).
 
 ## Contracts
 
@@ -207,7 +222,7 @@ Phase 1 (M1–M6) is complete. Post-Phase-1 work is tracked as a four-phase
 roadmap: **compliance / data-protection** (operator personal-data model, export &
 erasure, audit-log retention — landed); **ops readiness & auth hardening**
 (restart policies, health probes, ingestor heartbeat, login lockout, scheduled
-backups — landed); then quality & CI (mypy and pip-audit already gate CI; more
-test coverage and a Playwright dashboard smoke test to come), and finally real
-tracker hardware (`adapters/teltonika.py`) — everything it feeds is already
-proven against the simulator.
+backups — landed); **quality & CI** (mypy, pip-audit, coverage floor, Docker
+build, filled HTTP/CLI/SSE test gaps and a Chromium dashboard smoke test —
+landed); and finally real tracker hardware (`adapters/teltonika.py`) —
+everything it feeds is already proven against the simulator.
