@@ -1,8 +1,12 @@
 """Per-data-class retention: a deletion job that actually runs (brief §4).
 
-Retention is configurable per class — raw positions, derived metrics/cycles, and
-events — with generous defaults. A value of 0 days means "keep forever" (skip).
-The job is idempotent and logs an audit entry, so deletion is accountable.
+Retention is configurable per class — raw positions, derived analytics (metrics
+and haul cycles, which share one window), events, and the audit trail — with
+generous defaults. A value of 0 days means "keep forever" (skip). The job is
+idempotent and logs an audit entry, so deletion is accountable.
+
+The audit trail is retained longer than the operational data it describes:
+accountability for a deletion has to outlive the deleted record.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from minemonitor import audit
 from minemonitor.config import get_settings
-from minemonitor.storage.models import AssetMetrics, Event, HaulCycle, Position
+from minemonitor.storage.models import AssetMetrics, AuditLog, Event, HaulCycle, Position
 
 log = logging.getLogger("minemonitor.retention")
 
@@ -27,9 +31,16 @@ def run_retention(
     positions_days: int,
     metrics_days: int,
     events_days: int,
+    audit_days: int = 0,
     actor: str = "system",
 ) -> dict[str, int]:
-    """Delete data older than each class's retention window. Commits."""
+    """Delete data older than each class's retention window. Commits.
+
+    ``metrics_days`` governs both metric buckets and haul cycles — one "derived
+    analytics" class, both recomputable from stored positions. ``audit_days``
+    prunes the audit trail itself (0 = keep forever); the entry written for this
+    run is created after the cutoff, so a run never deletes its own record.
+    """
     now = now or datetime.now(UTC)
     deleted: dict[str, int] = {}
 
@@ -44,6 +55,7 @@ def run_retention(
     deleted["asset_metrics"] = _purge(AssetMetrics, AssetMetrics.bucket_start, metrics_days)
     deleted["haul_cycles"] = _purge(HaulCycle, HaulCycle.end_ts, metrics_days)
     deleted["events"] = _purge(Event, Event.ts, events_days)
+    deleted["audit_log"] = _purge(AuditLog, AuditLog.ts, audit_days)
 
     audit.record(
         session,
@@ -58,6 +70,7 @@ def run_retention(
                 "positions": positions_days,
                 "metrics": metrics_days,
                 "events": events_days,
+                "audit": audit_days,
             },
         },
     )
@@ -75,4 +88,5 @@ def run_from_config(session: Session, *, now: datetime | None = None) -> dict[st
         positions_days=s.retain_positions_days,
         metrics_days=s.retain_metrics_days,
         events_days=s.retain_events_days,
+        audit_days=s.retain_audit_days,
     )
