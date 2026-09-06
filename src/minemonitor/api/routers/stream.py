@@ -19,8 +19,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from minemonitor.auth.deps import require_viewer
+from minemonitor.config import get_settings
 from minemonitor.cycles.shifts import shift_bounds
 from minemonitor.events.repository import list_events
+from minemonitor.operations import equipment
+from minemonitor.operations.shifts import resolve_shift
 from minemonitor.storage.db import get_db, get_session_factory
 from minemonitor.storage.models import Asset, HaulCycle, Zone
 from minemonitor.storage.repositories import latest_positions
@@ -84,25 +87,44 @@ def _cycle_summary(session: Session, site_id: str, now: datetime) -> dict[str, A
     }
 
 
+def _asset_snapshot(
+    p: Any, asset_class: str, now: datetime, offline_after_s: float
+) -> dict[str, Any]:
+    status = equipment.derive_state(
+        latest_ts=p.ts,
+        speed_kph=p.speed_kph,
+        ignition=p.ignition,
+        now=now,
+        offline_after_s=offline_after_s,
+    )
+    return {
+        "asset_id": p.asset_id,
+        "asset_class": asset_class,
+        "lat": p.lat,
+        "lon": p.lon,
+        "speed_kph": p.speed_kph,
+        "heading_deg": p.heading_deg,
+        "ignition": p.ignition,
+        "ts": p.ts,
+        # Derived equipment state; state_basis says whether it is observed or inferred.
+        "state": status.state,
+        "state_basis": status.basis,
+        "data_age_s": status.data_age_s,
+    }
+
+
 def _snapshot(session: Session, site_id: str, *, include_zones: bool) -> dict[str, Any]:
     now = datetime.now(UTC)
+    offline_after_s = get_settings().offline_threshold_s
     classes = {
         a.asset_id: a.asset_class
         for a in session.execute(select(Asset).where(Asset.site_id == site_id)).scalars()
     }
     assets = [
-        {
-            "asset_id": p.asset_id,
-            "asset_class": classes.get(p.asset_id, "unknown"),
-            "lat": p.lat,
-            "lon": p.lon,
-            "speed_kph": p.speed_kph,
-            "heading_deg": p.heading_deg,
-            "ignition": p.ignition,
-            "ts": p.ts,
-        }
+        _asset_snapshot(p, classes.get(p.asset_id, "unknown"), now, offline_after_s)
         for p in latest_positions(session, site_id)
     ]
+    shift = resolve_shift(session, site_id, now)
     events = [
         {
             "event_id": e.event_id,
@@ -121,6 +143,7 @@ def _snapshot(session: Session, site_id: str, *, include_zones: bool) -> dict[st
     snap: dict[str, Any] = {
         "site_id": site_id,
         "now": now,
+        "shift": shift.as_dict() if shift is not None else None,
         "assets": assets,
         "events": events,
         "cycles": _cycle_summary(session, site_id, now),

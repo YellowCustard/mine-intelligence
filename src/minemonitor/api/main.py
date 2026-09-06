@@ -11,7 +11,16 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse
 
 from minemonitor import __version__
-from minemonitor.api.routers import account, cycles, events, health, ingest, stream, zones
+from minemonitor.api.routers import (
+    account,
+    cycles,
+    events,
+    health,
+    ingest,
+    operations,
+    stream,
+    zones,
+)
 from minemonitor.auth.deps import require_viewer
 from minemonitor.auth.service import create_user, user_count
 from minemonitor.config import get_settings
@@ -70,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(cycles.router)
     app.include_router(stream.router)
     app.include_router(account.router)
+    app.include_router(operations.router)
 
     @app.get("/", include_in_schema=False, dependencies=[Depends(require_viewer)])
     def dashboard() -> FileResponse:

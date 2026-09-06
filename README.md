@@ -247,3 +247,22 @@ simulator (landed).
 All four post-Phase-1 phases are complete. Remaining M7 work is on-site
 integration once the open questions in §14 (fleet list, connectivity, on-prem)
 are answered — the codec and listener are built and tested against the spec.
+
+### Operations platform (in progress)
+
+The product is evolving from fleet monitoring into a holistic, auditable
+operations platform, with the **shift** as the primary operational unit. Landed
+so far:
+
+- **Configurable shifts** — `shift_definitions` per site (name, start hour,
+  duration, enabled), managed by admins and audited. Shift *instances* are
+  derived, never stored, so editing a definition never rewrites past telemetry:
+  `GET /sites/{id}/shifts/current`, `GET/PUT/DELETE /sites/{id}/shift-definitions`.
+- **Derived equipment state** — each machine's state (`moving` / `idle` /
+  `stopped` / `offline` / `unknown`) is derived from its latest fix and carries
+  whether it is **observed** (a fresh fix) or **inferred**. Critically, a stale
+  feed reads `offline` — a comms outage is never counted as machine downtime.
+  Surfaced in the dashboard snapshot and the fleet table.
+
+Next: incident lifecycle + downtime classification, shift scorecard + exception
+dashboard, handover + reports, then trends/bottlenecks + data-quality/system-health.

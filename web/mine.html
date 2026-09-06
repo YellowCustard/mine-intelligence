@@ -567,8 +567,8 @@ function renderTables(){
     `<tr data-click class="${a.id===SELECTED?'sel':''}" onclick="selectAsset('${a.id}')">
       <td><b>${a.id}</b><span class="sub2">${E(a.t)}</span></td>
       <td class="m sub2">${E(a.age||'—')}</td>
-      <td><span class="tag ${a.sev==='crit'?'t-crit':a.sev==='warn'?'t-warn':'t-mut'}">${E(a.st)}</span>
-        <span class="sub2">${a.zone}</span></td>
+      <td><span class="tag ${a.offline?'t-warn':a.sev==='crit'?'t-crit':a.sev==='warn'?'t-warn':'t-mut'}">${E(a.st)}</span>
+        <span class="sub2">${a.offline?'data feed down':a.zone}</span></td>
       <td class="m">${Math.round(a.sp)} km/h</td></tr>`).join('');
 
   document.getElementById('atab').innerHTML = ALARMS.length ? ALARMS.map(x=>{
@@ -1292,9 +1292,13 @@ function applyState(snap, haveZones){
     const [x,y]=PROJECT(a.lat,a.lon);
     const inZone=RAW.zones.find(z=>pipLL(a.lat,a.lon,ring(z)));
     const sp=a.speed_kph||0;
-    const st = inZone?TYPEMAP[inZone.kind]:(sp<1.5?(a.ignition?'Idle':'Parked'):'Moving');
+    // Prefer the server's derived state for the data-feed-down case: the client
+    // cannot tell "stopped" from "tracker offline" without a staleness threshold.
+    const offline = a.state==='offline';
+    const st = offline ? 'Offline'
+             : inZone?TYPEMAP[inZone.kind]:(sp<1.5?(a.ignition?'Idle':'Parked'):'Moving');
     return {id:a.asset_id, t:ICONMAP[a.asset_class]||'truck', x, y, sp, sev:sevByAsset[a.asset_id]||'ok',
-            st, zone: inZone?shortCode(inZone.zone_id):'—', age: ageStr(snap.now, a.ts)};
+            st, offline, zone: inZone?shortCode(inZone.zone_id):'—', age: ageStr(snap.now, a.ts)};
   });
 
   // alarms (dashboard shape)
