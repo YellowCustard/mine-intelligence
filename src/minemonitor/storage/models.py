@@ -296,6 +296,89 @@ class ServiceHeartbeat(Base):
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class Incident(Base):
+    """A managed investigation over an alarm — the operations lifecycle.
+
+    An alarm (``Event``) says *something happened*; an incident tracks *what was
+    done about it*: open → acknowledged → investigating → assigned → resolved →
+    closed. The raw ``Event`` is **never mutated** — an incident links to it by
+    ``event_id`` (nullable, so an incident can also be raised by hand). The
+    per-incident timeline lives in ``incident_notes`` for full traceability.
+    """
+
+    __tablename__ = "incidents"
+    __table_args__ = (Index("ix_incidents_site_state", "site_id", "state"),)
+
+    incident_id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    # The originating alarm, if any. Linked, never mutated (brief §6 / §4).
+    event_id: Mapped[str | None] = mapped_column(
+        ForeignKey("events.event_id"), nullable=True, index=True
+    )
+    type: Mapped[str] = mapped_column(String, nullable=False)
+    severity: Mapped[str] = mapped_column(String, nullable=False)
+    asset_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    zone_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(String, nullable=False, default="open")
+    assignee: Mapped[str | None] = mapped_column(String, nullable=True)
+    resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolution_category: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class IncidentNote(Base):
+    """Append-only timeline entry for an incident — a note or a state change.
+
+    Never updated or deleted: the incident's full history (who did what, when,
+    and every transition) is reconstructable from these rows.
+    """
+
+    __tablename__ = "incident_notes"
+    __table_args__ = (Index("ix_incident_notes_incident", "incident_id", "ts"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    incident_id: Mapped[str] = mapped_column(ForeignKey("incidents.incident_id"), nullable=False)
+    site_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    actor: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False)  # "note" | "state_change"
+    from_state: Mapped[str | None] = mapped_column(String, nullable=True)
+    to_state: Mapped[str | None] = mapped_column(String, nullable=True)
+    text: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class DelayClassification(Base):
+    """A human annotation explaining a period of lost time — stored **separately**
+    from telemetry (brief: annotations never touch ``positions``).
+
+    Why time was lost is a judgement a supervisor makes, not a fact a GNSS tracker
+    measures. Keeping classifications in their own table means derived analytics
+    stay reproducible from raw positions, and a reclassification never rewrites
+    history. ``category`` is validated against a known list with ``other`` /
+    ``unknown`` escape hatches; ``source`` marks manual vs. (future) auto-detected.
+    """
+
+    __tablename__ = "delay_classifications"
+    __table_args__ = (Index("ix_delay_classifications_site_start", "site_id", "start_ts"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    asset_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    zone_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    category: Mapped[str] = mapped_column(String, nullable=False)
+    start_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class AuditLog(Base):
     """Append-only audit trail: rule/zone changes, acks, retention runs, auth
     failures/lockouts, and access to personal data (operator reads, exports and

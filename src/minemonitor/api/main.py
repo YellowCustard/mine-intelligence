@@ -14,8 +14,10 @@ from minemonitor import __version__
 from minemonitor.api.routers import (
     account,
     cycles,
+    delays,
     events,
     health,
+    incidents,
     ingest,
     operations,
     stream,
@@ -80,6 +82,8 @@ def create_app() -> FastAPI:
     app.include_router(stream.router)
     app.include_router(account.router)
     app.include_router(operations.router)
+    app.include_router(incidents.router)
+    app.include_router(delays.router)
 
     @app.get("/", include_in_schema=False, dependencies=[Depends(require_viewer)])
     def dashboard() -> FileResponse:

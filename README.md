@@ -263,6 +263,25 @@ so far:
   whether it is **observed** (a fresh fix) or **inferred**. Critically, a stale
   feed reads `offline` — a comms outage is never counted as machine downtime.
   Surfaced in the dashboard snapshot and the fleet table.
+- **Incident management** — an alarm records that something happened; an
+  *incident* tracks what was done about it, through a full lifecycle (`open` →
+  `acknowledged` → `investigating` → `assigned` → `resolved` → `closed`). The
+  raw `Event` is **never mutated** — an incident links to the alarm and keeps its
+  own append-only timeline for traceability. Resolving requires a resolution;
+  assigning requires an assignee. Reads are viewer-level, changes supervisor-level
+  and audited: `GET/POST /sites/{id}/incidents`,
+  `GET /sites/{id}/incidents/{id}`, `POST …/transition`, `POST …/notes`,
+  `POST /sites/{id}/events/{event_id}/incident`.
+- **Downtime / delay classification** — *why* time was lost is a human judgement,
+  not a telemetry measurement, so classifications live in their own table and
+  never touch `positions` (derived analytics stay reproducible). A known category
+  list (`loader_unavailable`, `truck_unavailable`, `maintenance`, `breakdown`,
+  `road_congestion`, `refuelling`, `blasting`, `shift_change`, `operational_delay`,
+  `weather`, `other`, `unknown`) with deliberate `other`/`unknown` escape hatches:
+  `GET /delay-categories`, `GET/POST/DELETE /sites/{id}/delays`.
 
-Next: incident lifecycle + downtime classification, shift scorecard + exception
-dashboard, handover + reports, then trends/bottlenecks + data-quality/system-health.
+Migration **0009** is additive (three annotation tables) and safe for an existing
+install; it up/down round-trips on Postgres 16.
+
+Next: shift scorecard + exception dashboard, handover + reports, then
+trends/bottlenecks + data-quality/system-health.
