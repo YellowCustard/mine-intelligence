@@ -18,3 +18,9 @@ venv/
 
 # OS
 .DS_Store
+
+# Coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml

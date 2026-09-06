@@ -61,6 +61,21 @@ def test_healthz_is_public(db_session: Session) -> None:
     assert anon.get("/health").status_code in (200, 503)  # reachable without auth
 
 
+def test_healthcheck_cli_exit_codes(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from sqlalchemy.orm import sessionmaker
+
+    from minemonitor import healthcheck
+
+    factory = sessionmaker(bind=db_session.bind, expire_on_commit=False, future=True)
+    monkeypatch.setattr(healthcheck, "get_session_factory", lambda: factory)
+    # No heartbeat yet -> unhealthy.
+    assert healthcheck.main() == 1
+    # After a fresh beat -> healthy.
+    heartbeat.beat(db_session, heartbeat.INGESTOR)
+    db_session.commit()
+    assert healthcheck.main() == 0
+
+
 def test_heartbeat_helpers(db_session: Session) -> None:
     assert heartbeat.age_s(db_session, heartbeat.INGESTOR) is None
     heartbeat.beat(db_session, heartbeat.INGESTOR)

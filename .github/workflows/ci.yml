@@ -71,5 +71,33 @@ jobs:
       - name: Run migrations (creates the hypertable on real TimescaleDB)
         run: uv run alembic upgrade head
 
-      - name: Tests (SQLite + Postgres + MQTT integration)
-        run: uv run pytest -q
+      - name: Tests (SQLite + Postgres + MQTT integration) with coverage
+        run: uv run pytest -q --cov=minemonitor --cov-report=term-missing
+
+  # Build the deployment image so a Dockerfile regression fails CI, not the mine.
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t minemonitor:ci .
+
+  # Browser end-to-end: load the real dashboard in Chromium and acknowledge an alarm.
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.8.17"
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Install dependencies (with browser extra)
+        run: uv sync --frozen --extra dev --extra browser
+      - name: Install Chromium for Playwright
+        run: uv run playwright install --with-deps chromium
+      - name: Dashboard smoke test
+        env:
+          MM_TEST_BROWSER: "1"
+        run: uv run pytest tests/test_dashboard_browser.py -q
