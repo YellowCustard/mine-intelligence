@@ -111,11 +111,33 @@ Then `certbot --nginx -d mine.example.com`.
 ## 7. Operate
 
 ```bash
-docker compose ps                 # status
+docker compose ps                 # status + per-service health
 docker compose logs -f api        # API/dashboard logs
 docker compose logs -f ingestor   # ingest + periodic cycle recompute
 docker compose down               # stop (keeps data volumes)
 ```
+
+**Resilience & health:** every long-running service has `restart: unless-stopped`
+and a healthcheck, so a crash or reboot brings the stack back up (power will fail
+at the site). Two probes:
+- `GET /healthz` — liveness (API + database). This is what the api container's
+  healthcheck and `deploy/deploy.sh` wait on.
+- `GET /health` — full system: also MQTT and the ingestor heartbeat; returns 503
+  when either is down, so a stuck ingestor or dead broker is visible to
+  monitoring. `docker compose ps` shows each container's own health.
+
+**Auth lockout:** an account locks after `MM_LOGIN_MAX_FAILURES` consecutive
+failed logins for `MM_LOGIN_LOCKOUT_MINUTES` (audited). If a real user locks
+themselves out, either wait out the window or reset their password with the CLI
+(`docker compose exec api uv run python -m minemonitor.auth.cli <user> <role>`),
+which clears the lock.
+
+**Scheduled backups:** run the backup sidecar alongside the stack —
+```bash
+docker compose --profile backup up -d     # dumps ./backups on MM_BACKUP_INTERVAL_S
+```
+or invoke `deploy/backup.sh` from host cron. Old dumps are pruned after
+`MM_BACKUP_KEEP_DAYS`.
 
 **Retention & audit:** the ingestor runs a per-data-class deletion job (~daily;
 positions / metrics+cycles / events / audit trail, each configurable in days via

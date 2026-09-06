@@ -19,7 +19,8 @@ _POSITION = {
 
 
 def test_health_ok(client: TestClient) -> None:
-    resp = client.get("/health")
+    # Liveness: the API is up and its database is reachable.
+    resp = client.get("/healthz")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok", "db": "ok"}
 
