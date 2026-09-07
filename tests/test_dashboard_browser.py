@@ -171,6 +171,9 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
         expect(page.locator("#ftab")).to_contain_text("HT-102", timeout=10_000)
         expect(page.locator("#atab")).to_contain_text("magazine", timeout=10_000)
 
+        # The exception layer surfaces the open critical alarm (operations platform).
+        expect(page.locator("#exbar")).to_contain_text("critical", timeout=10_000)
+
         # Acknowledge the alarm in the UI; the button then clears on the next poll.
         page.locator("#atab .ackbtn").first.click()
         page.wait_for_function(

@@ -10,13 +10,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from minemonitor import audit
 from minemonitor.auth.deps import require_admin, require_viewer
+from minemonitor.config import get_settings
+from minemonitor.operations import exceptions as exceptions_mod
+from minemonitor.operations.scorecard import scorecard_with_comparison
 from minemonitor.operations.shifts import definitions, resolve_shift
 from minemonitor.storage.db import get_db
 from minemonitor.storage.models import ShiftDefinition, User
@@ -45,6 +48,29 @@ def current_shift(site_id: str, db: Session = Depends(get_db)) -> dict[str, Any]
     """The shift instance containing 'now', or ``{"shift": null}`` if outside all shifts."""
     window = resolve_shift(db, site_id, datetime.now(UTC))
     return {"shift": window.as_dict() if window is not None else None}
+
+
+@router.get("/sites/{site_id}/scorecard", dependencies=[Depends(require_viewer)])
+def shift_scorecard(
+    site_id: str,
+    at: datetime | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Scorecard for the shift containing ``at`` (default now), vs the previous shift.
+
+    Every figure is observed or derived from stored data — no target or benchmark.
+    """
+    moment = at or datetime.now(UTC)
+    return scorecard_with_comparison(db, site_id, moment)
+
+
+@router.get("/sites/{site_id}/exceptions", dependencies=[Depends(require_viewer)])
+def exceptions(site_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """What needs attention now: critical alarms, open incidents, stopped machines,
+    offline trackers. ``healthy`` is true when there is nothing to act on.
+    """
+    offline_after_s = get_settings().offline_threshold_s
+    return exceptions_mod.compute_exceptions(db, site_id, datetime.now(UTC), offline_after_s)
 
 
 @router.get("/sites/{site_id}/shift-definitions", dependencies=[Depends(require_viewer)])

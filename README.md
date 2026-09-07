@@ -282,6 +282,21 @@ so far:
 
 Migration **0009** is additive (three annotation tables) and safe for an existing
 install; it up/down round-trips on Postgres 16.
+- **Shift scorecard** — one glance at how a shift went: cycle count / mean cycle
+  time / queue %, utilisation (moving vs idle, from the `AssetMetrics` rollup),
+  safety events by severity, classified downtime by category (clipped to the
+  window), and open/opened incidents — plus an observed delta vs the *previous*
+  shift. Every figure is observed or derived from stored data; **no target or
+  benchmark is ever invented**, and "nothing observed" reports `null`, not `0`:
+  `GET /sites/{id}/scorecard?at=…`.
+- **Exception layer** — the dashboard leads with what needs a human now (critical
+  alarms, open incidents, stopped machines, offline trackers), each with a
+  drill-down, and is **quiet when healthy**. Stopped machines and offline trackers
+  are separate groups — a comms outage is a data-feed problem, not downtime:
+  `GET /sites/{id}/exceptions`. Surfaced on the dashboard as a "Needs attention"
+  strip that collapses to "All clear" when there is nothing to action.
 
-Next: shift scorecard + exception dashboard, handover + reports, then
-trends/bottlenecks + data-quality/system-health.
+These endpoints are pure reads over existing data (no new migration).
+
+Next: shift handover + automated reports, then trends/bottlenecks +
+data-quality/system-health.
