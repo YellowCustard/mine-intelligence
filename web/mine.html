@@ -148,6 +148,12 @@ svg{display:block;width:100%;height:auto}
 
 <!-- ══════════════════ SITE OVERVIEW ══════════════════ -->
 <div id="site" class="wrap" style="padding:0;gap:13px">
+  <!-- Exception layer: quiet when healthy, loud when something needs a human.
+       Populated from /sites/{id}/exceptions (see loadExceptions). -->
+  <section id="exbar" class="panel" aria-live="polite">
+    <header><h2>Needs attention</h2><span class="meta" id="excount">—</span></header>
+    <div class="body" id="exbody" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start"></div>
+  </section>
   <div class="tiles">
     <div class="tile"><span class="lab">In loading zone</span><span class="val" id="k-load">—</span>
       <span class="sub" id="k-load-sub">loading zones</span></div>
@@ -1337,11 +1343,57 @@ function applyState(snap, haveZones){
   if(snap.cycles && snap.cycles.shift) set('clock', `${snap.cycles.shift[0].toUpperCase()+snap.cycles.shift.slice(1)} shift · live`);
 }
 
+// --- Exception layer + shift scorecard (operations platform) ---------------
+const EXGROUPS = [
+  {key:'critical_alarms',      label:'critical alarms',  cls:'crit', item:x=>`${x.asset_id||'—'} · ${x.summary}`, go:'site'},
+  {key:'unresolved_incidents', label:'open incidents',   cls:'warn', item:x=>`${x.asset_id||'—'} · ${x.summary}${x.unassigned?' · unassigned':''}`, go:'site'},
+  {key:'stopped_machines',     label:'stopped machines', cls:'warn', item:x=>`${x.asset_id} · ${x.reason||'stopped'}`, go:'fleet'},
+  {key:'offline_trackers',     label:'offline trackers', cls:'muted',item:x=>`${x.asset_id} · data feed down (${Math.round((x.data_age_s||0)/60)} min)`, go:'fleet'},
+];
+function renderExceptions(data){
+  const body=document.getElementById('exbody'), meta=document.getElementById('excount');
+  if(!body) return;
+  body.innerHTML='';
+  if(!data || data.healthy){
+    body.innerHTML='<span class="exok">All clear — nothing needs attention this shift.</span>';
+    if(meta) meta.textContent='healthy';
+    return;
+  }
+  const total=Object.values(data.counts||{}).reduce((a,n)=>a+n,0);
+  if(meta) meta.textContent=`${total} to action`;
+  EXGROUPS.forEach(g=>{
+    const items=(data.groups&&data.groups[g.key])||[]; if(!items.length) return;
+    const wrap=document.createElement('div'); wrap.className='exgrp';
+    const chip=document.createElement('button');
+    chip.className=`exchip ex-${g.cls}`; chip.setAttribute('aria-expanded','false');
+    chip.innerHTML=`<b>${items.length}</b> ${g.label}`;
+    const list=document.createElement('div'); list.className='exlist'; list.hidden=true;
+    items.slice(0,12).forEach(x=>{ const d=document.createElement('div'); d.className='exitem'; d.textContent=g.item(x); list.appendChild(d); });
+    chip.onclick=()=>{ const open=list.hidden; list.hidden=!open; chip.setAttribute('aria-expanded',String(open)); };
+    wrap.appendChild(chip); wrap.appendChild(list); body.appendChild(wrap);
+  });
+}
+async function loadExceptions(){
+  try{ const r=await fetch(`/sites/${SITE}/exceptions`); renderExceptions(await r.json()); }
+  catch(e){/* leave the last strip in place on a transient failure */}
+}
+async function loadScorecard(){
+  try{
+    const r=await fetch(`/sites/${SITE}/scorecard`); const s=await r.json();
+    const sub=document.getElementById('k-queue-sub'); const cmp=s&&s.comparison;
+    if(sub && cmp && cmp.queue_pct_delta!=null){
+      const d=cmp.queue_pct_delta, arrow=d>0.5?'▲':(d<-0.5?'▼':'—');
+      sub.textContent=`of every cycle · ${arrow} ${Math.abs(d).toFixed(0)}% vs last shift`;
+    }
+  }catch(e){}
+}
+
 async function ackAlarm(id){
   try{ await fetch(`/sites/${SITE}/events/${id}/ack`,{method:'POST',headers:{'content-type':'application/json'},
         body:JSON.stringify({acknowledged_by:'control room'})}); }
   catch(e){}
   await loadState();
+  loadExceptions();
 }
 
 async function loadState(){
@@ -1361,9 +1413,22 @@ async function boot(){
   const st=document.createElement('style');
   st.textContent='.ackbtn{font:600 10.5px Barlow,sans-serif;color:var(--acc);background:transparent;'
     +'border:1px solid var(--acc);border-radius:3px;padding:2px 8px;cursor:pointer}'
-    +'.ackbtn:hover{background:var(--acc);color:#fff}tr.ackd{opacity:.62}';
+    +'.ackbtn:hover{background:var(--acc);color:#fff}tr.ackd{opacity:.62}'
+    +'.exok{font:600 12px Barlow,sans-serif;color:var(--mut,#8a8577)}'
+    +'.exgrp{display:flex;flex-direction:column;gap:4px}'
+    +'.exchip{font:600 11.5px Barlow,sans-serif;border-radius:4px;padding:4px 10px;cursor:pointer;'
+    +'border:1px solid transparent;background:rgba(0,0,0,.05)}.exchip b{font-size:12.5px}'
+    +'.exchip:hover{filter:brightness(1.04)}'
+    +'.ex-crit{border-color:var(--crit,#c0392b);color:var(--crit,#c0392b)}'
+    +'.ex-warn{border-color:var(--warn,#c77d00);color:var(--warn,#c77d00)}'
+    +'.ex-muted{border-color:var(--mut,#8a8577);color:var(--mut,#8a8577)}'
+    +'.exlist{display:flex;flex-direction:column;gap:2px;padding:2px 2px 4px}'
+    +'.exitem{font:500 11px Barlow,sans-serif;opacity:.85}';
   document.head.appendChild(st);
   try{ await loadState(); }catch(e){ paint(); }
+  // Exceptions + scorecard are not part of the SSE snapshot; poll them lightly.
+  loadExceptions(); loadScorecard();
+  setInterval(()=>{ loadExceptions(); loadScorecard(); }, 15000);
   startStream();
 }
 boot();
