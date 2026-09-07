@@ -11,6 +11,7 @@ the UI moves it out of the open state.
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
 import time
@@ -166,13 +167,68 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
         page = context.new_page()
         page.goto(live_server + "/", wait_until="networkidle")
 
-        # Live data from the API renders: the seeded zone, fleet asset, and alarm.
+        # The Operations command centre is the default view: headline KPIs render,
+        # and the exception layer surfaces the open critical alarm.
+        expect(page.locator("#cc-kpis")).to_contain_text("Active equipment", timeout=10_000)
+        expect(page.locator("#exbar")).to_contain_text("critical", timeout=10_000)
+        # The operational-data-health chip is populated with a real verdict
+        # (healthy / degraded / unknown), not the initial placeholder.
+        expect(page.locator("#hdr-health")).to_contain_text(
+            re.compile("healthy|degraded|unknown"), timeout=10_000
+        )
+        # The queue KPI never presents degraded analytics silently: a data-confidence
+        # badge is always shown (High / Reduced / Low / Unknown).
+        expect(page.locator("#cc-queue-conf")).to_contain_text("Data confidence", timeout=10_000)
+
+        # Switch to the Fleet view: the live map data (zone, asset, alarm) renders.
+        page.locator("#n-site").click()
         expect(page.locator("#ztab")).to_contain_text("Pit Face", timeout=10_000)
         expect(page.locator("#ftab")).to_contain_text("HT-102", timeout=10_000)
         expect(page.locator("#atab")).to_contain_text("magazine", timeout=10_000)
 
-        # The exception layer surfaces the open critical alarm (operations platform).
-        expect(page.locator("#exbar")).to_contain_text("critical", timeout=10_000)
+        # Machine drill-down: selecting the asset opens its detail without leaving
+        # the operational view (identity + investigation sections render).
+        page.locator("#ftab tr").first.click()
+        expect(page.locator("#machine-detail")).to_contain_text("HT-102", timeout=10_000)
+        expect(page.locator("#machine-detail")).to_contain_text("Recent cycles", timeout=10_000)
+
+        # Historical investigation: replay this machine's stored track on the map.
+        page.locator("#machine-detail button", has_text="This shift").click()
+        expect(page.locator("#md-hist-msg")).to_contain_text("fix(es)", timeout=10_000)
+
+        # Map/table filters: filtering to offline hides the moving asset.
+        page.select_option("#flt-state", "offline")
+        expect(page.locator("#ftab")).to_contain_text("No machines match", timeout=10_000)
+        page.select_option("#flt-state", "all")
+        expect(page.locator("#ftab")).to_contain_text("HT-102", timeout=10_000)
+
+        # Analytics view: the trend, bottleneck and downtime panels render (here
+        # with first-class empty states, since the smoke seed has no cycles).
+        page.locator("#n-analytics").click()
+        expect(page.locator("#an-trend")).to_contain_text("No completed cycles", timeout=10_000)
+        expect(page.locator("#an-bottlenecks")).to_contain_text(
+            "No bottleneck observations", timeout=10_000
+        )
+        expect(page.locator("#an-downtime")).to_contain_text("No downtime", timeout=10_000)
+
+        # Handover: an admin (supervisor+) sees the record form and can submit; the
+        # new handover then appears in the list.
+        page.locator("#n-handover").click()
+        expect(page.locator("#ho-create")).to_contain_text("Record handover", timeout=10_000)
+        page.locator("#ho-notes").fill("day crew: loader B intermittent")
+        page.locator("#ho-create button").click()
+        expect(page.locator("#ho-list")).to_contain_text("loader B intermittent", timeout=10_000)
+
+        # Reports centre: the current shift report links render (open in new tab).
+        page.locator("#n-reports").click()
+        expect(page.locator("#rp-shift")).to_contain_text("Current shift", timeout=10_000)
+        expect(page.locator("#rp-shift a", has_text="View").first).to_have_attribute(
+            "href", re.compile(r"/reports/shift\.html")
+        )
+
+        # Back to Fleet to acknowledge the alarm.
+        page.locator("#n-site").click()
+        expect(page.locator("#atab")).to_contain_text("magazine", timeout=10_000)
 
         # Acknowledge the alarm in the UI; the button then clears on the next poll.
         page.locator("#atab .ackbtn").first.click()

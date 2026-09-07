@@ -334,3 +334,65 @@ These endpoints are pure reads over existing data (no new migration).
   source of truth; the API still enforces every permission independently.
 
 These endpoints are pure reads over existing data (no new migration).
+
+### Operations Command Centre (dashboard)
+
+The dashboard (`web/mine.html`, framework-free) leads with an **Operations**
+command centre that answers, at a glance: *what is happening now, what needs my
+attention, and is the shift getting better?* It is organised by operational
+priority, not by API surface:
+
+- **Current shift** — headline KPIs with the **queue %** given visual prominence
+  as the primary commercial metric, alongside total queue time, mean cycle,
+  utilisation, active/offline equipment, critical alarms and unresolved incidents.
+  Observed and derived figures are labelled as such.
+- **Data confidence** — the queue KPI carries a confidence badge
+  (High / Reduced / Low) sourced from the data-quality endpoint; degraded
+  analytics are never presented silently as fully reliable.
+- **Needs attention** — the exception layer (critical alarms, open incidents,
+  stopped machines, offline trackers) folded together with data-quality problems
+  and suspected bottleneck observations. **Quiet when healthy** ("All clear").
+- **Shift performance** — this shift vs the previous shift, shown as observed
+  deltas (direction + magnitude), never implying causation.
+- **Operational data health** — a concise header chip distinguishes a **platform**
+  problem (ingestor/broker/DB) from the **field** going quiet (trackers/comms) —
+  a tracker outage is never shown as machine downtime.
+- The live **Fleet** map (zones, assets, alarm queue + acknowledge, cycle
+  breakdown) is one view within the centre; navigation is role-aware via
+  `/me/capabilities`. The synthetic Vision/Exploration/payload/fuel demo panels
+  (out-of-scope for Phase 1) have been retired.
+
+The **Fleet** view adds **filters** (by machine type and operational state,
+applied to both map and table) and a **machine drill-down**: selecting a machine
+opens a detail panel — identity, current state (with observed/inferred basis),
+last telemetry, current zone, recent cycles with queue contribution, active
+alarms and incidents affecting it, and per-machine tracker/data-quality status —
+so "why is this machine behaving differently?" is answerable without leaving the
+operational view.
+
+The **Analytics** view turns the trend, bottleneck and downtime endpoints into a
+manager surface: per-shift **trend sparklines** (queue %, mean cycle, utilisation,
+downtime — observed values only, no projection), **bottleneck intelligence** cards
+stating WHAT / EVIDENCE / CONFIDENCE / CAUSALITY (*not established — correlation
+only*) / ACTION (a jump to the implicated machine), and a **downtime-by-cause**
+breakdown for the current shift. Each panel has a first-class empty state.
+
+The **Handover** view runs the end-of-shift handover in-place: a supervisor
+records a handover (snapshotting the shift scorecard) with outgoing notes, and the
+incoming crew acknowledges it with their own — capability-gated via
+`/me/capabilities` (viewers read only), with the full handover list shown either
+way. The **Reports** view is a discoverable reports centre: current/previous shift
+reports opened as printable HTML or downloaded as CSV, a daily roll-up loaded by
+date, and a historical shift report fetched by shift id — all reusing the existing
+report endpoints (no separate reporting system).
+
+**Historical investigation** is wired into the Fleet map: selecting a machine
+offers to replay its **stored track** for this shift, the last 1 h or 3 h, or a
+±15-minute window around a specific alarm — drawn from immutable telemetry
+(`GET /sites/{id}/positions` gains `since`/`until`/`order` for a bounded,
+oldest-first playback window; a pure read, no schema change). The synthetic map
+trail has been replaced by this real track. So "something looks wrong" → "show me
+what happened" is a click, not a screen change.
+
+The final increment adds a system/admin view (health drill-down, ingestion,
+config, users, audit, retention, data quality) plus responsive/perf hardening.

@@ -74,3 +74,33 @@ def test_read_is_site_scoped(client: TestClient) -> None:
     client.post("/ingest/positions", json=_POSITION)
     other = client.get("/sites/other-site/positions").json()
     assert other == []
+
+
+def test_positions_window_and_order(client: TestClient) -> None:
+    # Three fixes across a morning; historical playback reads a bounded window.
+    for minute in (0, 30, 59):
+        p = {**_POSITION, "ts": f"2026-09-05T08:{minute:02d}:00Z", "lat": -17.8 + minute * 1e-4}
+        assert client.post("/ingest/positions", json=p).status_code == 202
+
+    # since/until bound the device-time window (since inclusive, until exclusive).
+    win = client.get(
+        "/sites/kn-zw-01/positions",
+        params={
+            "asset_id": "HT-102",
+            "since": "2026-09-05T08:15:00Z",
+            "until": "2026-09-05T08:59:00Z",
+            "order": "asc",
+        },
+    ).json()
+    times = [r["ts"] for r in win]
+    assert len(times) == 1  # only the 08:30 fix falls inside [08:15, 08:59)
+    assert times[0].startswith("2026-09-05T08:30")
+
+    # order=asc replays oldest→newest; the default stays newest-first.
+    asc = client.get(
+        "/sites/kn-zw-01/positions", params={"asset_id": "HT-102", "order": "asc"}
+    ).json()
+    asc_times = [r["ts"] for r in asc]
+    assert asc_times == sorted(asc_times)
+    desc_times = [r["ts"] for r in client.get("/sites/kn-zw-01/positions").json()]
+    assert desc_times == sorted(desc_times, reverse=True)

@@ -8,6 +8,7 @@ ingest service so HTTP and MQTT behave identically.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -43,10 +44,20 @@ def read_positions(
     site_id: str,
     asset_id: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+    order: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: Session = Depends(get_db),
 ) -> list[dict[str, object]]:
-    """Read stored positions for a site (always site-scoped), newest first."""
-    rows = list_positions(db, site_id=site_id, asset_id=asset_id, limit=limit)
+    """Read stored positions for a site (always site-scoped).
+
+    ``since``/``until`` bound the device-time window and ``order`` (``asc``/``desc``)
+    picks the direction — together they drive historical playback of a track over a
+    shift or around an event. Raw telemetry is immutable; this is a pure read.
+    """
+    rows = list_positions(
+        db, site_id=site_id, asset_id=asset_id, limit=limit, since=since, until=until, order=order
+    )
     return [
         {
             "schema": "asset.position.v1",
