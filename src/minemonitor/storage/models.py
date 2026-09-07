@@ -379,6 +379,33 @@ class DelayClassification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ShiftHandover(Base):
+    """An end-of-shift handover: what the outgoing crew saw, and the incoming
+    crew's acknowledgement.
+
+    An operational record (an annotation), stored separately from telemetry. The
+    ``summary`` is a point-in-time snapshot of the shift scorecard captured when
+    the handover was written — it is the record of *what was handed over*, so it
+    stays fixed even as late data arrives; the live, recomputable scorecard is
+    always available separately. Lifecycle is simply ``open`` → ``acknowledged``.
+    """
+
+    __tablename__ = "shift_handovers"
+    __table_args__ = (Index("ix_shift_handovers_site_shift", "site_id", "shift_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    shift_id: Mapped[str] = mapped_column(String, nullable=False)
+    state: Mapped[str] = mapped_column(String, nullable=False, default="open")
+    summary: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False, default=dict)
+    outgoing_by: Mapped[str] = mapped_column(String, nullable=False)
+    outgoing_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    incoming_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    incoming_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class AuditLog(Base):
     """Append-only audit trail: rule/zone changes, acks, retention runs, auth
     failures/lockouts, and access to personal data (operator reads, exports and
