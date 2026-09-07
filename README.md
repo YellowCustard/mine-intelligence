@@ -312,5 +312,25 @@ These endpoints are pure reads over existing data (no new migration).
   value is never shown as measured: `GET /sites/{id}/reports/shift[.csv|.html]`,
   `GET /sites/{id}/reports/daily?date=…` (viewer). All pure reads.
 
-Next: trends/benchmarks + bottleneck observations, then data-quality +
-system-health, operational config surfaces and role-scoped views.
+- **Trends** — the same scorecard walked back over the last N shifts as a
+  per-shift series (queue %, cycle time, utilisation, downtime by category,
+  incidents, safety events), newest first. Observed values only — no projection or
+  fitted line: `GET /sites/{id}/trends?shifts=N`.
+- **Bottleneck observations** — where time *appears* to go, stated conservatively:
+  the dominant cycle segment, outlier-slow trucks, the top downtime category —
+  each with its evidence and an explicit `causal: false`. The system supplies the
+  numbers; a supervisor draws the conclusion: `GET /sites/{id}/bottlenecks`.
+- **Data-quality monitoring** — inspects recent fixes for stale feeds, late/
+  backfilled and out-of-order arrivals, physically impossible jumps and missing
+  quality fields, and rolls them into a `good`/`fair`/`poor` confidence label. A
+  stale feed is a *data* problem, never machine downtime:
+  `GET /sites/{id}/data-quality`.
+- **System-health centre** — beyond the `/health` probe, answers *whose* fault a
+  gap is: `platform_degraded` (ingestor/broker/DB — ours) vs `field_degraded`
+  (trackers/comms quiet — the site's), never conflated:
+  `GET /sites/{id}/system-health`.
+- **Role capabilities** — `GET /me/capabilities` returns per-role capability flags
+  so a role-specific UI (control room / supervisor / manager / admin) keys off one
+  source of truth; the API still enforces every permission independently.
+
+These endpoints are pure reads over existing data (no new migration).

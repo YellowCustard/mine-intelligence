@@ -43,6 +43,33 @@ def me(user: User = Depends(require_viewer)) -> dict[str, Any]:
     return {"username": user.username, "role": user.role, "site_id": user.site_id}
 
 
+# What each role may do, most-privileged capability last. The dashboard reads this
+# to render a role-specific view without hardcoding the role hierarchy client-side;
+# the server still enforces every permission independently (this is a UI hint only).
+_RANK = {"viewer": 1, "supervisor": 2, "admin": 3, "device": 0}
+_CAPABILITIES: dict[str, int] = {
+    "view_operations": 1,  # dashboards, scorecards, reports, trends
+    "acknowledge_alarms": 2,  # ack, incidents, delays, handovers
+    "manage_incidents": 2,
+    "classify_delays": 2,
+    "write_handovers": 2,
+    "configure_site": 3,  # shift definitions, zones, retention, users
+    "manage_users": 3,
+}
+
+
+@router.get("/me/capabilities")
+def my_capabilities(user: User = Depends(require_viewer)) -> dict[str, Any]:
+    """The current user's role and the capability flags a role-specific UI can key on.
+
+    A convenience for the frontend — the API enforces each permission regardless of
+    what this returns.
+    """
+    rank = _RANK.get(user.role, 0)
+    caps = {name: rank >= needed for name, needed in _CAPABILITIES.items()}
+    return {"username": user.username, "role": user.role, "site_id": user.site_id, "can": caps}
+
+
 @router.post("/users", status_code=201)
 def add_user(
     body: UserIn, db: Session = Depends(get_db), admin: User = Depends(require_admin)

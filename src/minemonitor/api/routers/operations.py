@@ -15,10 +15,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from minemonitor import audit
+from minemonitor import audit, heartbeat
+from minemonitor.api.routers.health import _mqtt_reachable
 from minemonitor.auth.deps import require_admin, require_viewer
 from minemonitor.config import get_settings
+from minemonitor.operations import bottlenecks as bottlenecks_mod
+from minemonitor.operations import dataquality as dataquality_mod
 from minemonitor.operations import exceptions as exceptions_mod
+from minemonitor.operations import systemhealth as systemhealth_mod
+from minemonitor.operations import trends as trends_mod
 from minemonitor.operations.scorecard import scorecard_with_comparison
 from minemonitor.operations.shifts import definitions, resolve_shift
 from minemonitor.storage.db import get_db
@@ -71,6 +76,53 @@ def exceptions(site_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     """
     offline_after_s = get_settings().offline_threshold_s
     return exceptions_mod.compute_exceptions(db, site_id, datetime.now(UTC), offline_after_s)
+
+
+@router.get("/sites/{site_id}/trends", dependencies=[Depends(require_viewer)])
+def trends(
+    site_id: str,
+    shifts: int = Query(default=7, ge=1, le=60),
+    at: datetime | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Per-shift series of the headline metrics over the last N shifts (observed only)."""
+    return trends_mod.compute_trends(db, site_id, at or datetime.now(UTC), count=shifts)
+
+
+@router.get("/sites/{site_id}/bottlenecks", dependencies=[Depends(require_viewer)])
+def bottlenecks(
+    site_id: str,
+    at: datetime | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Bottleneck observations for the shift containing ``at`` — correlations, not causes."""
+    window = resolve_shift(db, site_id, at or datetime.now(UTC))
+    if window is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no shift matches")
+    return bottlenecks_mod.compute_bottlenecks(db, site_id, window)
+
+
+@router.get("/sites/{site_id}/data-quality", dependencies=[Depends(require_viewer)])
+def data_quality(site_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Telemetry trustworthiness: stale/late/out-of-order/impossible fixes + confidence."""
+    offline_after_s = get_settings().offline_threshold_s
+    return dataquality_mod.compute_data_quality(db, site_id, datetime.now(UTC), offline_after_s)
+
+
+@router.get("/sites/{site_id}/system-health", dependencies=[Depends(require_viewer)])
+def system_health(site_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Platform-vs-field health: distinguishes an app failure from trackers going quiet."""
+    settings = get_settings()
+    ingestor_fresh = heartbeat.is_fresh(db, heartbeat.INGESTOR, stale_s=settings.heartbeat_stale_s)
+    mqtt_ok = _mqtt_reachable(settings.mqtt_host, settings.mqtt_port)
+    return systemhealth_mod.compute_system_health(
+        db,
+        site_id,
+        datetime.now(UTC),
+        offline_after_s=settings.offline_threshold_s,
+        ingestor_fresh=ingestor_fresh,
+        mqtt_ok=mqtt_ok,
+    )
 
 
 @router.get("/sites/{site_id}/shift-definitions", dependencies=[Depends(require_viewer)])
