@@ -197,6 +197,31 @@ svg{display:block;width:100%;height:auto}
       <span class="sub" id="k-cycle-sub">this shift</span></div>
   </div>
 
+  <section class="panel">
+    <header><h2>Fleet filters</h2><span class="meta">machine type · operational state</span></header>
+    <div class="body" style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+      <label class="flt">Type
+        <select id="flt-type" onchange="setFilter('type', this.value)">
+          <option value="all">All types</option>
+          <option value="haul_truck">Haul truck</option>
+          <option value="excavator">Excavator</option>
+          <option value="light_vehicle">Light vehicle</option>
+          <option value="water_bowser">Water bowser</option>
+          <option value="grader">Grader</option>
+        </select></label>
+      <label class="flt">State
+        <select id="flt-state" onchange="setFilter('state', this.value)">
+          <option value="all">All states</option>
+          <option value="moving">Moving</option>
+          <option value="idle">Idle</option>
+          <option value="stopped">Stopped</option>
+          <option value="offline">Offline (data feed down)</option>
+          <option value="unknown">Unknown</option>
+        </select></label>
+      <span class="sub2" style="margin-left:auto">Filters apply to the map and fleet table.</span>
+    </div>
+  </section>
+
   <div class="g2">
     <section class="panel">
       <header><h2>Site plan · geofenced zones</h2>
@@ -234,6 +259,13 @@ svg{display:block;width:100%;height:auto}
       </section>
     </div>
   </div>
+
+  <section class="panel">
+    <header><h2>Machine detail</h2><span class="meta">select a machine to inspect</span></header>
+    <div class="body" id="machine-detail">
+      <p class="note">Select a machine on the map or in the fleet table to inspect it.</p>
+    </div>
+  </section>
 
   <section class="panel">
     <header><h2>Cycle breakdown</h2><span class="meta">where the shift's minutes go · observed</span></header>
@@ -289,6 +321,13 @@ const ZFILL = {load:['rgba(58,115,73,.26)','#3a7349'], unload:['rgba(58,110,150,
 
 let LAYERS = {zones:true, roads:true, assets:true, trails:false};
 let SELECTED = null;
+// Fleet filters: machine type (asset_class) and operational state.
+let FILTER = {type:'all', state:'all'};
+function visibleAssets(){
+  return ASSETS.filter(a =>
+    (FILTER.type==='all' || a.cls===FILTER.type) &&
+    (FILTER.state==='all' || a.state===FILTER.state));
+}
 
 /* ───────────────────────── the map ───────────────────────── */
 function baseMap(){
@@ -402,7 +441,7 @@ function zoneLayer(){
 function assetLayer(){
   if(!LAYERS.assets) return '';
   let s='';
-  ASSETS.forEach(a=>{
+  visibleAssets().forEach(a=>{
     const col=T(SEV[a.sev]);
     const sel = a.id===SELECTED;
     if(a.sev!=='ok') s+=`<circle class="pulse" cx="${a.x}" cy="${a.y}" r="21" fill="${col}" opacity="0.22"/>`;
@@ -446,13 +485,16 @@ function renderTables(){
       <td><span class="tag ${z.kind==='restrict'?'t-crit':z.kind==='speed'?'t-warn':'t-ok'}">${z.type}</span></td>
       <td class="sub2">${E(z.rule)}</td><td class="m">${z.inside}</td></tr>`;}).join('');
 
-  document.getElementById('ftab').innerHTML = ASSETS.map(a=>
+  const vis=visibleAssets();
+  document.getElementById('ftab').innerHTML = vis.length ? vis.map(a=>
     `<tr data-click class="${a.id===SELECTED?'sel':''}" onclick="selectAsset('${a.id}')">
       <td><b>${a.id}</b><span class="sub2">${E(a.t)}</span></td>
       <td class="m sub2">${E(a.age||'—')}</td>
       <td><span class="tag ${a.offline?'t-warn':a.sev==='crit'?'t-crit':a.sev==='warn'?'t-warn':'t-mut'}">${E(a.st)}</span>
         <span class="sub2">${a.offline?'data feed down':a.zone}</span></td>
-      <td class="m">${Math.round(a.sp)} km/h</td></tr>`).join('');
+      <td class="m">${Math.round(a.sp)} km/h</td></tr>`).join('')
+    : `<tr><td colspan="4" class="sub2" style="text-align:center;padding:14px">No machines match the filter.</td></tr>`;
+  const fc=document.getElementById('fcount'); if(fc) fc.textContent=`${vis.length} of ${ASSETS.length} shown`;
 
   document.getElementById('atab').innerHTML = ALARMS.length ? ALARMS.map(x=>{
     const ackd = x.state && x.state!=='open';
@@ -465,11 +507,84 @@ function renderTables(){
       <td class="sub2">${E(x.src)}</td><td>${action}</td></tr>`;}).join('')
     : `<tr><td colspan="7" class="sub2" style="text-align:center;padding:18px">No alarms — all clear.</td></tr>`;
 }
-function selectAsset(id){ SELECTED=id; drawMap('map'); renderTables(); }
+function selectAsset(id){ SELECTED=id; drawMap('map'); renderTables(); renderMachineDetail(id); }
 function tog(k){
   LAYERS[k]=!LAYERS[k];
   document.getElementById('t-'+k).setAttribute('aria-pressed', String(LAYERS[k]));
   drawMap('map');
+}
+function setFilter(kind, value){
+  FILTER[kind]=value;
+  drawMap('map'); renderTables();
+}
+
+// ── Machine drill-down ───────────────────────────────────────────────────
+// Composes the live snapshot (identity/state/telemetry/zone/alarms) with a few
+// read-only fetches (recent cycles, active incidents, recent fixes) so a
+// supervisor can answer "why is this machine behaving differently?" without
+// leaving the operational view.
+const STATE_WORD={moving:'Moving',idle:'Idle',stopped:'Stopped',offline:'Offline (data feed down)',unknown:'Unknown'};
+async function renderMachineDetail(id){
+  const el=document.getElementById('machine-detail'); if(!el) return;
+  const a=ASSETS.find(x=>x.id===id);
+  if(!a){ el.innerHTML='<p class="note">Select a machine on the map or in the fleet table to inspect it.</p>'; return; }
+  const alarms=(RAW.events||[]).filter(e=>e.asset_id===id && e.state!=='resolved');
+  const basis=a.state_basis?` (${a.state_basis})`:'';
+  const feed = a.offline ? `<span class="tag t-warn">data feed down${a.data_age_s?` · ${Math.round(a.data_age_s/60)} min`:''}</span>`
+                         : `<span class="tag t-ok">reporting</span>`;
+  // Synchronous section from the snapshot; async sections fill in after fetches.
+  el.innerHTML = `
+    <div class="md-head">
+      <div><span class="md-id">${E(a.id)}</span>
+        <span class="sub2">${E(a.t)} · ${E(a.cls)}</span></div>
+      <div class="md-state"><span class="tag ${a.offline?'t-warn':a.sev==='crit'?'t-crit':'t-mut'}">${E(STATE_WORD[a.state]||a.st)}</span>${feed}</div>
+    </div>
+    <div class="kv">
+      <div>Current zone</div><div>${E(a.zone_full||a.zone||'—')}</div>
+      <div>Last telemetry</div><div>${E(a.age||'—')} ago</div>
+      <div>Speed</div><div>${Math.round(a.sp)} km/h</div>
+      <div>Ignition</div><div>${a.ignition===true?'on':a.ignition===false?'off':'—'}</div>
+      <div>Position</div><div>${a.lat!=null?a.lat.toFixed(5):'—'}, ${a.lon!=null?a.lon.toFixed(5):'—'}</div>
+      <div>State basis</div><div>${a.state_basis||'—'}${basis?'':''}</div>
+    </div>
+    <div class="md-grid">
+      <div><h3>Active alarms &amp; incidents</h3><div id="md-alarms">${
+        alarms.length ? alarms.map(e=>`<div class="md-line"><span class="tag ${e.severity==='critical'?'t-crit':'t-warn'}">${e.severity}</span> ${E(e.summary)}</div>`).join('')
+                      : '<p class="note">None affecting this machine.</p>'}<div id="md-incidents"></div></div></div>
+      <div><h3>Recent cycles</h3><div id="md-cycles"><p class="note">Loading…</p></div></div>
+      <div><h3>Telemetry &amp; data quality</h3><div id="md-dq"><p class="note">Loading…</p></div></div>
+    </div>`;
+
+  // Recent cycles (with queue contribution).
+  try{
+    const cyc=await (await fetch(`/sites/${SITE}/assets/${encodeURIComponent(id)}/cycles?limit=5`)).json();
+    const box=document.getElementById('md-cycles'); if(box){
+      box.innerHTML = (cyc&&cyc.length) ? cyc.slice().reverse().map(c=>
+        `<div class="md-line"><span class="m">${fmtMin(c.cycle_time_s)}</span> cycle · <span class="m">${Math.round(c.queue_pct||0)}%</span> queue</div>`).join('')
+        : '<p class="note">No completed cycles for this machine yet.</p>';
+    }
+  }catch(e){ const b=document.getElementById('md-cycles'); if(b) b.innerHTML='<p class="note">Cycle history unavailable.</p>'; }
+
+  // Active incidents referencing this machine.
+  try{
+    const inc=await (await fetch(`/sites/${SITE}/incidents`)).json();
+    const mine=(inc||[]).filter(i=>i.asset_id===id && !['resolved','closed'].includes(i.state));
+    const box=document.getElementById('md-incidents');
+    if(box && mine.length) box.innerHTML = mine.map(i=>`<div class="md-line"><span class="tag t-warn">${E(i.state)}</span> ${E(i.summary)}</div>`).join('');
+  }catch(e){}
+
+  // Per-machine data-quality + recent fix count (a data problem, not downtime).
+  try{
+    const [dq, pos] = await Promise.all([
+      fetch(`/sites/${SITE}/data-quality`).then(r=>r.json()).catch(()=>null),
+      fetch(`/sites/${SITE}/positions?asset_id=${encodeURIComponent(id)}&limit=100`).then(r=>r.json()).catch(()=>[]),
+    ]);
+    const stale = dq && (dq.stale_feed_assets||[]).includes(id);
+    const box=document.getElementById('md-dq');
+    if(box) box.innerHTML =
+      `<div class="md-line">${stale?'<span class="tag t-warn">stale feed</span>':'<span class="tag t-ok">feed healthy</span>'}</div>`
+      +`<div class="md-line sub2">${(pos&&pos.length)||0} recent fix(es) stored · <b>${E((dq&&dq.confidence)||'unknown')}</b> site confidence</div>`;
+  }catch(e){ const b=document.getElementById('md-dq'); if(b) b.innerHTML='<p class="note">Data-quality unavailable.</p>'; }
 }
 
 /* ───────────────────────── small charts ───────────────────────── */
@@ -597,8 +712,14 @@ function applyState(snap, haveZones){
     const st = offline ? 'Offline'
              : inZone?TYPEMAP[inZone.kind]:(sp<1.5?(a.ignition?'Idle':'Parked'):'Moving');
     return {id:a.asset_id, t:ICONMAP[a.asset_class]||'truck', x, y, sp, sev:sevByAsset[a.asset_id]||'ok',
-            st, offline, zone: inZone?shortCode(inZone.zone_id):'—', age: ageStr(snap.now, a.ts)};
+            st, offline, zone: inZone?shortCode(inZone.zone_id):'—', age: ageStr(snap.now, a.ts),
+            // Raw fields for filtering + machine drill-down (server-derived).
+            cls:a.asset_class||'unknown', state:a.state||'unknown', lat:a.lat, lon:a.lon,
+            ts:a.ts, ignition:a.ignition, data_age_s:a.data_age_s,
+            zone_full: inZone ? inZone.name : null,
+            state_basis: a.state_basis||null};
   });
+  if(SELECTED) renderMachineDetail(SELECTED);
 
   // alarms (dashboard shape)
   ALARMS = RAW.events.map(e=>({t:fmtTime(e.ts), a:e.asset_id, ty:humanType(e.type), d:e.summary,
@@ -882,7 +1003,16 @@ async function boot(){
     +'.cmp-lab{font-family:var(--cond);font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--mut)}'
     +'.cmp-val{font-family:var(--mono);font-size:20px;font-variant-numeric:tabular-nums;color:var(--ink)}'
     +'.cmp-d{font:600 12px Barlow,sans-serif}'
-    +'.cmp-up{color:var(--ok)}.cmp-down{color:var(--crit)}.cmp-flat{color:var(--dim)}';
+    +'.cmp-up{color:var(--ok)}.cmp-down{color:var(--crit)}.cmp-flat{color:var(--dim)}'
+    // fleet filters + machine detail
+    +'.flt{font-family:var(--cond);font-size:11.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);display:flex;gap:6px;align-items:center}'
+    +'.flt select{font-family:var(--sans);font-size:13px;text-transform:none;letter-spacing:0;padding:4px 8px;border:1px solid var(--line);border-radius:3px;background:var(--panel);color:var(--ink)}'
+    +'.md-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:8px}'
+    +'.md-id{font-family:var(--mono);font-size:20px;font-weight:500;color:var(--ink);margin-right:8px}'
+    +'.md-state{display:flex;gap:6px;flex-wrap:wrap}'
+    +'.md-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:12px}'
+    +'.md-grid h3{font-family:var(--cond);font-size:11.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);margin:0 0 6px}'
+    +'.md-line{font-size:12.5px;color:var(--ink2);padding:3px 0}';
   document.head.appendChild(st);
   await applyCapabilities();
   try{ await loadState(); }catch(e){ paint(); }

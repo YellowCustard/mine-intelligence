@@ -362,6 +362,14 @@ priority, not by API surface:
   `/me/capabilities`. The synthetic Vision/Exploration/payload/fuel demo panels
   (out-of-scope for Phase 1) have been retired.
 
-Later increments extend the centre with machine drill-down, an analytics view
+The **Fleet** view adds **filters** (by machine type and operational state,
+applied to both map and table) and a **machine drill-down**: selecting a machine
+opens a detail panel — identity, current state (with observed/inferred basis),
+last telemetry, current zone, recent cycles with queue contribution, active
+alarms and incidents affecting it, and per-machine tracker/data-quality status —
+so "why is this machine behaving differently?" is answerable without leaving the
+operational view.
+
+Later increments extend the centre with an analytics view
 (trends/bottlenecks/downtime), handover and reports centres, historical playback,
 and a system/admin view.

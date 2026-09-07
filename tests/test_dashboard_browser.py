@@ -186,6 +186,18 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
         expect(page.locator("#ftab")).to_contain_text("HT-102", timeout=10_000)
         expect(page.locator("#atab")).to_contain_text("magazine", timeout=10_000)
 
+        # Machine drill-down: selecting the asset opens its detail without leaving
+        # the operational view (identity + investigation sections render).
+        page.locator("#ftab tr").first.click()
+        expect(page.locator("#machine-detail")).to_contain_text("HT-102", timeout=10_000)
+        expect(page.locator("#machine-detail")).to_contain_text("Recent cycles", timeout=10_000)
+
+        # Map/table filters: filtering to offline hides the moving asset.
+        page.select_option("#flt-state", "offline")
+        expect(page.locator("#ftab")).to_contain_text("No machines match", timeout=10_000)
+        page.select_option("#flt-state", "all")
+        expect(page.locator("#ftab")).to_contain_text("HT-102", timeout=10_000)
+
         # Acknowledge the alarm in the UI; the button then clears on the next poll.
         page.locator("#atab .ackbtn").first.click()
         page.wait_for_function(
