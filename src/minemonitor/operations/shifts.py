@@ -80,6 +80,27 @@ def _window(
     )
 
 
+def resolve_shift_by_id(session: Session, site_id: str, shift_id: str) -> ShiftWindow | None:
+    """Rebuild the window for a stable ``shift_id`` (``<site>:<date>:<name>``).
+
+    Returns None if the id is malformed, names another site, or its date/name do
+    not match a current definition — so a report or handover can only target a
+    shift that actually exists for this site.
+    """
+    try:
+        sid, date_str, name = shift_id.rsplit(":", 2)
+        base_day = date.fromisoformat(date_str)
+    except ValueError:
+        return None
+    if sid != site_id:
+        return None
+    tz = _site_tz(session, site_id)
+    for def_name, start_hour, duration_h in definitions(session, site_id):
+        if def_name == name:
+            return _window(site_id, name, start_hour, duration_h, base_day, tz)
+    return None
+
+
 def resolve_shift(session: Session, site_id: str, at: datetime) -> ShiftWindow | None:
     """The shift instance containing ``at``, or None if it falls outside all shifts.
 

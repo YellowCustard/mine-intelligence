@@ -297,6 +297,20 @@ install; it up/down round-trips on Postgres 16.
   strip that collapses to "All clear" when there is nothing to action.
 
 These endpoints are pure reads over existing data (no new migration).
+- **Shift handover** — the outgoing crew records a handover that snapshots the
+  shift scorecard plus free-text notes; the incoming crew acknowledges it with
+  their own notes (`open` → `acknowledged`). It is an operational record stored
+  apart from telemetry — the snapshot is frozen, while the live scorecard stays
+  recomputable. Migration **0010** adds the `shift_handovers` table (additive):
+  `GET/POST /sites/{id}/handovers`, `POST …/{id}/acknowledge` (supervisor write,
+  viewer read, audited).
+- **Automated reports** — a shift report composes the scorecard, incidents raised,
+  delays classified and any handover, and renders three ways: JSON, CSV
+  (spreadsheet), and a self-contained **printable HTML** page (print to PDF from
+  any browser — no server-side PDF dependency). A daily report rolls the day's
+  shifts together. Every figure keeps its observed/derived label so an inferred
+  value is never shown as measured: `GET /sites/{id}/reports/shift[.csv|.html]`,
+  `GET /sites/{id}/reports/daily?date=…` (viewer). All pure reads.
 
-Next: shift handover + automated reports, then trends/bottlenecks +
-data-quality/system-health.
+Next: trends/benchmarks + bottleneck observations, then data-quality +
+system-health, operational config surfaces and role-scoped views.
