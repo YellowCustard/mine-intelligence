@@ -198,6 +198,19 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
         page.select_option("#flt-state", "all")
         expect(page.locator("#ftab")).to_contain_text("HT-102", timeout=10_000)
 
+        # Analytics view: the trend, bottleneck and downtime panels render (here
+        # with first-class empty states, since the smoke seed has no cycles).
+        page.locator("#n-analytics").click()
+        expect(page.locator("#an-trend")).to_contain_text("No completed cycles", timeout=10_000)
+        expect(page.locator("#an-bottlenecks")).to_contain_text(
+            "No bottleneck observations", timeout=10_000
+        )
+        expect(page.locator("#an-downtime")).to_contain_text("No downtime", timeout=10_000)
+
+        # Back to Fleet to acknowledge the alarm.
+        page.locator("#n-site").click()
+        expect(page.locator("#atab")).to_contain_text("magazine", timeout=10_000)
+
         # Acknowledge the alarm in the UI; the button then clears on the next poll.
         page.locator("#atab .ackbtn").first.click()
         page.wait_for_function(

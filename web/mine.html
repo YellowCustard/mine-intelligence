@@ -140,6 +140,7 @@ svg{display:block;width:100%;height:auto}
 <nav><div class="in">
   <button role="tab" id="n-ops" aria-selected="true" onclick="go('ops')">Operations</button>
   <button role="tab" id="n-site" aria-selected="false" onclick="go('site')">Fleet</button>
+  <button role="tab" id="n-analytics" aria-selected="false" onclick="go('analytics')">Analytics</button>
 </div></nav>
 
 <div class="wrap">
@@ -279,6 +280,24 @@ svg{display:block;width:100%;height:auto}
       <th style="width:120px">Type</th><th>Detail</th><th style="width:88px">Severity</th>
       <th style="width:100px">Source</th><th style="width:96px">Action</th></tr></thead><tbody id="atab"></tbody></table></div>
   </section>
+</div>
+
+<!-- ══════════════════ ANALYTICS ══════════════════ -->
+<div id="analytics" class="wrap hide" style="padding:0;gap:13px">
+  <section class="panel">
+    <header><h2>Shift trend</h2><span class="meta" id="an-trend-meta">last shifts · observed</span></header>
+    <div class="body" id="an-trend"><p class="note">Loading…</p></div>
+  </section>
+  <div class="g2b">
+    <section class="panel">
+      <header><h2>Bottleneck intelligence</h2><span class="meta">observations, not causes</span></header>
+      <div class="body" id="an-bottlenecks"><p class="note">Loading…</p></div>
+    </section>
+    <section class="panel">
+      <header><h2>Downtime by cause</h2><span class="meta">this shift · classified</span></header>
+      <div class="body" id="an-downtime"><p class="note">Loading…</p></div>
+    </section>
+  </div>
 </div>
 
 </div>
@@ -624,7 +643,7 @@ function cycleBar(){
 /* ───────────────────────── views ───────────────────────── */
 // Views the command centre navigates between. Role visibility is applied in
 // applyCapabilities; VIEWS is the full set of built views in nav order.
-const VIEWS = ['ops', 'site'];
+const VIEWS = ['ops', 'site', 'analytics'];
 function go(v){
   if(!VIEWS.includes(v)) v = VIEWS[0];
   VIEWS.forEach(k=>{
@@ -633,6 +652,7 @@ function go(v){
     if(tab) tab.setAttribute('aria-selected', String(k===v));
   });
   paint();
+  if(v==='analytics') loadAnalytics();
 }
 function paint(){
   drawMap('map'); renderTables(); cycleBar();
@@ -937,6 +957,85 @@ async function loadCommandCentre(){
   setHealthChip(sh);
 }
 
+// ── Analytics view ───────────────────────────────────────────────────────
+// Trends, bottleneck intelligence and downtime-by-cause — all observed/derived
+// from existing endpoints. Comparisons over decoration; causal claims are never
+// presented as established.
+function sparkline(vals, col){
+  const pts=vals.filter(v=>v!=null);
+  if(pts.length<2) return '<span class="sub2">not enough shifts</span>';
+  const W=160,H=30,lo=Math.min(...pts),hi=Math.max(...pts),rng=(hi-lo)||1;
+  const x=i=>i*(W/(vals.length-1)), y=v=>H-2-((v-lo)/rng)*(H-6);
+  let d='',started=false;
+  vals.forEach((v,i)=>{ if(v==null) return; d+=`${started?'L':'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`; started=true; });
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block">`
+    +`<path d="${d}" fill="none" stroke="${T(col)}" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
+}
+function renderTrend(tr){
+  const el=document.getElementById('an-trend'); if(!el) return;
+  const series=(tr&&tr.series)||[];
+  const withData=series.filter(p=>p.cycles>0);
+  if(!withData.length){
+    el.innerHTML='<p class="note">No completed cycles in the recent shifts yet — the trend appears once shifts produce data.</p>';
+    return;
+  }
+  // Oldest-left for the eye; series arrives newest-first.
+  const ordered=series.slice().reverse();
+  const q=ordered.map(p=>p.queue_pct), c=ordered.map(p=>p.mean_cycle_time_s==null?null:p.mean_cycle_time_s/60),
+        u=ordered.map(p=>p.utilisation_pct), d=ordered.map(p=>p.classified_delay_s/60);
+  const spark=(label,vals,unit,col)=>`<div class="an-metric"><span class="an-lab">${label}</span>`
+    +`${sparkline(vals,col)}`
+    +`<span class="an-now">${vals[vals.length-1]==null?'—':vals[vals.length-1].toFixed(unit==='%'?1:0)+unit}</span></div>`;
+  el.innerHTML =
+    spark('Queue %', q, '%', '--acc')
+   + spark('Mean cycle', c, ' min', '--ink2')
+   + spark('Utilisation', u, '%', '--ok')
+   + spark('Downtime', d, ' min', '--warn')
+   + `<p class="sub2" style="margin-top:8px">${ordered.length} shifts · oldest left → newest right · observed values only, no projection.</p>`;
+}
+function renderBottleneckCards(bn){
+  const el=document.getElementById('an-bottlenecks'); if(!el) return;
+  const obs=(bn&&bn.observations)||[];
+  if(!obs.length){ el.innerHTML='<p class="note">No bottleneck observations this shift.</p>'; return; }
+  el.innerHTML = obs.map(o=>{
+    const ev=o.evidence||{};
+    const evtxt=Object.entries(ev).map(([k,v])=>`${k.replace(/_/g,' ')}: ${typeof v==='number'?(+v).toFixed(1):E(String(v))}`).join(' · ');
+    const asset=ev.asset_id;
+    const action = asset
+      ? `<button class="ackbtn" onclick="go('site');selectAsset('${E(asset)}')">Investigate ${E(asset)}</button>`
+      : `<button class="ackbtn" onclick="go('site')">Open Fleet view</button>`;
+    return `<div class="bn-card">
+      <div class="bn-what">${E(o.summary)}</div>
+      <div class="bn-row"><b>Evidence</b> <span class="sub2">${evtxt||'—'}</span></div>
+      <div class="bn-row"><b>Confidence</b> <span class="tag t-mut">${E(o.kind||'observation')}</span></div>
+      <div class="bn-row"><b>Causality</b> <span class="sub2">not established — correlation only</span></div>
+      <div class="bn-row">${action}</div>
+    </div>`;
+  }).join('') + `<p class="sub2" style="margin-top:6px">${E((bn&&bn.note)||'')}</p>`;
+}
+function renderDowntime(sc){
+  const el=document.getElementById('an-downtime'); if(!el) return;
+  const by=(sc&&sc.delays&&sc.delays.by_category)||{};
+  const rows=Object.entries(by).sort((a,b)=>b[1]-a[1]);
+  if(!rows.length){ el.innerHTML='<p class="note">No downtime classified this shift.</p>'; return; }
+  const max=Math.max(...rows.map(r=>r[1]))||1;
+  el.innerHTML = rows.map(([cat,secs])=>{
+    const w=Math.round(100*secs/max);
+    return `<div class="dt-row"><span class="dt-cat">${E(cat.replace(/_/g,' '))}</span>`
+      +`<div class="bar" style="flex:1"><b style="width:${w}%"></b></div>`
+      +`<span class="m">${(secs/60).toFixed(0)} min</span></div>`;
+  }).join('');
+}
+async function loadAnalytics(){
+  const getj=async p=>{ try{ const r=await fetch(p); return r.ok?await r.json():null; }catch(e){ return null; } };
+  const [tr, bn, sc] = await Promise.all([
+    getj(`/sites/${SITE}/trends?shifts=8`),
+    getj(`/sites/${SITE}/bottlenecks`),
+    getj(`/sites/${SITE}/scorecard`),
+  ]);
+  renderTrend(tr); renderBottleneckCards(bn); renderDowntime(sc);
+}
+
 // Role-specific experience: nav visibility from /me/capabilities. The API still
 // enforces every permission; this only shapes what a role is shown by default.
 async function applyCapabilities(){
@@ -1012,7 +1111,17 @@ async function boot(){
     +'.md-state{display:flex;gap:6px;flex-wrap:wrap}'
     +'.md-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:12px}'
     +'.md-grid h3{font-family:var(--cond);font-size:11.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);margin:0 0 6px}'
-    +'.md-line{font-size:12.5px;color:var(--ink2);padding:3px 0}';
+    +'.md-line{font-size:12.5px;color:var(--ink2);padding:3px 0}'
+    // analytics
+    +'.an-metric{display:grid;grid-template-columns:120px 160px 1fr;gap:12px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line2)}'
+    +'.an-metric:last-of-type{border-bottom:0}'
+    +'.an-lab{font-family:var(--cond);font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)}'
+    +'.an-now{font-family:var(--mono);font-size:15px;color:var(--ink);text-align:right}'
+    +'.bn-card{border:1px solid var(--line);border-radius:4px;padding:10px 12px;margin-bottom:9px}'
+    +'.bn-what{font-weight:600;color:var(--ink);margin-bottom:6px}'
+    +'.bn-row{font-size:12.5px;color:var(--ink2);padding:2px 0}.bn-row b{font-family:var(--cond);letter-spacing:.06em;text-transform:uppercase;font-size:11px;color:var(--mut);margin-right:6px}'
+    +'.dt-row{display:flex;align-items:center;gap:10px;padding:6px 0}'
+    +'.dt-cat{font-size:12.5px;color:var(--ink2);width:130px;text-transform:capitalize}';
   document.head.appendChild(st);
   await applyCapabilities();
   try{ await loadState(); }catch(e){ paint(); }

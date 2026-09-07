@@ -370,6 +370,12 @@ alarms and incidents affecting it, and per-machine tracker/data-quality status �
 so "why is this machine behaving differently?" is answerable without leaving the
 operational view.
 
-Later increments extend the centre with an analytics view
-(trends/bottlenecks/downtime), handover and reports centres, historical playback,
-and a system/admin view.
+The **Analytics** view turns the trend, bottleneck and downtime endpoints into a
+manager surface: per-shift **trend sparklines** (queue %, mean cycle, utilisation,
+downtime — observed values only, no projection), **bottleneck intelligence** cards
+stating WHAT / EVIDENCE / CONFIDENCE / CAUSALITY (*not established — correlation
+only*) / ACTION (a jump to the implicated machine), and a **downtime-by-cause**
+breakdown for the current shift. Each panel has a first-class empty state.
+
+Later increments extend the centre with handover and reports centres, historical
+playback, and a system/admin view.
