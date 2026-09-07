@@ -207,6 +207,21 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
         )
         expect(page.locator("#an-downtime")).to_contain_text("No downtime", timeout=10_000)
 
+        # Handover: an admin (supervisor+) sees the record form and can submit; the
+        # new handover then appears in the list.
+        page.locator("#n-handover").click()
+        expect(page.locator("#ho-create")).to_contain_text("Record handover", timeout=10_000)
+        page.locator("#ho-notes").fill("day crew: loader B intermittent")
+        page.locator("#ho-create button").click()
+        expect(page.locator("#ho-list")).to_contain_text("loader B intermittent", timeout=10_000)
+
+        # Reports centre: the current shift report links render (open in new tab).
+        page.locator("#n-reports").click()
+        expect(page.locator("#rp-shift")).to_contain_text("Current shift", timeout=10_000)
+        expect(page.locator("#rp-shift a", has_text="View").first).to_have_attribute(
+            "href", re.compile(r"/reports/shift\.html")
+        )
+
         # Back to Fleet to acknowledge the alarm.
         page.locator("#n-site").click()
         expect(page.locator("#atab")).to_contain_text("magazine", timeout=10_000)

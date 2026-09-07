@@ -377,5 +377,14 @@ stating WHAT / EVIDENCE / CONFIDENCE / CAUSALITY (*not established — correlati
 only*) / ACTION (a jump to the implicated machine), and a **downtime-by-cause**
 breakdown for the current shift. Each panel has a first-class empty state.
 
-Later increments extend the centre with handover and reports centres, historical
-playback, and a system/admin view.
+The **Handover** view runs the end-of-shift handover in-place: a supervisor
+records a handover (snapshotting the shift scorecard) with outgoing notes, and the
+incoming crew acknowledges it with their own — capability-gated via
+`/me/capabilities` (viewers read only), with the full handover list shown either
+way. The **Reports** view is a discoverable reports centre: current/previous shift
+reports opened as printable HTML or downloaded as CSV, a daily roll-up loaded by
+date, and a historical shift report fetched by shift id — all reusing the existing
+report endpoints (no separate reporting system).
+
+Later increments extend the centre with historical playback and a system/admin
+view, plus responsive/perf hardening.

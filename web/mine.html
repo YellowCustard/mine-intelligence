@@ -141,6 +141,8 @@ svg{display:block;width:100%;height:auto}
   <button role="tab" id="n-ops" aria-selected="true" onclick="go('ops')">Operations</button>
   <button role="tab" id="n-site" aria-selected="false" onclick="go('site')">Fleet</button>
   <button role="tab" id="n-analytics" aria-selected="false" onclick="go('analytics')">Analytics</button>
+  <button role="tab" id="n-handover" aria-selected="false" onclick="go('handover')">Handover</button>
+  <button role="tab" id="n-reports" aria-selected="false" onclick="go('reports')">Reports</button>
 </div></nav>
 
 <div class="wrap">
@@ -298,6 +300,51 @@ svg{display:block;width:100%;height:auto}
       <div class="body" id="an-downtime"><p class="note">Loading…</p></div>
     </section>
   </div>
+</div>
+
+<!-- ══════════════════ HANDOVER ══════════════════ -->
+<div id="handover" class="wrap hide" style="padding:0;gap:13px">
+  <div class="g2b">
+    <section class="panel">
+      <header><h2>Record handover</h2><span class="meta" id="ho-shift">current shift</span></header>
+      <div class="body" id="ho-create"><p class="note">Loading…</p></div>
+    </section>
+    <section class="panel">
+      <header><h2>Shift handovers</h2><span class="meta">outgoing → incoming</span></header>
+      <div class="body" id="ho-list"><p class="note">Loading…</p></div>
+    </section>
+  </div>
+</div>
+
+<!-- ══════════════════ REPORTS ══════════════════ -->
+<div id="reports" class="wrap hide" style="padding:0;gap:13px">
+  <div class="g2b">
+    <section class="panel">
+      <header><h2>Shift reports</h2><span class="meta">browser · CSV · printable</span></header>
+      <div class="body" id="rp-shift"><p class="note">Loading…</p></div>
+    </section>
+    <section class="panel">
+      <header><h2>Daily report</h2><span class="meta">a day's shifts, rolled up</span></header>
+      <div class="body">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <label class="flt">Date <input type="date" id="rp-date"></label>
+          <button class="ackbtn" onclick="loadDaily()">Load</button>
+        </div>
+        <div id="rp-daily"><p class="note">Pick a date and load the daily roll-up.</p></div>
+      </div>
+    </section>
+  </div>
+  <section class="panel">
+    <header><h2>Historical shift report</h2><span class="meta">by shift id · site:date:name</span></header>
+    <div class="body">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <label class="flt" style="flex:1">Shift id
+          <input type="text" id="rp-hist" placeholder="kn-zw-01:2026-09-05:day" style="flex:1;min-width:220px;font-family:var(--mono);font-size:12.5px;padding:5px 8px;border:1px solid var(--line);border-radius:3px"></label>
+        <a class="ackbtn" id="rp-hist-view" target="_blank" rel="noopener" href="#" onclick="return openHist(this,'html')">View</a>
+        <a class="ackbtn" id="rp-hist-csv" target="_blank" rel="noopener" href="#" onclick="return openHist(this,'csv')">CSV</a>
+      </div>
+    </div>
+  </section>
 </div>
 
 </div>
@@ -643,7 +690,8 @@ function cycleBar(){
 /* ───────────────────────── views ───────────────────────── */
 // Views the command centre navigates between. Role visibility is applied in
 // applyCapabilities; VIEWS is the full set of built views in nav order.
-const VIEWS = ['ops', 'site', 'analytics'];
+const VIEWS = ['ops', 'site', 'analytics', 'handover', 'reports'];
+let CAPS = {role:'viewer', can:{}};
 function go(v){
   if(!VIEWS.includes(v)) v = VIEWS[0];
   VIEWS.forEach(k=>{
@@ -653,6 +701,8 @@ function go(v){
   });
   paint();
   if(v==='analytics') loadAnalytics();
+  if(v==='handover') loadHandover();
+  if(v==='reports') loadReports();
 }
 function paint(){
   drawMap('map'); renderTables(); cycleBar();
@@ -1041,11 +1091,115 @@ async function loadAnalytics(){
 async function applyCapabilities(){
   let caps=null;
   try{ const r=await fetch('/me/capabilities'); if(r.ok) caps=await r.json(); }catch(e){}
-  const role=(caps&&caps.role)||'viewer';
-  const clockRole=document.getElementById('hdr-role'); if(clockRole) clockRole.textContent=role;
-  // Increment 1 exposes Operations + Fleet to every role; later increments add
-  // Incidents / Analytics / Handover / Reports / System with capability gating.
-  return role;
+  CAPS = {role:(caps&&caps.role)||'viewer', can:(caps&&caps.can)||{}};
+  return CAPS.role;
+}
+
+// ── Handover workflow ────────────────────────────────────────────────────
+async function loadHandover(){
+  const getj=async p=>{ try{ const r=await fetch(p); return r.ok?await r.json():null; }catch(e){ return null; } };
+  const [cur, list] = await Promise.all([
+    getj(`/sites/${SITE}/shifts/current`),
+    getj(`/sites/${SITE}/handovers`),
+  ]);
+  const shift=cur&&cur.shift;
+  const meta=document.getElementById('ho-shift');
+  if(meta) meta.textContent = shift ? `${(shift.name||'').toUpperCase()} · ${shift.operating_date||''}` : 'no active shift';
+  renderHandoverCreate(shift);
+  renderHandoverList(list||[]);
+}
+function renderHandoverCreate(shift){
+  const el=document.getElementById('ho-create'); if(!el) return;
+  if(!CAPS.can.write_handovers){
+    el.innerHTML='<p class="note">Recording a handover requires a supervisor role. You can review handovers in the list.</p>';
+    return;
+  }
+  if(!shift){ el.innerHTML='<p class="note">No active shift to hand over right now.</p>'; return; }
+  el.innerHTML = `
+    <p class="note">Records a handover for <b>${E(shift.name)}</b> (${E(shift.operating_date)}), snapshotting the shift scorecard.</p>
+    <textarea id="ho-notes" rows="4" placeholder="Outgoing notes — what the incoming crew must know…"
+      style="width:100%;font-family:var(--sans);font-size:13px;padding:8px;border:1px solid var(--line);border-radius:3px;margin:8px 0"></textarea>
+    <button class="ackbtn" onclick="submitHandover('${E(shift.shift_id)}')">Record handover</button>
+    <span class="sub2" id="ho-msg" style="margin-left:8px"></span>`;
+}
+async function submitHandover(shiftId){
+  const notes=(document.getElementById('ho-notes')||{}).value||'';
+  const msg=document.getElementById('ho-msg'); if(msg) msg.textContent='Saving…';
+  try{
+    const r=await fetch(`/sites/${SITE}/handovers`,{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({shift_id:shiftId, outgoing_notes:notes})});
+    if(msg) msg.textContent = r.ok ? 'Recorded.' : 'Failed.';
+  }catch(e){ if(msg) msg.textContent='Failed.'; }
+  loadHandover();
+}
+function renderHandoverList(list){
+  const el=document.getElementById('ho-list'); if(!el) return;
+  if(!list.length){ el.innerHTML='<p class="note">No handovers recorded yet.</p>'; return; }
+  const canAck=CAPS.can.write_handovers;
+  el.innerHTML = list.map(h=>{
+    const sc=h.summary&&h.summary.cycles ? `queue ${h.summary.cycles.queue_pct==null?'—':Math.round(h.summary.cycles.queue_pct)+'%'} · ${h.summary.cycles.count} cycles` : '';
+    const ack = h.state==='acknowledged'
+      ? `<span class="tag t-ok">acknowledged</span> <span class="sub2">by ${E(h.incoming_by||'')}</span>`
+      : (canAck ? `<button class="ackbtn" onclick="ackHandover('${E(h.id)}')">Acknowledge incoming</button>`
+                : `<span class="tag t-warn">open</span>`);
+    return `<div class="bn-card">
+      <div class="bn-row"><b>${E(h.shift_id)}</b> <span class="sub2">${sc}</span></div>
+      <div class="bn-row sub2">out: ${E(h.outgoing_by||'')}${h.outgoing_notes?` — ${E(h.outgoing_notes)}`:''}</div>
+      ${h.incoming_notes?`<div class="bn-row sub2">in: ${E(h.incoming_notes)}</div>`:''}
+      <div class="bn-row">${ack}</div>
+    </div>`;
+  }).join('');
+}
+async function ackHandover(id){
+  try{ await fetch(`/sites/${SITE}/handovers/${id}/acknowledge`,{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({incoming_notes:'acknowledged from command centre'})}); }
+  catch(e){}
+  loadHandover();
+}
+
+// ── Reports centre ───────────────────────────────────────────────────────
+function reportLink(kind, params){
+  const q=new URLSearchParams(params).toString();
+  return `/sites/${SITE}/reports/${kind}${q?`?${q}`:''}`;
+}
+async function loadReports(){
+  const el=document.getElementById('rp-shift'); if(!el) return;
+  let sc=null; try{ const r=await fetch(`/sites/${SITE}/scorecard`); if(r.ok) sc=await r.json(); }catch(e){}
+  const cur = sc&&sc.shift ? sc.shift.shift_id : null;
+  const prev = sc&&sc.comparison ? sc.comparison.previous_shift_id : null;
+  const rowFor=(label, shiftId)=> shiftId ? `
+    <div class="rp-row"><span class="rp-lab">${label}</span>
+      <a class="ackbtn" target="_blank" rel="noopener" href="${reportLink('shift.html',{shift_id:shiftId})}">View</a>
+      <a class="ackbtn" target="_blank" rel="noopener" href="${reportLink('shift.csv',{shift_id:shiftId})}">CSV</a>
+      <span class="sub2 m">${E(shiftId)}</span></div>` : '';
+  const rows = (cur?rowFor('Current shift', cur):'<p class="note">No active shift to report on.</p>')
+             + (prev?rowFor('Previous shift', prev):'');
+  el.innerHTML = rows + '<p class="sub2" style="margin-top:8px">Reports open in a new tab. Printable HTML prints to PDF from any browser.</p>';
+  // Default the daily date input to today (site-local is approximated by the browser).
+  const d=document.getElementById('rp-date'); if(d && !d.value) d.value=new Date().toISOString().slice(0,10);
+}
+async function loadDaily(){
+  const el=document.getElementById('rp-daily'); const date=(document.getElementById('rp-date')||{}).value;
+  if(!el) return;
+  if(!date){ el.innerHTML='<p class="note">Pick a date first.</p>'; return; }
+  el.innerHTML='<p class="note">Loading…</p>';
+  try{
+    const r=await fetch(reportLink('daily',{date}));
+    if(!r.ok){ el.innerHTML=`<p class="note">No shifts for ${E(date)}.</p>`; return; }
+    const rep=await r.json(); const t=rep.totals||{};
+    el.innerHTML = `<div class="kv">
+      <div>Cycles</div><div>${t.cycles??0}</div>
+      <div>Incidents</div><div>${t.incidents??0}</div>
+      <div>Classified downtime</div><div>${t.classified_delay_s?Math.round(t.classified_delay_s/60)+' min':'0 min'}</div>
+      <div>Shifts</div><div>${(rep.shifts||[]).length}</div>
+    </div>`;
+  }catch(e){ el.innerHTML='<p class="note">Daily report unavailable.</p>'; }
+}
+function openHist(a, fmt){
+  const id=(document.getElementById('rp-hist')||{}).value||'';
+  if(!id){ return false; }
+  a.href = reportLink(fmt==='csv'?'shift.csv':'shift.html', {shift_id:id});
+  return true;  // allow the anchor to open the built URL in a new tab
 }
 
 async function ackAlarm(id){
@@ -1121,7 +1275,12 @@ async function boot(){
     +'.bn-what{font-weight:600;color:var(--ink);margin-bottom:6px}'
     +'.bn-row{font-size:12.5px;color:var(--ink2);padding:2px 0}.bn-row b{font-family:var(--cond);letter-spacing:.06em;text-transform:uppercase;font-size:11px;color:var(--mut);margin-right:6px}'
     +'.dt-row{display:flex;align-items:center;gap:10px;padding:6px 0}'
-    +'.dt-cat{font-size:12.5px;color:var(--ink2);width:130px;text-transform:capitalize}';
+    +'.dt-cat{font-size:12.5px;color:var(--ink2);width:130px;text-transform:capitalize}'
+    // reports
+    +'.rp-row{display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line2);flex-wrap:wrap}'
+    +'.rp-row:last-child{border-bottom:0}'
+    +'.rp-lab{font-family:var(--cond);font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--mut);min-width:120px}'
+    +'a.ackbtn{text-decoration:none;display:inline-block}';
   document.head.appendChild(st);
   await applyCapabilities();
   try{ await loadState(); }catch(e){ paint(); }
