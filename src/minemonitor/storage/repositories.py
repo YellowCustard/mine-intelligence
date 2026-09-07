@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -61,12 +63,24 @@ def list_positions(
     site_id: str,
     asset_id: str | None = None,
     limit: int = 100,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    order: str = "desc",
 ) -> list[Position]:
-    """Read positions for a site, newest first. Always scoped by ``site_id``."""
+    """Read positions for a site. Always scoped by ``site_id``.
+
+    ``since``/``until`` bound the device-time window (``since`` inclusive, ``until``
+    exclusive) for historical playback; ``order`` is ``"desc"`` (newest first, the
+    live default) or ``"asc"`` (oldest first, natural for replaying a track).
+    """
     stmt = select(Position).where(Position.site_id == site_id)
     if asset_id is not None:
         stmt = stmt.where(Position.asset_id == asset_id)
-    stmt = stmt.order_by(Position.ts.desc()).limit(limit)
+    if since is not None:
+        stmt = stmt.where(Position.ts >= since)
+    if until is not None:
+        stmt = stmt.where(Position.ts < until)
+    stmt = stmt.order_by(Position.ts.asc() if order == "asc" else Position.ts.desc()).limit(limit)
     return list(session.execute(stmt).scalars().all())
 
 

@@ -192,6 +192,10 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
         expect(page.locator("#machine-detail")).to_contain_text("HT-102", timeout=10_000)
         expect(page.locator("#machine-detail")).to_contain_text("Recent cycles", timeout=10_000)
 
+        # Historical investigation: replay this machine's stored track on the map.
+        page.locator("#machine-detail button", has_text="This shift").click()
+        expect(page.locator("#md-hist-msg")).to_contain_text("fix(es)", timeout=10_000)
+
         # Map/table filters: filtering to offline hides the moving asset.
         page.select_option("#flt-state", "offline")
         expect(page.locator("#ftab")).to_contain_text("No machines match", timeout=10_000)

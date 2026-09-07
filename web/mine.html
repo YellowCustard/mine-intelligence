@@ -524,17 +524,56 @@ function assetLayer(){
   return s;
 }
 
-const TRAIL = "M356,398 L392,452 L452,412 L470,336 L432,286 L494,258 L604,250 L702,272 L748,318 L800,352";
+// Historical track for one machine, drawn from stored telemetry (never synthetic).
+// HISTORY.points are already projected to map coordinates.
+let HISTORY = {assetId:null, points:[], from:null, to:null, count:0};
 function trailLayer(force){
-  if(!LAYERS.trails && !force) return '';
+  if((!LAYERS.trails && !force) || !HISTORY.points.length) return '';
   const ac=T('--acc');
-  let s=`<path d="${TRAIL}" fill="none" stroke="${T('--panel')}" stroke-width="7"
+  const d = HISTORY.points.map((p,i)=>`${i?'L':'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join('');
+  let s=`<path d="${d}" fill="none" stroke="${T('--panel')}" stroke-width="7"
           opacity="0.85" stroke-linecap="round" stroke-linejoin="round"/>`;
-  s+=`<path d="${TRAIL}" fill="none" stroke="${ac}" stroke-width="3.4" opacity="0.95"
+  s+=`<path d="${d}" fill="none" stroke="${ac}" stroke-width="3.4" opacity="0.95"
         stroke-linecap="round" stroke-linejoin="round"/>`;
-  [[356,398],[452,412],[494,258],[604,250],[748,318],[806,356]].forEach(([x,y])=>{
-    s+=`<circle cx="${x}" cy="${y}" r="3.4" fill="${T('--panel')}" stroke="${ac}" stroke-width="2"/>`;});
+  // Mark the start and end of the replayed track.
+  const ends=[HISTORY.points[0], HISTORY.points[HISTORY.points.length-1]];
+  ends.forEach(([x,y],i)=>{
+    s+=`<circle cx="${x}" cy="${y}" r="4.2" fill="${i?ac:T('--panel')}" stroke="${ac}" stroke-width="2"/>`;});
   return s;
+}
+async function loadHistory(assetId, since, until, label){
+  const q=new URLSearchParams({asset_id:assetId, order:'asc', limit:'1000'});
+  if(since) q.set('since', since); if(until) q.set('until', until);
+  let rows=[];
+  try{ const r=await fetch(`/sites/${SITE}/positions?${q}`); if(r.ok) rows=await r.json(); }catch(e){}
+  HISTORY.points = rows.map(p=>PROJECT(p.lat, p.lon).map(n=>+n.toFixed(1)));
+  HISTORY.assetId=assetId; HISTORY.count=rows.length;
+  HISTORY.from=rows.length?rows[0].ts:null; HISTORY.to=rows.length?rows[rows.length-1].ts:null;
+  // Turn the trails layer on so the track is visible immediately.
+  LAYERS.trails=true; const tb=document.getElementById('t-trails'); if(tb) tb.setAttribute('aria-pressed','true');
+  drawMap('map');
+  const msg=document.getElementById('md-hist-msg');
+  if(msg) msg.textContent = HISTORY.count
+    ? `${HISTORY.count} fix(es) · ${label||''} · ${fmtTime(HISTORY.from)}–${fmtTime(HISTORY.to)}`
+    : `No stored fixes for ${label||'that window'}.`;
+}
+function clearHistory(){
+  HISTORY={assetId:null, points:[], from:null, to:null, count:0};
+  drawMap('map'); const msg=document.getElementById('md-hist-msg'); if(msg) msg.textContent='';
+}
+async function historyThisShift(assetId){
+  let win=null;
+  try{ const r=await fetch(`/sites/${SITE}/shifts/current`); if(r.ok){ const j=await r.json(); win=j.shift; } }catch(e){}
+  if(win) loadHistory(assetId, win.start, win.end, 'this shift');
+  else loadHistory(assetId, null, null, 'recent');
+}
+function historyHoursAgo(assetId, hours){
+  const now=new Date(); const since=new Date(now.getTime()-hours*3600e3);
+  loadHistory(assetId, since.toISOString(), now.toISOString(), `last ${hours}h`);
+}
+function historyAroundEvent(assetId, tsIso){
+  const t=new Date(tsIso).getTime();
+  loadHistory(assetId, new Date(t-15*60e3).toISOString(), new Date(t+15*60e3).toISOString(), 'around event');
 }
 
 function drawMap(id, opts={}){
@@ -573,7 +612,10 @@ function renderTables(){
       <td class="sub2">${E(x.src)}</td><td>${action}</td></tr>`;}).join('')
     : `<tr><td colspan="7" class="sub2" style="text-align:center;padding:18px">No alarms — all clear.</td></tr>`;
 }
-function selectAsset(id){ SELECTED=id; drawMap('map'); renderTables(); renderMachineDetail(id); }
+function selectAsset(id){
+  if(id!==SELECTED) clearHistory();  // don't show one machine's track under another
+  SELECTED=id; drawMap('map'); renderTables(); renderMachineDetail(id);
+}
 function tog(k){
   LAYERS[k]=!LAYERS[k];
   document.getElementById('t-'+k).setAttribute('aria-pressed', String(LAYERS[k]));
@@ -613,9 +655,17 @@ async function renderMachineDetail(id){
       <div>Position</div><div>${a.lat!=null?a.lat.toFixed(5):'—'}, ${a.lon!=null?a.lon.toFixed(5):'—'}</div>
       <div>State basis</div><div>${a.state_basis||'—'}${basis?'':''}</div>
     </div>
+    <div class="md-hist">
+      <span class="an-lab">History on map</span>
+      <button class="ackbtn" onclick="historyThisShift('${E(a.id)}')">This shift</button>
+      <button class="ackbtn" onclick="historyHoursAgo('${E(a.id)}',1)">Last 1h</button>
+      <button class="ackbtn" onclick="historyHoursAgo('${E(a.id)}',3)">Last 3h</button>
+      <button class="ackbtn" onclick="clearHistory()">Clear</button>
+      <span class="sub2" id="md-hist-msg">${HISTORY.assetId===a.id?`${HISTORY.count} fix(es) shown`:'draws the stored track on the site plan'}</span>
+    </div>
     <div class="md-grid">
       <div><h3>Active alarms &amp; incidents</h3><div id="md-alarms">${
-        alarms.length ? alarms.map(e=>`<div class="md-line"><span class="tag ${e.severity==='critical'?'t-crit':'t-warn'}">${e.severity}</span> ${E(e.summary)}</div>`).join('')
+        alarms.length ? alarms.map(e=>`<div class="md-line"><span class="tag ${e.severity==='critical'?'t-crit':'t-warn'}">${e.severity}</span> ${E(e.summary)} <button class="ackbtn" style="padding:1px 6px;font-size:10px" onclick="historyAroundEvent('${E(a.id)}','${E(e.ts)}')">▷ history</button></div>`).join('')
                       : '<p class="note">None affecting this machine.</p>'}<div id="md-incidents"></div></div></div>
       <div><h3>Recent cycles</h3><div id="md-cycles"><p class="note">Loading…</p></div></div>
       <div><h3>Telemetry &amp; data quality</h3><div id="md-dq"><p class="note">Loading…</p></div></div>
@@ -1280,7 +1330,8 @@ async function boot(){
     +'.rp-row{display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line2);flex-wrap:wrap}'
     +'.rp-row:last-child{border-bottom:0}'
     +'.rp-lab{font-family:var(--cond);font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--mut);min-width:120px}'
-    +'a.ackbtn{text-decoration:none;display:inline-block}';
+    +'a.ackbtn{text-decoration:none;display:inline-block}'
+    +'.md-hist{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px solid var(--line2)}';
   document.head.appendChild(st);
   await applyCapabilities();
   try{ await loadState(); }catch(e){ paint(); }

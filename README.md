@@ -386,5 +386,13 @@ reports opened as printable HTML or downloaded as CSV, a daily roll-up loaded by
 date, and a historical shift report fetched by shift id — all reusing the existing
 report endpoints (no separate reporting system).
 
-Later increments extend the centre with historical playback and a system/admin
-view, plus responsive/perf hardening.
+**Historical investigation** is wired into the Fleet map: selecting a machine
+offers to replay its **stored track** for this shift, the last 1 h or 3 h, or a
+±15-minute window around a specific alarm — drawn from immutable telemetry
+(`GET /sites/{id}/positions` gains `since`/`until`/`order` for a bounded,
+oldest-first playback window; a pure read, no schema change). The synthetic map
+trail has been replaced by this real track. So "something looks wrong" → "show me
+what happened" is a click, not a screen change.
+
+The final increment adds a system/admin view (health drill-down, ingestion,
+config, users, audit, retention, data quality) plus responsive/perf hardening.
