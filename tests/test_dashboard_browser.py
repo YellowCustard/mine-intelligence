@@ -11,6 +11,7 @@ the UI moves it out of the open state.
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
 import time
@@ -166,13 +167,24 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
         page = context.new_page()
         page.goto(live_server + "/", wait_until="networkidle")
 
-        # Live data from the API renders: the seeded zone, fleet asset, and alarm.
+        # The Operations command centre is the default view: headline KPIs render,
+        # and the exception layer surfaces the open critical alarm.
+        expect(page.locator("#cc-kpis")).to_contain_text("Active equipment", timeout=10_000)
+        expect(page.locator("#exbar")).to_contain_text("critical", timeout=10_000)
+        # The operational-data-health chip is populated with a real verdict
+        # (healthy / degraded / unknown), not the initial placeholder.
+        expect(page.locator("#hdr-health")).to_contain_text(
+            re.compile("healthy|degraded|unknown"), timeout=10_000
+        )
+        # The queue KPI never presents degraded analytics silently: a data-confidence
+        # badge is always shown (High / Reduced / Low / Unknown).
+        expect(page.locator("#cc-queue-conf")).to_contain_text("Data confidence", timeout=10_000)
+
+        # Switch to the Fleet view: the live map data (zone, asset, alarm) renders.
+        page.locator("#n-site").click()
         expect(page.locator("#ztab")).to_contain_text("Pit Face", timeout=10_000)
         expect(page.locator("#ftab")).to_contain_text("HT-102", timeout=10_000)
         expect(page.locator("#atab")).to_contain_text("magazine", timeout=10_000)
-
-        # The exception layer surfaces the open critical alarm (operations platform).
-        expect(page.locator("#exbar")).to_contain_text("critical", timeout=10_000)
 
         # Acknowledge the alarm in the UI; the button then clears on the next poll.
         page.locator("#atab .ackbtn").first.click()

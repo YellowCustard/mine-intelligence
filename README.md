@@ -334,3 +334,34 @@ These endpoints are pure reads over existing data (no new migration).
   source of truth; the API still enforces every permission independently.
 
 These endpoints are pure reads over existing data (no new migration).
+
+### Operations Command Centre (dashboard)
+
+The dashboard (`web/mine.html`, framework-free) leads with an **Operations**
+command centre that answers, at a glance: *what is happening now, what needs my
+attention, and is the shift getting better?* It is organised by operational
+priority, not by API surface:
+
+- **Current shift** — headline KPIs with the **queue %** given visual prominence
+  as the primary commercial metric, alongside total queue time, mean cycle,
+  utilisation, active/offline equipment, critical alarms and unresolved incidents.
+  Observed and derived figures are labelled as such.
+- **Data confidence** — the queue KPI carries a confidence badge
+  (High / Reduced / Low) sourced from the data-quality endpoint; degraded
+  analytics are never presented silently as fully reliable.
+- **Needs attention** — the exception layer (critical alarms, open incidents,
+  stopped machines, offline trackers) folded together with data-quality problems
+  and suspected bottleneck observations. **Quiet when healthy** ("All clear").
+- **Shift performance** — this shift vs the previous shift, shown as observed
+  deltas (direction + magnitude), never implying causation.
+- **Operational data health** — a concise header chip distinguishes a **platform**
+  problem (ingestor/broker/DB) from the **field** going quiet (trackers/comms) —
+  a tracker outage is never shown as machine downtime.
+- The live **Fleet** map (zones, assets, alarm queue + acknowledge, cycle
+  breakdown) is one view within the centre; navigation is role-aware via
+  `/me/capabilities`. The synthetic Vision/Exploration/payload/fuel demo panels
+  (out-of-scope for Phase 1) have been retired.
+
+Later increments extend the centre with machine drill-down, an analytics view
+(trends/bottlenecks/downtime), handover and reports centres, historical playback,
+and a system/admin view.
