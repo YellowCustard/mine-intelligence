@@ -61,6 +61,20 @@ def test_healthz_is_public(db_session: Session) -> None:
     assert anon.get("/health").status_code in (200, 503)  # reachable without auth
 
 
+def test_version_is_public_and_safe(db_session: Session) -> None:
+    from minemonitor import __version__
+
+    anon = make_client(db_session, None)
+    r = anon.get("/version")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["name"] == "Mine Monitor"
+    assert body["version"] == __version__
+    # The alembic_version table is absent under the SQLite test schema; the probe
+    # must degrade to None rather than error.
+    assert body["db_revision"] is None
+
+
 def test_healthcheck_cli_exit_codes(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     from sqlalchemy.orm import sessionmaker
 

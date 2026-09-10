@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The credentials shipped in ``.env.example`` for local development. They must
+# never reach a production deployment — the ``prod`` guard below refuses to start
+# if they are still in place, so a dev default cannot silently become a prod one.
+_DEV_DB_URL = "postgresql+psycopg://minemonitor:minemonitor@localhost:5432/minemonitor"
+_DEV_DB_CREDENTIALS = "minemonitor:minemonitor@"
 
 
 class Settings(BaseSettings):
@@ -16,7 +23,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     default_site_tz: str = "Africa/Harare"
 
-    database_url: str = "postgresql+psycopg://minemonitor:minemonitor@localhost:5432/minemonitor"
+    database_url: str = _DEV_DB_URL
 
     # MQTT transport (M2).
     mqtt_host: str = "localhost"
@@ -64,6 +71,35 @@ class Settings(BaseSettings):
     # Present for later milestones; unused now.
     s3_endpoint: str = "http://localhost:9000"
     s3_bucket: str = "mine-evidence"
+
+    @model_validator(mode="after")
+    def _guard_production_defaults(self) -> Settings:
+        """Fail fast rather than ship dev defaults to production (brief §36).
+
+        When ``MM_ENV=prod`` the process refuses to start if any known-dangerous
+        development default is still in place. A misconfigured production box
+        must fall over loudly at startup, not run silently with the sample
+        credentials that ship in ``.env.example``.
+        """
+        if self.env.lower() != "prod":
+            return self
+        problems: list[str] = []
+        if self.database_url == _DEV_DB_URL or _DEV_DB_CREDENTIALS in self.database_url:
+            problems.append(
+                "MM_DATABASE_URL still uses the sample dev credentials "
+                "(minemonitor:minemonitor); set a real database URL with a strong password"
+            )
+        if self.bootstrap_admin_user and len(self.bootstrap_admin_password) < 12:
+            problems.append(
+                "MM_BOOTSTRAP_ADMIN_PASSWORD is set but weak (<12 chars); use a strong "
+                "password or leave the bootstrap admin blank and create users via the CLI"
+            )
+        if problems:
+            raise ValueError(
+                "refusing to start with MM_ENV=prod and unsafe configuration:\n  - "
+                + "\n  - ".join(problems)
+            )
+        return self
 
 
 @lru_cache

@@ -226,10 +226,12 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
             "href", re.compile(r"/reports/shift\.html")
         )
 
-        # System view: platform-vs-field health and data-quality drill-down render.
+        # System view: platform-vs-field health and data-quality drill-down render,
+        # and the build/schema version is surfaced for multi-site support (brief §38).
         page.locator("#n-system").click()
         expect(page.locator("#sy-health")).to_contain_text("Verdict", timeout=10_000)
         expect(page.locator("#sy-dq")).to_contain_text("Confidence", timeout=10_000)
+        expect(page.locator("#sy-version")).to_contain_text("Mine Monitor v", timeout=10_000)
 
         # Back to Fleet to acknowledge the alarm.
         page.locator("#n-site").click()

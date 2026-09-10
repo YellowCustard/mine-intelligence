@@ -10,13 +10,14 @@ a dead broker is visible even though the API itself can still serve reads.
 from __future__ import annotations
 
 import socket
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from minemonitor import heartbeat
+from minemonitor import __version__, heartbeat
 from minemonitor.config import get_settings
 from minemonitor.storage.db import get_db
 
@@ -29,6 +30,33 @@ def _db_ok(db: Session) -> bool:
         return True
     except Exception:  # noqa: BLE001 - any DB error means unhealthy
         return False
+
+
+def _db_revision(db: Session) -> str | None:
+    """The applied Alembic migration revision, or None if unavailable.
+
+    Reported so a support engineer can tell, from one call, which schema a mine
+    is actually running — different deployments drift and this pins it down.
+    """
+    try:
+        return db.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
+    except Exception:  # noqa: BLE001 - table absent (tests) or DB down
+        return None
+
+
+@router.get("/version")
+def version(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Application identity and schema revision — a safe, unauthenticated probe.
+
+    Carries no operational or personal data (brief §38): just the app name, the
+    release version, and the applied database migration so multiple mine
+    deployments can be told apart during support.
+    """
+    return {
+        "name": "Mine Monitor",
+        "version": __version__,
+        "db_revision": _db_revision(db),
+    }
 
 
 def _mqtt_reachable(host: str, port: int, *, timeout_s: float = 1.0) -> bool:

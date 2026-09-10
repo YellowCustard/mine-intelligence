@@ -1281,19 +1281,23 @@ function openHist(a, fmt){
 // ── System / admin view ──────────────────────────────────────────────────
 async function loadSystem(){
   const getj=async p=>{ try{ const r=await fetch(p); return r.ok?await r.json():null; }catch(e){ return null; } };
-  const [sh, dq, defs] = await Promise.all([
+  const [sh, dq, defs, ver] = await Promise.all([
     getj(`/sites/${SITE}/system-health`),
     getj(`/sites/${SITE}/data-quality`),
     getj(`/sites/${SITE}/shift-definitions`),
+    getj(`/version`),
   ]);
-  renderSysHealth(sh);
+  renderSysHealth(sh, ver);
   renderSysDataQuality(dq);
   renderSysConfig(defs);
   renderSysAudit();
 }
-function renderSysHealth(sh){
+function renderSysHealth(sh, ver){
   const el=document.getElementById('sy-health'); if(!el) return;
-  if(!sh){ el.innerHTML='<p class="note">System health unavailable.</p>'; return; }
+  const verLine = ver
+    ? `<p class="sub2" id="sy-version" style="margin-top:8px">${E(ver.name||'Mine Monitor')} v${E(ver.version||'?')} · schema ${E(ver.db_revision||'unknown')}</p>`
+    : '';
+  if(!sh){ el.innerHTML='<p class="note">System health unavailable.</p>'+verLine; return; }
   const v=sh.verdict, ap=sh.app_plane||{}, fp=sh.field_plane||{};
   const badge = v==='healthy'?'<span class="tag t-ok">healthy</span>'
     : v==='field_degraded'?'<span class="tag t-warn">field degraded</span>'
@@ -1310,7 +1314,7 @@ function renderSysHealth(sh){
       <div>Silent feeds</div><div>${fp.silent_feeds??'—'}</div>
       <div>Latest fix age</div><div>${fp.latest_fix_age_s!=null?Math.round(fp.latest_fix_age_s)+' s':'—'}</div>
       <div>Ingest flowing</div><div>${fp.ingest_flowing===true?'yes':fp.ingest_flowing===false?'no':'—'}</div>
-    </div>`;
+    </div>${verLine}`;
 }
 function renderSysDataQuality(dq){
   const el=document.getElementById('sy-dq'); if(!el) return;
