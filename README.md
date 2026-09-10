@@ -394,5 +394,16 @@ oldest-first playback window; a pure read, no schema change). The synthetic map
 trail has been replaced by this real track. So "something looks wrong" → "show me
 what happened" is a click, not a screen change.
 
-The final increment adds a system/admin view (health drill-down, ingestion,
-config, users, audit, retention, data quality) plus responsive/perf hardening.
+The **System** view is the administrator's drill-down behind the header health
+chip: the platform-vs-field verdict with the app plane (database, broker,
+ingestor) and field plane (assets, silent feeds, latest-fix age, ingest flowing),
+the data-quality issue breakdown and confidence, the shift-definition
+configuration, and — for administrators — the recent audit log; non-admin roles
+see health and data quality but not the audit trail or config actions.
+
+Performance and responsiveness are handled deliberately: the command centre's
+analytics poll pauses while the tab is backgrounded and refreshes on return, live
+telemetry stays on the SSE stream (the Fleet map redraws only when visible), and
+on constrained screens the nav scrolls horizontally while KPIs, alerts, machine
+status, incidents and handover stack. This completes the Operations Command
+Centre: Operations · Fleet · Analytics · Handover · Reports · System.
