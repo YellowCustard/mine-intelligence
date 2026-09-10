@@ -226,6 +226,11 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
             "href", re.compile(r"/reports/shift\.html")
         )
 
+        # System view: platform-vs-field health and data-quality drill-down render.
+        page.locator("#n-system").click()
+        expect(page.locator("#sy-health")).to_contain_text("Verdict", timeout=10_000)
+        expect(page.locator("#sy-dq")).to_contain_text("Confidence", timeout=10_000)
+
         # Back to Fleet to acknowledge the alarm.
         page.locator("#n-site").click()
         expect(page.locator("#atab")).to_contain_text("magazine", timeout=10_000)
