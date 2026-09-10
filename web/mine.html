@@ -1325,6 +1325,7 @@ function renderSysDataQuality(dq){
     <div class="kv">
       <div>Stale feeds</div><div>${i.stale_feeds??0}</div>
       <div>Late / backfilled</div><div>${i.late_or_backfilled_fixes??0}</div>
+      <div>Future-dated (clock)</div><div>${i.future_dated_fixes??0}</div>
       <div>Out of order</div><div>${i.out_of_order_fixes??0}</div>
       <div>Impossible moves</div><div>${i.impossible_moves??0}</div>
       <div>Missing quality fields</div><div>${i.missing_quality_fields??0}</div>

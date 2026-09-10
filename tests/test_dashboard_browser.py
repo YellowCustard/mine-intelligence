@@ -238,10 +238,10 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
         expect(page.locator("#atab")).to_contain_text("magazine", timeout=10_000)
 
         # Acknowledge the alarm in the UI; the button then clears on the next poll.
+        # Use a retrying locator assertion (not wait_for_function) so the check does
+        # not rely on page-side eval, which the production CSP correctly forbids.
         page.locator("#atab .ackbtn").first.click()
-        page.wait_for_function(
-            "document.querySelectorAll('#atab .ackbtn').length === 0", timeout=15_000
-        )
+        expect(page.locator("#atab .ackbtn")).to_have_count(0, timeout=15_000)
 
         browser.close()
 

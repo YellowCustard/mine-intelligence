@@ -310,6 +310,12 @@ class Incident(Base):
     __table_args__ = (Index("ix_incidents_site_state", "site_id", "state"),)
 
     incident_id: Mapped[str] = mapped_column(String, primary_key=True)
+    # Optimistic concurrency (brief §15): every UPDATE checks and bumps version_id,
+    # so two operators who both act on a stale copy of the same incident cannot
+    # silently overwrite one another — the second write raises StaleDataError, which
+    # the router surfaces as 409 Conflict.
+    version_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    __mapper_args__ = {"version_id_col": version_id}
     site_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     # The originating alarm, if any. Linked, never mutated (brief §6 / §4).
     event_id: Mapped[str | None] = mapped_column(

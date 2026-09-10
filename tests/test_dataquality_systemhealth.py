@@ -78,6 +78,28 @@ def test_data_quality_flags_late_backfilled_fix(client: TestClient, db_session: 
     assert dq["issues"]["late_or_backfilled_fixes"] >= 1
 
 
+def test_data_quality_flags_future_dated_fix_from_bad_device_clock(
+    client: TestClient, db_session: Session
+) -> None:
+    # Device clock runs ahead: the fix carries a ts well after the server actually
+    # received it. Left unflagged this would misplace the fix into a later shift, so
+    # it must count against confidence rather than pass silently (brief §7/§20).
+    received = _NOW - timedelta(seconds=20)
+    _pos(
+        db_session,
+        "HT-102",
+        received + timedelta(minutes=10),  # device time 10 min ahead of receipt
+        -17.8252,
+        31.0335,
+        received_at=received,
+    )
+    db_session.commit()
+    dq = client.get("/sites/kn-zw-01/data-quality").json()
+    assert dq["issues"]["future_dated_fixes"] >= 1
+    # And it is not mistaken for a late/backfilled fix (the opposite skew).
+    assert dq["issues"]["late_or_backfilled_fixes"] == 0
+
+
 def test_system_health_healthy_when_app_up_and_ingest_flowing(db_session: Session) -> None:
     _pos(db_session, "HT-102", _NOW - timedelta(seconds=10), -17.8252, 31.0335)
     db_session.commit()

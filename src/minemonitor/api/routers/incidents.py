@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 from minemonitor import audit
 from minemonitor.auth.deps import require_supervisor, require_viewer
@@ -56,6 +57,7 @@ def _incident_dict(row: Incident) -> dict[str, Any]:
         "zone_id": row.zone_id,
         "summary": row.summary,
         "state": row.state,
+        "version_id": row.version_id,
         "assignee": row.assignee,
         "resolution": row.resolution,
         "resolution_category": row.resolution_category,
@@ -176,7 +178,15 @@ def transition_incident(
         site_id=site_id,
         detail={"to_state": body.to_state, "assignee": row.assignee},
     )
-    db.commit()
+    try:
+        db.commit()
+    except StaleDataError as exc:
+        # Another operator moved this incident since we read it (brief §15). Reject
+        # rather than clobber their change; the client should reload and retry.
+        db.rollback()
+        raise HTTPException(
+            status_code=409, detail="incident was modified concurrently; reload and retry"
+        ) from exc
     return _incident_dict(row)
 
 
