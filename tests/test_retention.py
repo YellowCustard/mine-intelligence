@@ -11,7 +11,16 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from minemonitor.retention import run_retention
-from minemonitor.storage.models import AuditLog, Base, Event, Position
+from minemonitor.storage.models import (
+    AuditLog,
+    Base,
+    DelayClassification,
+    Event,
+    Incident,
+    IncidentNote,
+    Position,
+    ShiftHandover,
+)
 
 _NOW = datetime(2026, 9, 5, 12, 0, 0, tzinfo=UTC)
 
@@ -128,3 +137,113 @@ def test_audit_zero_days_keeps_forever(session: Session) -> None:
         session, now=_NOW, positions_days=0, metrics_days=0, events_days=0, audit_days=0
     )
     assert deleted["audit_log"] == 0
+
+
+# --- operational annotations -------------------------------------------------
+
+
+def _incident(
+    s: Session, iid: str, *, closed_days_ago: float | None, created_days_ago: float
+) -> None:
+    created = _NOW - timedelta(days=created_days_ago)
+    closed = None if closed_days_ago is None else _NOW - timedelta(days=closed_days_ago)
+    s.add(
+        Incident(
+            incident_id=iid,
+            site_id="kn-zw-01",
+            type="zone_breach",
+            severity="critical",
+            summary="x",
+            state="closed" if closed else "open",
+            created_by="sup",
+            created_at=created,
+            updated_at=created,
+            closed_at=closed,
+        )
+    )
+    s.add(
+        IncidentNote(
+            id=f"n-{iid}",
+            incident_id=iid,
+            site_id="kn-zw-01",
+            ts=created,
+            actor="sup",
+            kind="note",
+            text="did a thing",
+        )
+    )
+
+
+def _delay(s: Session, did: str, end_days_ago: float) -> None:
+    end = _NOW - timedelta(days=end_days_ago)
+    s.add(
+        DelayClassification(
+            id=did,
+            site_id="kn-zw-01",
+            category="loader_unavailable",
+            start_ts=end - timedelta(hours=1),
+            end_ts=end,
+            created_by="sup",
+            created_at=end,
+        )
+    )
+
+
+def _handover(s: Session, hid: str, created_days_ago: float) -> None:
+    s.add(
+        ShiftHandover(
+            id=hid,
+            site_id="kn-zw-01",
+            shift_id="kn-zw-01:2026-01-01:day",
+            summary={},
+            outgoing_by="sup",
+            created_at=_NOW - timedelta(days=created_days_ago),
+        )
+    )
+
+
+def test_annotations_pruned_by_window(session: Session) -> None:
+    # Closed-and-old incident -> deleted with its note; open incident of any age
+    # and a recently-closed one survive.
+    _incident(session, "old-closed", closed_days_ago=400, created_days_ago=410)
+    _incident(session, "old-open", closed_days_ago=None, created_days_ago=999)
+    _incident(session, "recent-closed", closed_days_ago=10, created_days_ago=20)
+    _delay(session, "old-delay", end_days_ago=400)
+    _delay(session, "recent-delay", end_days_ago=10)
+    _handover(session, "old-h", created_days_ago=400)
+    _handover(session, "recent-h", created_days_ago=10)
+    session.commit()
+
+    deleted = run_retention(
+        session,
+        now=_NOW,
+        positions_days=0,
+        metrics_days=0,
+        events_days=0,
+        annotations_days=365,
+    )
+    assert deleted["incidents"] == 1 and deleted["incident_notes"] == 1
+    assert deleted["delay_classifications"] == 1
+    assert deleted["shift_handovers"] == 1
+
+    surviving = {i for (i,) in session.execute(select(Incident.incident_id)).all()}
+    assert surviving == {"old-open", "recent-closed"}  # open work never age-deleted
+    assert session.execute(select(func.count()).select_from(IncidentNote)).scalar_one() == 2
+
+
+def test_annotations_zero_days_keeps_forever(session: Session) -> None:
+    _incident(session, "old-closed", closed_days_ago=9999, created_days_ago=9999)
+    _delay(session, "old-delay", end_days_ago=9999)
+    _handover(session, "old-h", created_days_ago=9999)
+    session.commit()
+    deleted = run_retention(
+        session,
+        now=_NOW,
+        positions_days=0,
+        metrics_days=0,
+        events_days=0,
+        annotations_days=0,
+    )
+    assert deleted["incidents"] == 0
+    assert deleted["delay_classifications"] == 0
+    assert deleted["shift_handovers"] == 0

@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     retain_positions_days: int = 90
     retain_metrics_days: int = 365
     retain_events_days: int = 365
+    # Operational annotations: incidents (closed only), delay classifications, shift
+    # handovers. These hold PII-adjacent notes/assignees, so they are pruned too.
+    retain_annotations_days: int = 365
     # Audit trail is retained longer than the data it describes — accountability
     # outlives the records (brief §4). 0 = keep forever.
     retain_audit_days: int = 730

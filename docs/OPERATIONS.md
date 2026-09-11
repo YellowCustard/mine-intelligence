@@ -152,7 +152,12 @@ The mine is the data controller; eigenstate is the processor. Retention is
 | Raw positions | `MM_RETAIN_POSITIONS_DAYS` | 90 |
 | Derived metrics + cycles | `MM_RETAIN_METRICS_DAYS` | 365 |
 | Events | `MM_RETAIN_EVENTS_DAYS` | 365 |
+| Operational annotations | `MM_RETAIN_ANNOTATIONS_DAYS` | 365 |
 | Audit trail | `MM_RETAIN_AUDIT_DAYS` | 730 |
+
+Operational annotations are delay classifications, shift handovers, and **closed**
+incidents (with their notes). An open or in-progress incident is live work and is
+never age-deleted regardless of the window — only its close time starts the clock.
 
 Force a retention pass now: `POST /admin/retention/run` (admin).
 
