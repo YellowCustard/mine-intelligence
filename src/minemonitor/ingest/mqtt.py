@@ -242,9 +242,13 @@ class MqttIngestor:
         analytics to ingest.
         """
         from minemonitor import heartbeat
+        from minemonitor.config import get_settings
         from minemonitor.cycles.recompute import recompute
+        from minemonitor.notifications.dispatch import UrllibSmtpSender, dispatch_pending
         from minemonitor.retention import run_from_config
         from minemonitor.rules.offline import detect_offline
+
+        notify_sender = UrllibSmtpSender(get_settings())
 
         while not self._stop.wait(self._offline_interval_s):
             session = self._session_factory()
@@ -261,6 +265,11 @@ class MqttIngestor:
                         extra={"site_id": ev.site_id, "asset_id": ev.asset_id},
                     )
                 recompute(session, self._site_id)
+                # Drain the notification outbox (store-and-forward alerts, brief §3).
+                # No-op unless notifications are configured and rows are due.
+                outcome = dispatch_pending(session, sender=notify_sender)
+                if outcome["sent"] or outcome["failed"]:
+                    log.info("notifications dispatched", extra=outcome)
                 # Run the retention deletion job roughly daily (brief §4).
                 now = time.monotonic()
                 if now - self._last_retention >= self._retention_interval_s:

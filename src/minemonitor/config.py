@@ -75,6 +75,21 @@ class Settings(BaseSettings):
     # A background worker's heartbeat older than this marks it stale in /health.
     heartbeat_stale_s: int = 180
 
+    # Notification egress (advisory alerts). Nobody watches a dashboard 24/7 at a
+    # remote site, so qualifying events are pushed out via a store-and-forward outbox.
+    # Blank min-severity = notifications off (default). Order: info < warning < critical.
+    notify_min_severity: str = ""  # "" | "info" | "warning" | "critical"
+    notify_webhook_url: str = ""  # POST the event JSON here (blank = no webhook)
+    notify_smtp_host: str = ""  # blank = no email
+    notify_smtp_port: int = 587
+    notify_smtp_user: str = ""
+    notify_smtp_password: str = ""
+    notify_smtp_starttls: bool = True
+    notify_email_from: str = ""
+    notify_email_to: str = ""  # comma-separated recipients
+    notify_max_attempts: int = 5  # then the row is marked failed (visible in the queue)
+    notify_retry_base_s: int = 60  # exponential backoff base between attempts
+
     # Teltonika TCP listener (M7). Trackers speak Codec 8/8E over raw TCP; the
     # listener decodes and republishes into MQTT like any other adapter.
     teltonika_host: str = "0.0.0.0"  # noqa: S104 - a device listener binds all interfaces

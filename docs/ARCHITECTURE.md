@@ -203,6 +203,10 @@ Route surface (roles: `viewer < supervisor < admin`, plus `device` for ingest on
 - **Zones:** CRUD under `/sites/{id}/zones`.
 - **Alarm queue:** `POST /sites/{id}/events/{event_id}/ack`,
   `POST /sites/{id}/events/{event_id}/incident`.
+- **Notifications:** `GET /sites/{id}/notifications` (supervisor+) — the
+  store-and-forward alert outbox. Events above `MM_NOTIFY_MIN_SEVERITY` enqueue a
+  webhook/email notification in the same transaction; the ingestor drains it with
+  backoff. Advisory, `event.v1`-only payload (no operator names).
 - **Analytics:** cycles, metrics, recompute; operations scorecard, exceptions,
   trends, bottlenecks, data-quality, system-health; shift-definitions CRUD,
   `shifts/current`, shift-summary; `reports/shift`, `reports/daily`.

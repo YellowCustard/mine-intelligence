@@ -110,6 +110,21 @@ plant. Workflow:
 If an alarm *storm* appears (many enter/exit events on one asset), that is a
 debounce/hysteresis symptom, not normal — see §8.
 
+**Notifications (alert egress).** Because nobody watches the dashboard around the
+clock at a remote site, qualifying events are pushed out. It is **off by default**;
+turn it on in `.env`:
+
+- `MM_NOTIFY_MIN_SEVERITY` — `info` | `warning` | `critical` (blank = off).
+- A **webhook** (`MM_NOTIFY_WEBHOOK_URL`, POSTs the event JSON) and/or **email**
+  (`MM_NOTIFY_SMTP_*`, `MM_NOTIFY_EMAIL_TO`). Both self-hostable.
+
+Delivery is **store-and-forward**: a notification is written in the same transaction
+as its event, then a background dispatcher sends it with exponential backoff
+(`MM_NOTIFY_RETRY_BASE_S`), so an outage delays but never loses an alert. After
+`MM_NOTIFY_MAX_ATTEMPTS` a row is marked `failed` and stays visible. Notifications are
+**advisory** and carry only `event.v1` fields — never an operator name. Watch the
+outbox at `GET /sites/{id}/notifications?state=failed` (supervisor+).
+
 ---
 
 ## 5. Backup and restore

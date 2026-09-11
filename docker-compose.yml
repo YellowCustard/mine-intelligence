@@ -80,6 +80,15 @@ services:
       MM_LOGIN_MAX_FAILURES: ${MM_LOGIN_MAX_FAILURES:-5}
       MM_LOGIN_LOCKOUT_MINUTES: ${MM_LOGIN_LOCKOUT_MINUTES:-15}
       MM_HEARTBEAT_STALE_S: ${MM_HEARTBEAT_STALE_S:-180}
+      MM_NOTIFY_MIN_SEVERITY: ${MM_NOTIFY_MIN_SEVERITY:-}
+      MM_NOTIFY_WEBHOOK_URL: ${MM_NOTIFY_WEBHOOK_URL:-}
+      MM_NOTIFY_SMTP_HOST: ${MM_NOTIFY_SMTP_HOST:-}
+      MM_NOTIFY_SMTP_PORT: ${MM_NOTIFY_SMTP_PORT:-587}
+      MM_NOTIFY_SMTP_USER: ${MM_NOTIFY_SMTP_USER:-}
+      MM_NOTIFY_SMTP_PASSWORD: ${MM_NOTIFY_SMTP_PASSWORD:-}
+      MM_NOTIFY_SMTP_STARTTLS: ${MM_NOTIFY_SMTP_STARTTLS:-true}
+      MM_NOTIFY_EMAIL_FROM: ${MM_NOTIFY_EMAIL_FROM:-}
+      MM_NOTIFY_EMAIL_TO: ${MM_NOTIFY_EMAIL_TO:-}
     volumes:
       # Shared with the broker: `python -m minemonitor.devices.broker_config` (run
       # via `docker compose exec api`) writes passwd+acl here, and the mqtt service
@@ -114,6 +123,15 @@ services:
       MM_RETAIN_AUDIT_DAYS: ${MM_RETAIN_AUDIT_DAYS:-730}
       MM_RETENTION_INTERVAL_S: ${MM_RETENTION_INTERVAL_S:-86400}
       MM_HEARTBEAT_STALE_S: ${MM_HEARTBEAT_STALE_S:-180}
+      MM_NOTIFY_MIN_SEVERITY: ${MM_NOTIFY_MIN_SEVERITY:-}
+      MM_NOTIFY_WEBHOOK_URL: ${MM_NOTIFY_WEBHOOK_URL:-}
+      MM_NOTIFY_SMTP_HOST: ${MM_NOTIFY_SMTP_HOST:-}
+      MM_NOTIFY_SMTP_PORT: ${MM_NOTIFY_SMTP_PORT:-587}
+      MM_NOTIFY_SMTP_USER: ${MM_NOTIFY_SMTP_USER:-}
+      MM_NOTIFY_SMTP_PASSWORD: ${MM_NOTIFY_SMTP_PASSWORD:-}
+      MM_NOTIFY_SMTP_STARTTLS: ${MM_NOTIFY_SMTP_STARTTLS:-true}
+      MM_NOTIFY_EMAIL_FROM: ${MM_NOTIFY_EMAIL_FROM:-}
+      MM_NOTIFY_EMAIL_TO: ${MM_NOTIFY_EMAIL_TO:-}
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.mqtt"]
     healthcheck:
       # The ingestor has no HTTP endpoint; it is healthy while its heartbeat is fresh.

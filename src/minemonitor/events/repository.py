@@ -18,7 +18,12 @@ def new_event_id() -> str:
 
 
 def persist_event(session: Session, event: EventV1) -> Event:
-    """Write an event row. Caller commits."""
+    """Write an event row and queue any notifications for it. Caller commits.
+
+    Notification rows land in the same transaction as the event (store-and-forward,
+    brief §3), and enqueue is a no-op unless notifications are configured — so this is
+    invisible to callers that do not use them.
+    """
     row = Event(
         event_id=event.event_id,
         site_id=event.site_id,
@@ -37,6 +42,10 @@ def persist_event(session: Session, event: EventV1) -> Event:
         acknowledged_at=event.acknowledged_at,
     )
     session.add(row)
+    # Import locally to avoid a package import cycle (notifications -> models -> ...).
+    from minemonitor.notifications.outbox import enqueue_for_event
+
+    enqueue_for_event(session, event)
     return row
 
 

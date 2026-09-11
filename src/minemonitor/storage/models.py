@@ -458,3 +458,37 @@ class Device(Base):
     # into the broker password file (never the cleartext, which is shown once at
     # provisioning). Null until a secret is issued.
     broker_pw_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class Notification(Base):
+    """A queued outbound alert for an event — the store-and-forward notification outbox.
+
+    The network at the mine will fail (brief §3), so notifications are **not** sent
+    inline when an event fires: one row is written per (event, channel, target) in the
+    same transaction as the event, and a background dispatcher drains them with retry
+    and backoff. A row therefore survives a crash or an outage and is delivered on
+    recovery, exactly once per target (the unique constraint makes enqueue idempotent).
+
+    The payload carries only ``event.v1`` fields — summary, type, severity, asset/zone,
+    ids — never an operator name (personal data lives behind a foreign key, brief §4).
+    Notifications are **advisory** like every output of this system: they warn a person,
+    they never actuate plant (brief §15).
+    """
+
+    __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint("event_id", "channel", "target", name="uq_notifications_event_channel"),
+        Index("ix_notifications_state_next", "state", "next_attempt_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    event_id: Mapped[str] = mapped_column(ForeignKey("events.event_id"), nullable=False)
+    channel: Mapped[str] = mapped_column(String, nullable=False)  # "webhook" | "email"
+    target: Mapped[str] = mapped_column(String, nullable=False)  # URL or address
+    state: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
