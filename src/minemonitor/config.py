@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     mqtt_port: int = 1883
     mqtt_topic_prefix: str = "mm"
     mqtt_ingest_client_id: str = "mm-ingestor"
+    # Strict device provisioning (brief §10/§11): when true, MQTT telemetry is
+    # accepted only for assets with an enabled device row. Off by default so a
+    # fresh/demo install ingests without provisioning; turn on for a hardened site.
+    mqtt_require_registered_device: bool = False
     # Publisher-side store-and-forward spool (crash-safe local buffer).
     spool_path: str = "/tmp/mm-spool.sqlite"
 

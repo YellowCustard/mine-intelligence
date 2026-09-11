@@ -20,6 +20,7 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -428,3 +429,28 @@ class AuditLog(Base):
     entity_id: Mapped[str | None] = mapped_column(String, nullable=True)
     site_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     detail: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+
+
+class Device(Base):
+    """A provisioned telemetry device bound to exactly one asset (brief §10/§11).
+
+    ``device_id`` is the identity a tracker authenticates to the broker with; it may
+    publish telemetry only for its bound ``(site_id, asset_id)``. An asset has at most
+    one device (the unique constraint), so provisioning is unambiguous and the
+    broker ACL / ingest check can be derived directly from this table.
+    """
+
+    __tablename__ = "devices"
+    __table_args__ = (
+        UniqueConstraint("site_id", "asset_id", name="uq_devices_site_asset"),
+        Index("ix_devices_site", "site_id"),
+    )
+
+    device_id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(String, nullable=False)
+    asset_id: Mapped[str] = mapped_column(String, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    expected_interval_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
