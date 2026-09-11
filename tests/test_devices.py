@@ -81,6 +81,35 @@ def test_admin_provisions_and_lists(db_session: Session) -> None:
     assert [d["device_id"] for d in listed] == ["trk-1"]
 
 
+def test_provisioning_returns_secret_once_and_never_leaks_it(db_session: Session) -> None:
+    c = make_client(db_session, ADMIN)
+    created = c.post("/sites/kn-zw-01/devices", json={"device_id": "trk-1", "asset_id": "HT-102"})
+    body = created.json()
+    assert body.get("secret")  # issued once, in the create response
+    # Neither list nor read ever return the secret or its hash.
+    listed = c.get("/sites/kn-zw-01/devices").json()[0]
+    assert "secret" not in listed and "broker_pw_hash" not in listed
+
+
+def test_rotate_secret_endpoint(db_session: Session) -> None:
+    c = make_client(db_session, ADMIN)
+    first = c.post(
+        "/sites/kn-zw-01/devices", json={"device_id": "trk-1", "asset_id": "HT-102"}
+    ).json()["secret"]
+    r = c.post("/sites/kn-zw-01/devices/trk-1/rotate-secret")
+    assert r.status_code == 200 and r.json()["secret"] and r.json()["secret"] != first
+    # Unknown device / wrong site -> 404.
+    assert c.post("/sites/kn-zw-01/devices/nope/rotate-secret").status_code == 404
+
+
+def test_viewer_cannot_rotate_secret(db_session: Session) -> None:
+    make_client(db_session, ADMIN).post(
+        "/sites/kn-zw-01/devices", json={"device_id": "trk-1", "asset_id": "HT-102"}
+    )
+    r = make_client(db_session, VIEWER).post("/sites/kn-zw-01/devices/trk-1/rotate-secret")
+    assert r.status_code == 403
+
+
 def test_duplicate_asset_binding_is_409(db_session: Session) -> None:
     c = make_client(db_session, ADMIN)
     c.post("/sites/kn-zw-01/devices", json={"device_id": "trk-1", "asset_id": "HT-102"})

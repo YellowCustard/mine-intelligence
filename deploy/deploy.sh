@@ -24,6 +24,27 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+# Broker auth (brief §10/§11): when a service account is configured, generate the
+# Mosquitto password + ACL files from the devices table and run the broker with
+# allow_anonymous=false. The API migrates the DB on start, so bring it up first,
+# generate the files into the dir it shares with the broker, then select the
+# hardened broker config for the full bring-up.
+if [ -n "${MM_MQTT_USERNAME:-}" ]; then
+  echo "==> Broker auth enabled (MM_MQTT_USERNAME set) — generating broker credentials"
+  docker compose up -d --build db api
+  echo "    Waiting for the API (runs migrations on start) to be healthy"
+  for i in $(seq 1 30); do
+    if docker compose exec -T api python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=5)" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 2
+    [ "$i" = "30" ] && { echo "    API did not become healthy — check: docker compose logs api"; exit 1; }
+  done
+  docker compose exec -T api uv run python -m minemonitor.devices.broker_config
+  export MM_MOSQUITTO_CONF=./docker/mosquitto.auth.conf
+  echo "    Broker will use the hardened config ($MM_MOSQUITTO_CONF)."
+fi
+
 echo "==> Building and starting the core stack (db, mqtt, minio, api, ingestor)"
 docker compose up -d --build
 
@@ -53,3 +74,10 @@ echo "        ssh -L 8000:127.0.0.1:8000 <user>@<vps-host>"
 echo "    then open http://localhost:8000/"
 echo
 echo "    For a public URL, put it behind nginx + TLS (see deploy/DEPLOY.md)."
+if [ -n "${MM_MQTT_USERNAME:-}" ]; then
+  echo
+  echo "    Broker auth is on. After provisioning or disabling devices"
+  echo "    (POST /sites/{id}/devices), regenerate the broker files and reload it:"
+  echo "        docker compose exec api uv run python -m minemonitor.devices.broker_config"
+  echo "        docker compose exec mqtt kill -HUP 1"
+fi

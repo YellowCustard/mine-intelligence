@@ -55,6 +55,8 @@ class MqttPublisher:
         self.spool = Spool(spool_path or s.spool_path)
         self.drain_interval_s = drain_interval_s
         self._client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
+        if s.mqtt_username:
+            self._client.username_pw_set(s.mqtt_username, s.mqtt_password)
         self._connected = threading.Event()
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
@@ -142,6 +144,8 @@ class MqttIngestor:
             client_id=client_id or s.mqtt_ingest_client_id,
             clean_session=False,
         )
+        if s.mqtt_username:
+            self._client.username_pw_set(s.mqtt_username, s.mqtt_password)
         self._client.on_connect = self._on_connect
         self._client.on_message = self._on_message
         self._stop = threading.Event()

@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     mqtt_port: int = 1883
     mqtt_topic_prefix: str = "mm"
     mqtt_ingest_client_id: str = "mm-ingestor"
+    # Broker service account for internal clients (ingestor consumer + the simulator
+    # and Teltonika-adapter publishers). When set, clients authenticate with it and
+    # the broker can run with allow_anonymous=false. Blank = anonymous (dev/test).
+    mqtt_username: str = ""
+    mqtt_password: str = ""
     # Strict device provisioning (brief §10/§11): when true, MQTT telemetry is
     # accepted only for assets with an enabled device row. Off by default so a
     # fresh/demo install ingests without provisioning; turn on for a hardened site.
@@ -97,6 +102,12 @@ class Settings(BaseSettings):
             problems.append(
                 "MM_BOOTSTRAP_ADMIN_PASSWORD is set but weak (<12 chars); use a strong "
                 "password or leave the bootstrap admin blank and create users via the CLI"
+            )
+        if not self.mqtt_username:
+            problems.append(
+                "MM_MQTT_USERNAME is not set — the broker would accept anonymous "
+                "publishers; set MM_MQTT_USERNAME/MM_MQTT_PASSWORD and run the broker "
+                "with allow_anonymous=false (docker/mosquitto.auth.conf)"
             )
         if problems:
             raise ValueError(

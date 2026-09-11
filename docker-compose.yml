@@ -28,7 +28,11 @@ services:
     ports:
       - "1883:1883"
     volumes:
-      - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      # Default is the anonymous dev config; set MM_MOSQUITTO_CONF=./docker/mosquitto.auth.conf
+      # for the hardened, authenticated broker (generate ./docker/mosquitto first with
+      # `python -m minemonitor.devices.broker_config`).
+      - ${MM_MOSQUITTO_CONF:-./docker/mosquitto.conf}:/mosquitto/config/mosquitto.conf:ro
+      - ./docker/mosquitto:/mosquitto/config/auth:ro
       - mqtt_data:/mosquitto/data
     healthcheck:
       test: ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -t healthcheck -m ok || exit 1"]
@@ -58,6 +62,9 @@ services:
     environment:
       MM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-minemonitor}:${POSTGRES_PASSWORD:-minemonitor}@db:5432/${POSTGRES_DB:-minemonitor}
       MM_MQTT_HOST: mqtt
+      # Broker service account (blank = anonymous broker for dev/demo).
+      MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
+      MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
       MM_S3_ENDPOINT: http://minio:9000
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
       # First-run admin (M6): created only if the users table is empty. Leave
@@ -72,6 +79,11 @@ services:
       MM_LOGIN_MAX_FAILURES: ${MM_LOGIN_MAX_FAILURES:-5}
       MM_LOGIN_LOCKOUT_MINUTES: ${MM_LOGIN_LOCKOUT_MINUTES:-15}
       MM_HEARTBEAT_STALE_S: ${MM_HEARTBEAT_STALE_S:-180}
+    volumes:
+      # Shared with the broker: `python -m minemonitor.devices.broker_config` (run
+      # via `docker compose exec api`) writes passwd+acl here, and the mqtt service
+      # bind-mounts the same host dir read-only at /mosquitto/config/auth.
+      - ./docker/mosquitto:/app/docker/mosquitto
     ports:
       # The API has auth (M6, HTTP Basic), but Basic credentials must ride TLS.
       # Bind localhost by default and put nginx + TLS in front; set
@@ -90,6 +102,8 @@ services:
     environment:
       MM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-minemonitor}:${POSTGRES_PASSWORD:-minemonitor}@db:5432/${POSTGRES_DB:-minemonitor}
       MM_MQTT_HOST: mqtt
+      MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
+      MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
       # The ingestor also runs the scheduled retention deletion job (~daily).
       MM_RETAIN_POSITIONS_DAYS: ${MM_RETAIN_POSITIONS_DAYS:-90}
@@ -119,6 +133,8 @@ services:
         condition: service_started
     environment:
       MM_MQTT_HOST: mqtt
+      MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
+      MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
       MM_DEFAULT_SITE_ID: ${MM_DEFAULT_SITE_ID:-kn-zw-01}
       MM_TELTONIKA_PORT: ${MM_TELTONIKA_PORT:-5027}
@@ -136,6 +152,8 @@ services:
         condition: service_started
     environment:
       MM_MQTT_HOST: mqtt
+      MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
+      MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.adapters.simulator"]
 

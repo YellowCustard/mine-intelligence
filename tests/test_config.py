@@ -44,13 +44,21 @@ def test_prod_refuses_weak_bootstrap_password() -> None:
         )
 
 
+def test_prod_refuses_anonymous_broker() -> None:
+    # A broker service account is mandatory in prod (no anonymous publishers).
+    with pytest.raises(ValueError, match="MM_MQTT_USERNAME"):
+        _settings(env="prod", database_url=_SAFE_DB)
+
+
 def test_prod_starts_with_safe_configuration() -> None:
-    s = _settings(env="prod", database_url=_SAFE_DB)
+    s = _settings(env="prod", database_url=_SAFE_DB, mqtt_username="mm-ingestor")
     assert s.env == "prod"
     # A strong bootstrap password is accepted.
     s2 = _settings(
         env="prod",
         database_url=_SAFE_DB,
+        mqtt_username="mm-ingestor",
+        mqtt_password="a-strong-broker-secret",
         bootstrap_admin_user="admin",
         bootstrap_admin_password="a-strong-admin-secret",
     )

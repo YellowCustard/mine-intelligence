@@ -43,6 +43,9 @@ Tick every box. A red box is a blocked release, not a note for later.
       or a weak bootstrap password.
 - [ ] API bound to localhost; public exposure is only via TLS reverse proxy or SSH
       tunnel (Basic auth must ride TLS).
+- [ ] **MQTT broker requires auth** — `MM_MQTT_USERNAME`/`PASSWORD` set, the broker
+      runs `allow_anonymous false` (`docker/mosquitto.auth.conf`), and the password +
+      ACL files were generated from the devices table. No anonymous access to 1883.
 - [ ] Security headers present (CSP, nosniff, frame-options, referrer-policy).
 - [ ] Retention job runs on schedule; per-class `MM_RETAIN_*_DAYS` reviewed for the
       site.
@@ -59,8 +62,11 @@ Tick every box. A red box is a blocked release, not a note for later.
       (not the samples).
 - [ ] `MM_ENV` set correctly for the target (dev/staging/prod).
 - [ ] Site timezone (`MM_DEFAULT_SITE_TZ`) and `MM_DEFAULT_SITE_ID` correct.
-- [ ] MQTT: decide `MM_MQTT_REQUIRE_REGISTERED_DEVICE` (off for a fresh/demo install,
-      on once devices are provisioned) and that the broker ACL was regenerated.
+- [ ] MQTT: `MM_MQTT_USERNAME`/`PASSWORD` set (service account); decide
+      `MM_MQTT_REQUIRE_REGISTERED_DEVICE` (off for a fresh/demo install, on once devices
+      are provisioned); broker password + ACL files regenerated
+      (`python -m minemonitor.devices.broker_config`) and the broker reloaded after the
+      last device change. Each device configured with its one-time issued secret.
 
 ## 6. CI / build
 

@@ -137,11 +137,17 @@ The network and power **will** fail; the whole ingest side is designed around it
   double-count a cycle. The ingestor withholds MQTT acknowledgement until a fix is
   durably stored, so a **database restart loses nothing and duplicates nothing** (M2
   acceptance).
-- **MQTT device authz** (`ingest/authz.py` + `devices/`): each device authenticates to
-  the broker with its `device_id` as username; the Mosquitto ACL — generated from the
-  `devices` table by `python -m minemonitor.devices.acl` — confines each device to
-  writing only its own `mm/<site>/<asset>/position` topic. The ingestor independently
-  rejects any message whose topic and payload disagree (anti-spoof), and, when
+- **MQTT broker auth** (`ingest/authz.py` + `devices/`): the broker is the transport
+  authority. Internal publishers (ingestor, simulator, Teltonika adapter) authenticate
+  as one **service account** (`MM_MQTT_USERNAME`/`PASSWORD`); each native-MQTT tracker
+  authenticates with its `device_id`. Provisioning issues a per-device secret (returned
+  once; only its Mosquitto `$7$` hash is stored). `python -m minemonitor.devices.broker_config`
+  renders the broker **password file** and **ACL** from the `devices` table — the ACL
+  confines each device to writing only its own `mm/<site>/<asset>/position` topic. The
+  hardened broker config (`docker/mosquitto.auth.conf`) runs `allow_anonymous false`;
+  the dev/demo default stays anonymous, and `MM_ENV=prod` refuses to boot on an
+  anonymous broker. Above the broker, the ingestor still independently rejects any
+  message whose topic and payload disagree (anti-spoof), and, when
   `MM_MQTT_REQUIRE_REGISTERED_DEVICE=true`, rejects assets with no enabled device row.
 
 ---

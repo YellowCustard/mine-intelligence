@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import secrets
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from minemonitor.devices.broker_config import mosquitto_password_hash
 from minemonitor.storage.models import Device
 
 
@@ -63,6 +65,21 @@ def set_enabled(session: Session, device_id: str, enabled: bool) -> Device | Non
     if dev is not None:
         dev.enabled = enabled
     return dev
+
+
+def rotate_secret(session: Session, device_id: str) -> str:
+    """Issue a fresh broker password for a device; return the cleartext once.
+
+    Only the Mosquitto ``$7$`` hash is stored — the cleartext is returned to the
+    caller for one-time display and never persisted. The broker password file must
+    be regenerated and reloaded afterwards for the new secret to take effect.
+    """
+    dev = session.get(Device, device_id)
+    if dev is None:
+        raise ValueError(f"device {device_id!r} not found")
+    secret = secrets.token_urlsafe(24)
+    dev.broker_pw_hash = mosquitto_password_hash(secret)
+    return secret
 
 
 def authorized_asset(session: Session, site_id: str, asset_id: str) -> bool:

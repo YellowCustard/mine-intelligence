@@ -454,3 +454,7 @@ class Device(Base):
     expected_interval_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Mosquitto ``$7$`` PBKDF2-SHA512 hash of the device's broker password, rendered
+    # into the broker password file (never the cleartext, which is shown once at
+    # provisioning). Null until a secret is issued.
+    broker_pw_hash: Mapped[str | None] = mapped_column(String, nullable=True)

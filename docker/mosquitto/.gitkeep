@@ -1,0 +1,4 @@
+# Generated Mosquitto credential files (passwd, acl) are written here by
+# `python -m minemonitor.devices.broker_config` and are gitignored — they hold
+# credential hashes and must never be committed. This directory is bind-mounted
+# into the broker at /mosquitto/config/auth.

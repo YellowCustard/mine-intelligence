@@ -168,31 +168,44 @@ changes; use it to establish scope.
 
 ---
 
-## 7. Devices and MQTT provisioning
+## 7. Devices, broker auth and MQTT provisioning
 
-Trackers authenticate to the broker with their `device_id` as the MQTT username, and
-each is confined to writing only its own topic.
+The broker is the transport-layer authority. Internal clients (the ingestor consumer
+and the simulator / Teltonika-adapter publishers) authenticate as one **service
+account** (`MM_MQTT_USERNAME` / `MM_MQTT_PASSWORD`); each native-MQTT tracker
+authenticates with its `device_id` and is confined by ACL to writing only its own
+`mm/<site>/<asset>/position` topic.
+
+**Dev/demo default is anonymous** (`docker/mosquitto.conf`, `allow_anonymous true`) so
+a fresh install runs with no setup. **On a real site, set the service account** —
+`deploy.sh` then generates the broker credential files, selects the hardened config
+(`docker/mosquitto.auth.conf`, `allow_anonymous false`), and enforces auth. With
+`MM_ENV=prod` the API refuses to boot if the broker would be anonymous.
 
 ```bash
-# Provision a device (admin, audited):
+# Provision a device (admin, audited). A broker secret is returned ONCE — configure
+# the tracker with it; only its hash is stored, so it cannot be retrieved later.
 POST /sites/{site_id}/devices  { "device_id": "trk-1", "asset_id": "HT-102", "source": "teltonika" }
-# Enable/disable:
+# Reissue a lost/rotated secret (returned once):
+POST /sites/{site_id}/devices/{device_id}/rotate-secret
+# Enable/disable (a disabled device drops out of the password + ACL files):
 POST /sites/{site_id}/devices/{device_id}/enabled  { "enabled": false }
 ```
 
-One asset binds to one device (a second binding returns 409). Regenerate and reload the
-broker ACL whenever devices change:
+One asset binds to one device (a second binding returns 409). **Regenerate and reload
+the broker whenever devices change** — this rewrites both the password file (issued
+device secrets) and the ACL (per-device topic):
 
 ```bash
-docker compose exec api uv run python -m minemonitor.devices.acl > mosquitto/acl
+docker compose exec api uv run python -m minemonitor.devices.broker_config
 docker compose exec mqtt kill -HUP 1
 ```
 
-**Strict mode.** With `MM_MQTT_REQUIRE_REGISTERED_DEVICE=true` the ingestor accepts
-telemetry only for assets with an enabled device row. It is **off by default** so a
-fresh or demo install ingests without provisioning; turn it on once devices are
-provisioned. Independently of this flag, the ingestor always rejects any message whose
-topic and payload disagree (anti-spoof).
+**Strict mode.** With `MM_MQTT_REQUIRE_REGISTERED_DEVICE=true` the ingestor also accepts
+telemetry only for assets with an enabled device row — a second, source-agnostic check
+above the broker ACL. It is **off by default** so a fresh or demo install ingests
+without provisioning. Independently of this flag, the ingestor always rejects any
+message whose topic and payload disagree (anti-spoof).
 
 ---
 

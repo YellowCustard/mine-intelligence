@@ -57,7 +57,12 @@ def register_device(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ) -> dict[str, Any]:
-    """Provision a device bound to one asset (admin only). An asset takes one device."""
+    """Provision a device bound to one asset (admin only). An asset takes one device.
+
+    A broker secret is issued and returned **once** in ``secret``; only its hash is
+    stored. Configure the tracker with it, then regenerate the broker password file
+    (``python -m minemonitor.devices.broker_config``) and reload the broker.
+    """
     try:
         dev = service.register_device(
             db,
@@ -68,6 +73,7 @@ def register_device(
             expected_interval_s=body.expected_interval_s,
             note=body.note,
         )
+        secret = service.rotate_secret(db, body.device_id)
     except ValueError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     audit.record(
@@ -80,7 +86,34 @@ def register_device(
         detail={"asset_id": body.asset_id},
     )
     db.commit()
-    return _device_dict(dev)
+    return {**_device_dict(dev), "secret": secret}
+
+
+@router.post("/sites/{site_id}/devices/{device_id}/rotate-secret")
+def rotate_secret(
+    site_id: str,
+    device_id: str,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> dict[str, Any]:
+    """Issue a fresh broker secret for a device (admin only); returned once.
+
+    Regenerate the broker password file and reload the broker afterwards.
+    """
+    dev = service.get_device(db, device_id)
+    if dev is None or dev.site_id != site_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "device not found")
+    secret = service.rotate_secret(db, device_id)
+    audit.record(
+        db,
+        actor=admin.username,
+        action="device.rotate_secret",
+        entity_type="device",
+        entity_id=device_id,
+        site_id=site_id,
+    )
+    db.commit()
+    return {"device_id": device_id, "secret": secret}
 
 
 @router.post("/sites/{site_id}/devices/{device_id}/enabled")
