@@ -41,8 +41,10 @@ Tick every box. A red box is a blocked release, not a note for later.
 
 - [ ] `MM_ENV=prod` guard verified: the API refuses to boot on sample DB credentials
       or a weak bootstrap password.
-- [ ] API bound to localhost; public exposure is only via TLS reverse proxy or SSH
-      tunnel (Basic auth must ride TLS).
+- [ ] API bound to localhost; public exposure is only via TLS (the bundled Caddy
+      `--profile tls`, or your own reverse proxy) or an SSH tunnel — Basic auth must
+      ride TLS. For a public domain, the Caddyfile uses `tls {$MM_TLS_EMAIL}`
+      (Let's Encrypt); on-prem uses Caddy's internal CA.
 - [ ] **MQTT broker requires auth** — `MM_MQTT_USERNAME`/`PASSWORD` set, the broker
       runs `allow_anonymous false` (`docker/mosquitto.auth.conf`), and the password +
       ACL files were generated from the devices table. No anonymous access to 1883.

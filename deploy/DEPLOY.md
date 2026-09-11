@@ -97,10 +97,27 @@ ssh -L 8000:127.0.0.1:8000 <user>@<vps-host>
 # then open http://localhost:8000/
 ```
 
-**b) Public URL behind nginx + TLS:** put nginx in front, terminate Let's Encrypt
-TLS, and `proxy_pass` to `127.0.0.1:8000`. The **application** now handles login
-(HTTP Basic with roles), so nginx only needs to provide TLS — do not add a second
-`auth_basic` layer or the browser will prompt twice. SSE needs buffering off:
+**b) TLS in one command with the bundled Caddy profile (recommended):**
+```bash
+docker compose --profile tls up -d      # starts Caddy on 80/443 in front of the API
+```
+Caddy reaches the API over the compose network, so `MM_API_BIND` can stay
+`127.0.0.1` — only Caddy faces the world. It handles TLS; the **application** handles
+login (HTTP Basic with roles), so there is no second auth layer. The bundled
+`docker/Caddyfile` streams SSE correctly (`flush_interval -1`).
+
+- **On-prem / private host (default):** reach it over the mine LAN or VPN. Caddy's
+  internal CA issues a self-signed cert (`tls internal`); trust that CA once on the
+  operator machines, or accept the browser prompt.
+- **Public domain:** point DNS at the box, set `MM_SITE_DOMAIN=mine.example.com` and
+  `MM_TLS_EMAIL=ops@example.com` in `.env`, and change the Caddyfile's `tls internal`
+  to `tls {$MM_TLS_EMAIL}` — Caddy then provisions and renews a Let's Encrypt
+  certificate automatically. Open ports 80 and 443.
+
+**c) Bring your own nginx** (if you already run one): terminate Let's Encrypt TLS and
+`proxy_pass` to `127.0.0.1:8000`. The application handles login, so nginx only
+provides TLS — do not add a second `auth_basic` layer or the browser prompts twice.
+SSE needs buffering off:
 ```nginx
 server {
   server_name mine.example.com;

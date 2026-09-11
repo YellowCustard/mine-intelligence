@@ -1,0 +1,21 @@
+# Caddy reverse proxy — terminates TLS in front of the API (brief §3, on-prem).
+#
+# The API speaks HTTP Basic, which must ride TLS; this gives the stack a safe HTTPS
+# URL from one `docker compose --profile tls up -d`, instead of an SSH tunnel.
+#
+# Default is the ON-PREM case: a private hostname with Caddy's internal CA
+# (`tls internal`, a self-signed cert). Reach it over the mine LAN/VPN and trust the
+# CA once, or accept the browser prompt. For a PUBLIC domain with a real certificate,
+# replace `tls internal` with `tls {$MM_TLS_EMAIL}` so Caddy provisions Let's Encrypt.
+#
+# Caddy connects to the API over the compose network (service name `api`), so the
+# API's own published port can stay bound to localhost — only Caddy faces the world.
+
+{$MM_SITE_DOMAIN:localhost} {
+	encode gzip
+	# Streaming-friendly: the dashboard's live updates use Server-Sent Events.
+	reverse_proxy api:8000 {
+		flush_interval -1
+	}
+	tls internal
+}

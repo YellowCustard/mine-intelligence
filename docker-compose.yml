@@ -177,6 +177,29 @@ services:
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.adapters.simulator"]
 
+  # TLS reverse proxy. Enable with:  docker compose --profile tls up -d
+  # Terminates HTTPS in front of the API so Basic credentials ride TLS, giving a safe
+  # public/LAN URL instead of an SSH tunnel. Defaults to Caddy's internal CA for an
+  # on-prem host; for a public domain, set MM_SITE_DOMAIN and switch the Caddyfile's
+  # `tls internal` to `tls {$MM_TLS_EMAIL}` (Let's Encrypt). See deploy/DEPLOY.md.
+  caddy:
+    image: caddy:2
+    profiles: ["tls"]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      MM_SITE_DOMAIN: ${MM_SITE_DOMAIN:-localhost}
+      MM_TLS_EMAIL: ${MM_TLS_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
   # Scheduled database backup. Enable with:  docker compose --profile backup up -d
   # Dumps to ./backups on an interval and prunes old dumps. Restore with
   # deploy/restore.sh (see deploy/DEPLOY.md).
@@ -213,3 +236,5 @@ volumes:
   db_data:
   mqtt_data:
   minio_data:
+  caddy_data:
+  caddy_config:
