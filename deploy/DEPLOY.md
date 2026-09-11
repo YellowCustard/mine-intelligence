@@ -54,6 +54,21 @@ runs the Alembic migrations on start), and — with `--demo` — the `simulator`
 
 The API (and the dashboard at `/`) listens on **127.0.0.1:8000** on the VPS.
 
+## 4b. Smoke-test the deployment
+
+After the stack is up, confirm it is actually serving, authenticating, ingesting and
+rendering the dashboard. Prints one line per check and exits non-zero on any failure:
+
+```bash
+docker compose exec \
+  -e MM_SMOKE_USER=alice -e MM_SMOKE_PASSWORD='…' \
+  api uv run python -m minemonitor.smoke
+```
+
+Checks: `/version` and `/healthz`, that authentication is enforced, that the admin can
+log in, an ingest→read-back round-trip, and that the dashboard loads. Run it after
+every deploy and upgrade.
+
 ## 4a. Create users (M6)
 
 Log in as the bootstrap admin, then create real accounts. Roles are a hierarchy
