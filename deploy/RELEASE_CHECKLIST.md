@@ -80,11 +80,19 @@ Tick every box. A red box is a blocked release, not a note for later.
 
 ## 8. Backup / restore proof
 
-- [ ] `bash deploy/backup.sh` writes a dump.
+- [ ] `bash deploy/backup.sh` writes a dump; `gunzip -t` on it passes.
 - [ ] Scheduled backup sidecar running (`--profile backup`) with sane
       `MM_BACKUP_INTERVAL_S` / `MM_BACKUP_KEEP_DAYS`.
-- [ ] Restore rehearsed at least once: `bash deploy/restore.sh <dump>` onto a clean
-      box brings the stack up and `/health` is green (M6 acceptance).
+- [ ] **Dump/restore data integrity verified** — dump a seeded DB, drop it, restore
+      into an empty DB, and confirm row counts, the `alembic_version` head, and a
+      content checksum of `positions` all match the pre-dump baseline exactly.
+- [ ] **Restore rehearsed end-to-end through the real scripts** —
+      `bash deploy/restore.sh <dump>` onto a clean box (the actual `db` container,
+      not just a bare Postgres) brings the whole stack up, `/health` is green, and
+      the smoke test passes 6/6 against the restored data — proving login works
+      (the password hash survived the dump) and bootstrap did not duplicate the
+      restored admin. This is the M6 acceptance and is the box that exercises the
+      **compose/container plumbing** the data-integrity check above does not.
 
 ## 9. Sign-off
 
