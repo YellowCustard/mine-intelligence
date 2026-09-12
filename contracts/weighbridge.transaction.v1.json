@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/weighbridge.transaction.v1.json",
+  "title": "weighbridge.transaction.v1",
+  "description": "A measured weighbridge ticket. Manufacturer-neutral: every scale/adapter maps onto this shape.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "ticket_id", "site_id", "ticket_no", "ts", "gross_kg", "tare_kg", "net_kg"],
+  "properties": {
+    "schema": { "const": "weighbridge.transaction.v1" },
+    "ticket_id": { "type": "string", "minLength": 1 },
+    "site_id": { "type": "string", "minLength": 1 },
+    "ticket_no": { "type": "string", "minLength": 1, "description": "External ticket number; unique per site." },
+    "ts": { "type": "string", "format": "date-time" },
+    "direction": { "enum": ["inbound", "outbound"], "default": "outbound" },
+    "gross_kg": { "type": "number", "minimum": 0 },
+    "tare_kg": { "type": "number", "minimum": 0 },
+    "net_kg": { "type": "number", "description": "Measured net as printed by the bridge; net ≈ gross − tare is flagged, not corrected." },
+    "scale_id": { "type": ["string", "null"] },
+    "asset_id": { "type": ["string", "null"], "description": "The weighed vehicle." },
+    "trailer": { "type": ["string", "null"] },
+    "material": { "type": ["string", "null"] },
+    "destination": { "type": ["string", "null"] },
+    "customer": { "type": ["string", "null"] },
+    "source": { "enum": ["manual", "import", "api", "serial"], "default": "manual" },
+    "measured": { "const": true }
+  }
+}

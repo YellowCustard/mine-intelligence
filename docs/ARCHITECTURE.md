@@ -230,6 +230,12 @@ Route surface (roles: `viewer < supervisor < admin`, plus `device` for ingest on
   `GET /sites/{id}/fuel/consumption` (measured litres + calculated efficiency,
   labelled), `GET /sites/{id}/fuel/reconciliation/{tank_id}` (flags variance, never
   corrects). Measured facts only; anomaly detection is a later increment.
+- **Weighbridge** (Phase 4): `POST/GET /sites/{id}/weighbridge/scales` (admin/viewer),
+  `POST/GET /sites/{id}/weighbridge/tickets` (supervisor/viewer, audited, idempotent
+  per `ticket_no`; publishes `weighbridge.transaction.v1`),
+  `POST /sites/{id}/weighbridge/import` (CSV adapter, supervisor),
+  `GET /sites/{id}/weighbridge/tonnage` (measured net per material). Manufacturer-
+  neutral; net-consistency (`net ≈ gross − tare`) is flagged, never corrected.
 - **Governance:** operators (+ export), audit log, `POST /admin/retention/run`.
 
 ---

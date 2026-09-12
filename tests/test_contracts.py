@@ -150,3 +150,26 @@ def test_fuel_transaction_valid_instance_passes_both() -> None:
     model = FuelTransactionV1.model_validate(instance)
     dumped = json.loads(model.model_dump_json(by_alias=True))
     Draft202012Validator(_load_schema("fuel.transaction.v1.json")).validate(dumped)
+
+
+def test_weighbridge_transaction_valid_instance_passes_both() -> None:
+    from minemonitor.contracts.weighbridge import WeighbridgeTransactionV1
+
+    Draft202012Validator.check_schema(_load_schema("weighbridge.transaction.v1.json"))
+    instance = {
+        "schema": "weighbridge.transaction.v1",
+        "ticket_id": "01J9Z8ABCDEF",
+        "site_id": "kn-zw-01",
+        "ticket_no": "T-500",
+        "ts": "2026-09-05T11:42:07Z",
+        "direction": "outbound",
+        "gross_kg": 40000,
+        "tare_kg": 15000,
+        "net_kg": 25000,
+        "material": "gold_ore",
+        "measured": True,
+    }
+    Draft202012Validator(_load_schema("weighbridge.transaction.v1.json")).validate(instance)
+    model = WeighbridgeTransactionV1.model_validate(instance)
+    dumped = json.loads(model.model_dump_json(by_alias=True))
+    Draft202012Validator(_load_schema("weighbridge.transaction.v1.json")).validate(dumped)

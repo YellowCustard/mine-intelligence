@@ -28,6 +28,7 @@ from minemonitor.api.routers import (
     platform,
     reports,
     stream,
+    weighbridge,
     zones,
 )
 from minemonitor.auth.deps import require_viewer
@@ -172,6 +173,7 @@ def create_app() -> FastAPI:
         devices.router,
         notifications.router,
         fuel.router,
+        weighbridge.router,
     ]
     for r in _domain_routers:
         app.include_router(r)  # legacy unprefixed

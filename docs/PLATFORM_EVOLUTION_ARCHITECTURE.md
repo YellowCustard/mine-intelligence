@@ -235,6 +235,15 @@ No big-bang. Every step is additive, migration-backed, tested, and reversible.
      tank reconciliation flags variance beyond tolerance and never corrects records.
      Anomaly detection (theft/abnormal-consumption) is the deferred increment 2.
      *Additive; 11 tests; migration round-tripped on PG16; full suite green.*
+   - **Weighbridge (measured + CSV adapter): ✅ DELIVERED.** Migration 0016
+     (`weighbridges`, `weigh_tickets`); `minemonitor/weighbridge/` service;
+     manufacturer-neutral `weighbridge.transaction.v1` contract registered and
+     published on the bus; site-scoped, RBAC'd, audited API with a concrete CSV import
+     adapter. Tickets are idempotent per `(site, ticket_no)` (re-imports never
+     double-count production); net-consistency (`net ≈ gross − tare`) is flagged, never
+     corrected; tonnage summarised per material as measured net. Full dispatch/stock
+     reconciliation waits on those domains. *Additive; 11 tests; migration
+     round-tripped on PG16; full suite green (298 passed).*
 4. **Mobile:** against `/api/v1` + a sync endpoint; offline-first.
 5. **Service extraction (evidence-driven):** notifications, then reporting/analytics,
    then telemetry — each behind its existing API/contract, strangler-style.

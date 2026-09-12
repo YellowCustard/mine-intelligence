@@ -550,3 +550,52 @@ class FuelTankReading(Base):
     level_l: Mapped[float] = mapped_column(Float, nullable=False)
     source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class Weighbridge(Base):
+    """A weighbridge/scale at a site (weighbridge domain, Phase 4). Reference data."""
+
+    __tablename__ = "weighbridges"
+    __table_args__ = (Index("ix_weighbridges_site", "site_id"),)
+
+    scale_id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WeighTicket(Base):
+    """A **measured** weighbridge ticket — gross/tare/net for one weighing.
+
+    Manufacturer-neutral: every scale/adapter maps onto this shape via the
+    ``weighbridge.transaction.v1`` contract. Gross, tare and net are the measured
+    figures the bridge prints; net-consistency (net ≈ gross − tare) is *flagged*, never
+    silently corrected. ``ticket_no`` is unique per site, so re-importing a ticket (CSV
+    replays) is idempotent rather than double-counting production.
+    """
+
+    __tablename__ = "weigh_tickets"
+    __table_args__ = (
+        UniqueConstraint("site_id", "ticket_no", name="uq_weigh_tickets_site_ticket"),
+        Index("ix_weigh_tickets_site_ts", "site_id", "ts"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    ticket_no: Mapped[str] = mapped_column(String, nullable=False)
+    scale_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    direction: Mapped[str] = mapped_column(String, nullable=False, default="outbound")
+    gross_kg: Mapped[float] = mapped_column(Float, nullable=False)
+    tare_kg: Mapped[float] = mapped_column(Float, nullable=False)
+    net_kg: Mapped[float] = mapped_column(Float, nullable=False)
+    asset_id: Mapped[str | None] = mapped_column(String, nullable=True)  # the vehicle
+    trailer: Mapped[str | None] = mapped_column(String, nullable=True)
+    material: Mapped[str | None] = mapped_column(String, nullable=True)
+    destination: Mapped[str | None] = mapped_column(String, nullable=True)
+    customer: Mapped[str | None] = mapped_column(String, nullable=True)
+    operator_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
