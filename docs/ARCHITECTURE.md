@@ -224,6 +224,12 @@ Route surface (roles: `viewer < supervisor < admin`, plus `device` for ingest on
   classification (+ categories); handover create/acknowledge.
 - **Devices:** `GET/POST /sites/{id}/devices`,
   `POST /sites/{id}/devices/{device_id}/enabled` (admin, audited).
+- **Fuel** (Phase 3): `POST/GET /sites/{id}/fuel/tanks` (admin/viewer),
+  `POST/GET /sites/{id}/fuel/transactions` (supervisor/viewer, audited; publishes
+  `fuel.transaction.v1`), `POST /sites/{id}/fuel/tank-readings`,
+  `GET /sites/{id}/fuel/consumption` (measured litres + calculated efficiency,
+  labelled), `GET /sites/{id}/fuel/reconciliation/{tank_id}` (flags variance, never
+  corrects). Measured facts only; anomaly detection is a later increment.
 - **Governance:** operators (+ export), audit log, `POST /admin/retention/run`.
 
 ---

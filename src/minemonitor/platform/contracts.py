@@ -16,6 +16,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from minemonitor.contracts import AssetMetricsV1, AssetPositionV1, EventV1
+from minemonitor.contracts.fuel import FuelTransactionV1
 
 # The registered contracts, keyed by their schema string. Extend this as new domains
 # land — never mutate an existing entry's shape (add a new version instead).
@@ -23,6 +24,7 @@ _REGISTRY: dict[str, type[BaseModel]] = {
     "asset.position.v1": AssetPositionV1,
     "event.v1": EventV1,
     "asset.metrics.v1": AssetMetricsV1,
+    "fuel.transaction.v1": FuelTransactionV1,
 }
 
 

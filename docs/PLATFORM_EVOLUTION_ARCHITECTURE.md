@@ -227,6 +227,14 @@ No big-bang. Every step is additive, migration-backed, tested, and reversible.
 3. **Fuel → Weighbridge → Maintenance → Dispatch:** each a new in-core domain module
    + migration + contracts + API + UI section + tests, in that order (measured data
    before anomalies before predictions before optimisation).
+   - **Fuel (measured + reconciliation): ✅ DELIVERED (increment 1).** Migration 0015
+     (`fuel_tanks`, `fuel_transactions`, `fuel_tank_readings`); `minemonitor/fuel/`
+     service; `fuel.transaction.v1` contract registered and published on the Phase-1
+     bus; site-scoped, RBAC'd, audited API. Consumption labels measured vs calculated
+     (ratios are `None` when the measured denominator is absent — never fabricated);
+     tank reconciliation flags variance beyond tolerance and never corrects records.
+     Anomaly detection (theft/abnormal-consumption) is the deferred increment 2.
+     *Additive; 11 tests; migration round-tripped on PG16; full suite green.*
 4. **Mobile:** against `/api/v1` + a sync endpoint; offline-first.
 5. **Service extraction (evidence-driven):** notifications, then reporting/analytics,
    then telemetry — each behind its existing API/contract, strangler-style.

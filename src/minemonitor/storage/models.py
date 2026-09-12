@@ -492,3 +492,61 @@ class Notification(Base):
     next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class FuelTank(Base):
+    """A bulk fuel tank at a site (fuel domain, Phase 3). Reference data."""
+
+    __tablename__ = "fuel_tanks"
+    __table_args__ = (Index("ix_fuel_tanks_site", "site_id"),)
+
+    tank_id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    capacity_l: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class FuelTransaction(Base):
+    """A **measured** fuel movement — a machine observation, not an annotation.
+
+    ``direction`` is ``dispense`` (fuel out of a tank into a machine) or ``delivery``
+    (fuel into a tank). Litres and the optional odometer/engine-hour readings are
+    *measured*; anything derived from them (efficiency) is calculated elsewhere and
+    labelled as such. Records are append-only: a correction is a new, linked row, so
+    historical reconciliation stays reproducible (brief §3/§15 discipline).
+    """
+
+    __tablename__ = "fuel_transactions"
+    __table_args__ = (Index("ix_fuel_transactions_site_ts", "site_id", "ts"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    asset_id: Mapped[str | None] = mapped_column(String, nullable=True)  # machine fuelled
+    tank_id: Mapped[str | None] = mapped_column(String, nullable=True)  # source/target tank
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    litres: Mapped[float] = mapped_column(Float, nullable=False)
+    direction: Mapped[str] = mapped_column(String, nullable=False, default="dispense")
+    source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
+    station: Mapped[str | None] = mapped_column(String, nullable=True)
+    odometer_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    engine_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class FuelTankReading(Base):
+    """A **measured** tank level reading (dip or telemetry), for reconciliation."""
+
+    __tablename__ = "fuel_tank_readings"
+    __table_args__ = (Index("ix_fuel_tank_readings_tank_ts", "tank_id", "ts"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    tank_id: Mapped[str] = mapped_column(ForeignKey("fuel_tanks.tank_id"), nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    level_l: Mapped[float] = mapped_column(Float, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
