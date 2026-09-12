@@ -8,6 +8,11 @@ simulator for demo data until real trackers are on site). So it runs on a
 > **On xneelo:** use a **Cloud/VPS** instance (an Ubuntu server you get root on),
 > not the shared "Web Hosting" product. Shared hosting cannot run Docker.
 
+> **Commissioning a mine site (with a real tracker)?** This file covers the software
+> deploy. For the end-to-end on-site procedure — server bring-up, site config, first
+> Teltonika tracker provisioning/acceptance, failure injection, backup/restore
+> rehearsal and the soak test — follow [`COMMISSIONING.md`](./COMMISSIONING.md).
+
 ## 1. Prerequisites (once, on the VPS)
 
 - Ubuntu 22.04+ (or similar), **2 GB RAM minimum** (4 GB comfortable), ~10 GB disk.
