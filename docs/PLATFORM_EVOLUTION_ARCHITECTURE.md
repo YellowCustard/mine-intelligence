@@ -244,6 +244,16 @@ No big-bang. Every step is additive, migration-backed, tested, and reversible.
      corrected; tonnage summarised per material as measured net. Full dispatch/stock
      reconciliation waits on those domains. *Additive; 11 tests; migration
      round-tripped on PG16; full suite green (298 passed).*
+   - **Predictive maintenance (deterministic indicators): ✅ DELIVERED (increment 1).**
+     Migration 0017 (`maintenance_plans`, `work_orders`); `minemonitor/maintenance/`
+     service; `maintenance.health.v1` contract registered. Risk (Normal→Critical, or
+     Unknown) is derived deterministically from a service interval vs the time/engine-
+     hours since the last completed service — every assessment carries basis
+     (observed/measured/unknown), confidence and evidence; a completed service resets
+     it; engine hours come from the latest fuel record when present and are never
+     fabricated. **No ML, no invented sensor values, never actuates a machine.**
+     Anomaly detection and predictive models are deferred increments, gated on real
+     historical data. *Additive; 11 tests; migration round-tripped on PG16; 309 passed.*
 4. **Mobile:** against `/api/v1` + a sync endpoint; offline-first.
 5. **Service extraction (evidence-driven):** notifications, then reporting/analytics,
    then telemetry — each behind its existing API/contract, strangler-style.

@@ -236,6 +236,14 @@ Route surface (roles: `viewer < supervisor < admin`, plus `device` for ingest on
   `POST /sites/{id}/weighbridge/import` (CSV adapter, supervisor),
   `GET /sites/{id}/weighbridge/tonnage` (measured net per material). Manufacturer-
   neutral; net-consistency (`net ≈ gross − tare`) is flagged, never corrected.
+- **Maintenance** (Phase 5): `POST/GET /sites/{id}/maintenance/plans` (admin/viewer),
+  `POST /sites/{id}/maintenance/work-orders` + `/{id}/complete` (supervisor, audited),
+  `GET /sites/{id}/maintenance/work-orders`,
+  `GET /sites/{id}/maintenance/health` (viewer). Health is a **deterministic** risk
+  (`maintenance.health.v1`: Normal→Critical/Unknown) from service interval vs
+  time/engine-hours since last service — inferred, evidenced, advisory; engine hours
+  read from the latest fuel record when present, never fabricated. No ML in this
+  increment.
 - **Governance:** operators (+ export), audit log, `POST /admin/retention/run`.
 
 ---

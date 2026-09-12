@@ -173,3 +173,29 @@ def test_weighbridge_transaction_valid_instance_passes_both() -> None:
     model = WeighbridgeTransactionV1.model_validate(instance)
     dumped = json.loads(model.model_dump_json(by_alias=True))
     Draft202012Validator(_load_schema("weighbridge.transaction.v1.json")).validate(dumped)
+
+
+def test_maintenance_health_valid_instance_passes_both() -> None:
+    from minemonitor.contracts.maintenance import MaintenanceHealthV1
+
+    Draft202012Validator.check_schema(_load_schema("maintenance.health.v1.json"))
+    instance = {
+        "schema": "maintenance.health.v1",
+        "site_id": "kn-zw-01",
+        "asset_id": "HT-102",
+        "component": "engine",
+        "ts": "2026-09-12T12:00:00Z",
+        "risk": "High",
+        "basis": "measured",
+        "confidence": 0.85,
+        "dimension": "hours",
+        "fraction": 1.05,
+        "remaining": -25.0,
+        "evidence": ["525h since last service; interval 500h"],
+        "recommended_action": "Service overdue — inspect and service promptly.",
+        "inferred": True,
+    }
+    Draft202012Validator(_load_schema("maintenance.health.v1.json")).validate(instance)
+    model = MaintenanceHealthV1.model_validate(instance)
+    dumped = json.loads(model.model_dump_json(by_alias=True))
+    Draft202012Validator(_load_schema("maintenance.health.v1.json")).validate(dumped)

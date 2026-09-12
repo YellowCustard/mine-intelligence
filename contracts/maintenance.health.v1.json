@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/maintenance.health.v1.json",
+  "title": "maintenance.health.v1",
+  "description": "A derived maintenance health/risk assessment. Inferred, never a measured fact; carries basis, confidence and evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "site_id", "asset_id", "component", "ts", "risk", "basis", "confidence", "recommended_action"],
+  "properties": {
+    "schema": { "const": "maintenance.health.v1" },
+    "site_id": { "type": "string", "minLength": 1 },
+    "asset_id": { "type": "string", "minLength": 1 },
+    "component": { "type": "string", "minLength": 1 },
+    "ts": { "type": "string", "format": "date-time" },
+    "risk": { "enum": ["Normal", "Watch", "Elevated", "High", "Critical", "Unknown"] },
+    "basis": { "enum": ["observed", "measured", "estimated", "inferred", "unknown"] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "dimension": { "type": ["string", "null"], "description": "hours | days | null" },
+    "fraction": { "type": ["number", "null"], "description": "Interval consumed (1.0 = due)." },
+    "remaining": { "type": ["number", "null"], "description": "Remaining hours/days to service." },
+    "evidence": { "type": "array", "items": { "type": "string" } },
+    "recommended_action": { "type": "string" },
+    "inferred": { "const": true }
+  }
+}

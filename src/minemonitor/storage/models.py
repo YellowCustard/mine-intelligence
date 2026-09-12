@@ -599,3 +599,52 @@ class WeighTicket(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class MaintenancePlan(Base):
+    """A service plan for an asset component (maintenance domain, Phase 5). Reference data.
+
+    A plan is an interval — by engine hours, calendar days, or both — against which a
+    **deterministic** health indicator is derived. No plan means health is ``Unknown``;
+    the system never invents a schedule.
+    """
+
+    __tablename__ = "maintenance_plans"
+    __table_args__ = (
+        UniqueConstraint("site_id", "asset_id", "component", name="uq_maint_plan_asset_component"),
+        Index("ix_maint_plans_site", "site_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String, nullable=False)
+    component: Mapped[str] = mapped_column(String, nullable=False, default="machine")
+    interval_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    interval_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WorkOrder(Base):
+    """A maintenance event: a service, repair or inspection on an asset component.
+
+    Completing a ``service`` work order (with the optional engine-hour reading taken at
+    the time) is the baseline the health indicator measures from — so a fresh service
+    resets the risk. An operational annotation, stored separately from telemetry.
+    """
+
+    __tablename__ = "work_orders"
+    __table_args__ = (Index("ix_work_orders_site_asset", "site_id", "asset_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String, nullable=False)
+    component: Mapped[str] = mapped_column(String, nullable=False, default="machine")
+    type: Mapped[str] = mapped_column(String, nullable=False, default="service")
+    status: Mapped[str] = mapped_column(String, nullable=False, default="open")
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    at_engine_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
