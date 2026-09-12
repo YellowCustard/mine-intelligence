@@ -22,6 +22,7 @@ import time
 import paho.mqtt.client as mqtt
 
 from minemonitor.config import get_settings
+from minemonitor.ingest.authz import topic_matches_payload
 from minemonitor.ingest.service import PositionIngest, store_and_process
 from minemonitor.ingest.spool import Spool
 from minemonitor.storage.db import get_session_factory
@@ -54,6 +55,8 @@ class MqttPublisher:
         self.spool = Spool(spool_path or s.spool_path)
         self.drain_interval_s = drain_interval_s
         self._client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
+        if s.mqtt_username:
+            self._client.username_pw_set(s.mqtt_username, s.mqtt_password)
         self._connected = threading.Event()
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
@@ -141,6 +144,8 @@ class MqttIngestor:
             client_id=client_id or s.mqtt_ingest_client_id,
             clean_session=False,
         )
+        if s.mqtt_username:
+            self._client.username_pw_set(s.mqtt_username, s.mqtt_password)
         self._client.on_connect = self._on_connect
         self._client.on_message = self._on_message
         self._stop = threading.Event()
@@ -151,6 +156,8 @@ class MqttIngestor:
         self._site_id = s.default_site_id
         self._retention_interval_s = s.retention_interval_s
         self._last_retention = 0.0
+        self._require_registered_device = s.mqtt_require_registered_device
+        self.rejected_count = 0
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
         topic = f"{self.prefix}/+/+/position"
@@ -164,11 +171,42 @@ class MqttIngestor:
             # Malformed device data: reject loudly, but do not block the queue by
             # withholding the ack — a bad message will never become good.
             log.error("rejected malformed position", extra={"topic": msg.topic})
+            self.rejected_count += 1
+            return
+        # Anti-spoof (brief §10): the topic names the asset; a device confined by the
+        # broker ACL to its own topic cannot claim another asset in the body.
+        if not topic_matches_payload(self.prefix, msg.topic, payload.site_id, payload.asset_id):
+            log.error(
+                "rejected topic/payload mismatch",
+                extra={
+                    "topic": msg.topic,
+                    "payload_site": payload.site_id,
+                    "payload_asset": payload.asset_id,
+                },
+            )
+            self.rejected_count += 1
+            return
+        if self._require_registered_device and not self._is_registered(payload):
+            log.error(
+                "rejected unregistered device",
+                extra={"site_id": payload.site_id, "asset_id": payload.asset_id},
+            )
+            self.rejected_count += 1
             return
         # Withhold the ack (by not returning) until the write succeeds, so the
         # broker redelivers rather than the consumer dropping on a DB outage.
         self._store_with_retry(payload)
         self.stored_count += 1
+
+    def _is_registered(self, payload: PositionIngest) -> bool:
+        """Strict mode: accept only assets with an enabled provisioned device."""
+        from minemonitor.devices.service import authorized_asset
+
+        session = self._session_factory()
+        try:
+            return authorized_asset(session, payload.site_id, payload.asset_id)
+        finally:
+            session.close()
 
     def _store_with_retry(self, payload: PositionIngest) -> None:
         while not self._stop.is_set():
@@ -204,9 +242,13 @@ class MqttIngestor:
         analytics to ingest.
         """
         from minemonitor import heartbeat
+        from minemonitor.config import get_settings
         from minemonitor.cycles.recompute import recompute
+        from minemonitor.notifications.dispatch import UrllibSmtpSender, dispatch_pending
         from minemonitor.retention import run_from_config
         from minemonitor.rules.offline import detect_offline
+
+        notify_sender = UrllibSmtpSender(get_settings())
 
         while not self._stop.wait(self._offline_interval_s):
             session = self._session_factory()
@@ -223,6 +265,11 @@ class MqttIngestor:
                         extra={"site_id": ev.site_id, "asset_id": ev.asset_id},
                     )
                 recompute(session, self._site_id)
+                # Drain the notification outbox (store-and-forward alerts, brief §3).
+                # No-op unless notifications are configured and rows are due.
+                outcome = dispatch_pending(session, sender=notify_sender)
+                if outcome["sent"] or outcome["failed"]:
+                    log.info("notifications dispatched", extra=outcome)
                 # Run the retention deletion job roughly daily (brief §4).
                 now = time.monotonic()
                 if now - self._last_retention >= self._retention_interval_s:

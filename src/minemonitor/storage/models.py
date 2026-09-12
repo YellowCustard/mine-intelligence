@@ -20,6 +20,7 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -310,6 +311,12 @@ class Incident(Base):
     __table_args__ = (Index("ix_incidents_site_state", "site_id", "state"),)
 
     incident_id: Mapped[str] = mapped_column(String, primary_key=True)
+    # Optimistic concurrency (brief §15): every UPDATE checks and bumps version_id,
+    # so two operators who both act on a stale copy of the same incident cannot
+    # silently overwrite one another — the second write raises StaleDataError, which
+    # the router surfaces as 409 Conflict.
+    version_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    __mapper_args__ = {"version_id_col": version_id}
     site_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     # The originating alarm, if any. Linked, never mutated (brief §6 / §4).
     event_id: Mapped[str | None] = mapped_column(
@@ -422,3 +429,66 @@ class AuditLog(Base):
     entity_id: Mapped[str | None] = mapped_column(String, nullable=True)
     site_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     detail: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+
+
+class Device(Base):
+    """A provisioned telemetry device bound to exactly one asset (brief §10/§11).
+
+    ``device_id`` is the identity a tracker authenticates to the broker with; it may
+    publish telemetry only for its bound ``(site_id, asset_id)``. An asset has at most
+    one device (the unique constraint), so provisioning is unambiguous and the
+    broker ACL / ingest check can be derived directly from this table.
+    """
+
+    __tablename__ = "devices"
+    __table_args__ = (
+        UniqueConstraint("site_id", "asset_id", name="uq_devices_site_asset"),
+        Index("ix_devices_site", "site_id"),
+    )
+
+    device_id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(String, nullable=False)
+    asset_id: Mapped[str] = mapped_column(String, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    expected_interval_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Mosquitto ``$7$`` PBKDF2-SHA512 hash of the device's broker password, rendered
+    # into the broker password file (never the cleartext, which is shown once at
+    # provisioning). Null until a secret is issued.
+    broker_pw_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class Notification(Base):
+    """A queued outbound alert for an event — the store-and-forward notification outbox.
+
+    The network at the mine will fail (brief §3), so notifications are **not** sent
+    inline when an event fires: one row is written per (event, channel, target) in the
+    same transaction as the event, and a background dispatcher drains them with retry
+    and backoff. A row therefore survives a crash or an outage and is delivered on
+    recovery, exactly once per target (the unique constraint makes enqueue idempotent).
+
+    The payload carries only ``event.v1`` fields — summary, type, severity, asset/zone,
+    ids — never an operator name (personal data lives behind a foreign key, brief §4).
+    Notifications are **advisory** like every output of this system: they warn a person,
+    they never actuate plant (brief §15).
+    """
+
+    __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint("event_id", "channel", "target", name="uq_notifications_event_channel"),
+        Index("ix_notifications_state_next", "state", "next_attempt_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    event_id: Mapped[str] = mapped_column(ForeignKey("events.event_id"), nullable=False)
+    channel: Mapped[str] = mapped_column(String, nullable=False)  # "webhook" | "email"
+    target: Mapped[str] = mapped_column(String, nullable=False)  # URL or address
+    state: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)

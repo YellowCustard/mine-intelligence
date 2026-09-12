@@ -28,7 +28,11 @@ services:
     ports:
       - "1883:1883"
     volumes:
-      - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      # Default is the anonymous dev config; set MM_MOSQUITTO_CONF=./docker/mosquitto.auth.conf
+      # for the hardened, authenticated broker (generate ./docker/mosquitto first with
+      # `python -m minemonitor.devices.broker_config`).
+      - ${MM_MOSQUITTO_CONF:-./docker/mosquitto.conf}:/mosquitto/config/mosquitto.conf:ro
+      - ./docker/mosquitto:/mosquitto/config/auth:ro
       - mqtt_data:/mosquitto/data
     healthcheck:
       test: ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -t healthcheck -m ok || exit 1"]
@@ -58,6 +62,9 @@ services:
     environment:
       MM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-minemonitor}:${POSTGRES_PASSWORD:-minemonitor}@db:5432/${POSTGRES_DB:-minemonitor}
       MM_MQTT_HOST: mqtt
+      # Broker service account (blank = anonymous broker for dev/demo).
+      MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
+      MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
       MM_S3_ENDPOINT: http://minio:9000
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
       # First-run admin (M6): created only if the users table is empty. Leave
@@ -67,11 +74,26 @@ services:
       MM_RETAIN_POSITIONS_DAYS: ${MM_RETAIN_POSITIONS_DAYS:-90}
       MM_RETAIN_METRICS_DAYS: ${MM_RETAIN_METRICS_DAYS:-365}
       MM_RETAIN_EVENTS_DAYS: ${MM_RETAIN_EVENTS_DAYS:-365}
+      MM_RETAIN_ANNOTATIONS_DAYS: ${MM_RETAIN_ANNOTATIONS_DAYS:-365}
       MM_RETAIN_AUDIT_DAYS: ${MM_RETAIN_AUDIT_DAYS:-730}
       # Auth hardening (Phase 2). Tunable per site.
       MM_LOGIN_MAX_FAILURES: ${MM_LOGIN_MAX_FAILURES:-5}
       MM_LOGIN_LOCKOUT_MINUTES: ${MM_LOGIN_LOCKOUT_MINUTES:-15}
       MM_HEARTBEAT_STALE_S: ${MM_HEARTBEAT_STALE_S:-180}
+      MM_NOTIFY_MIN_SEVERITY: ${MM_NOTIFY_MIN_SEVERITY:-}
+      MM_NOTIFY_WEBHOOK_URL: ${MM_NOTIFY_WEBHOOK_URL:-}
+      MM_NOTIFY_SMTP_HOST: ${MM_NOTIFY_SMTP_HOST:-}
+      MM_NOTIFY_SMTP_PORT: ${MM_NOTIFY_SMTP_PORT:-587}
+      MM_NOTIFY_SMTP_USER: ${MM_NOTIFY_SMTP_USER:-}
+      MM_NOTIFY_SMTP_PASSWORD: ${MM_NOTIFY_SMTP_PASSWORD:-}
+      MM_NOTIFY_SMTP_STARTTLS: ${MM_NOTIFY_SMTP_STARTTLS:-true}
+      MM_NOTIFY_EMAIL_FROM: ${MM_NOTIFY_EMAIL_FROM:-}
+      MM_NOTIFY_EMAIL_TO: ${MM_NOTIFY_EMAIL_TO:-}
+    volumes:
+      # Shared with the broker: `python -m minemonitor.devices.broker_config` (run
+      # via `docker compose exec api`) writes passwd+acl here, and the mqtt service
+      # bind-mounts the same host dir read-only at /mosquitto/config/auth.
+      - ./docker/mosquitto:/app/docker/mosquitto
     ports:
       # The API has auth (M6, HTTP Basic), but Basic credentials must ride TLS.
       # Bind localhost by default and put nginx + TLS in front; set
@@ -90,14 +112,26 @@ services:
     environment:
       MM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-minemonitor}:${POSTGRES_PASSWORD:-minemonitor}@db:5432/${POSTGRES_DB:-minemonitor}
       MM_MQTT_HOST: mqtt
+      MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
+      MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
       # The ingestor also runs the scheduled retention deletion job (~daily).
       MM_RETAIN_POSITIONS_DAYS: ${MM_RETAIN_POSITIONS_DAYS:-90}
       MM_RETAIN_METRICS_DAYS: ${MM_RETAIN_METRICS_DAYS:-365}
       MM_RETAIN_EVENTS_DAYS: ${MM_RETAIN_EVENTS_DAYS:-365}
+      MM_RETAIN_ANNOTATIONS_DAYS: ${MM_RETAIN_ANNOTATIONS_DAYS:-365}
       MM_RETAIN_AUDIT_DAYS: ${MM_RETAIN_AUDIT_DAYS:-730}
       MM_RETENTION_INTERVAL_S: ${MM_RETENTION_INTERVAL_S:-86400}
       MM_HEARTBEAT_STALE_S: ${MM_HEARTBEAT_STALE_S:-180}
+      MM_NOTIFY_MIN_SEVERITY: ${MM_NOTIFY_MIN_SEVERITY:-}
+      MM_NOTIFY_WEBHOOK_URL: ${MM_NOTIFY_WEBHOOK_URL:-}
+      MM_NOTIFY_SMTP_HOST: ${MM_NOTIFY_SMTP_HOST:-}
+      MM_NOTIFY_SMTP_PORT: ${MM_NOTIFY_SMTP_PORT:-587}
+      MM_NOTIFY_SMTP_USER: ${MM_NOTIFY_SMTP_USER:-}
+      MM_NOTIFY_SMTP_PASSWORD: ${MM_NOTIFY_SMTP_PASSWORD:-}
+      MM_NOTIFY_SMTP_STARTTLS: ${MM_NOTIFY_SMTP_STARTTLS:-true}
+      MM_NOTIFY_EMAIL_FROM: ${MM_NOTIFY_EMAIL_FROM:-}
+      MM_NOTIFY_EMAIL_TO: ${MM_NOTIFY_EMAIL_TO:-}
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.mqtt"]
     healthcheck:
       # The ingestor has no HTTP endpoint; it is healthy while its heartbeat is fresh.
@@ -119,6 +153,8 @@ services:
         condition: service_started
     environment:
       MM_MQTT_HOST: mqtt
+      MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
+      MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
       MM_DEFAULT_SITE_ID: ${MM_DEFAULT_SITE_ID:-kn-zw-01}
       MM_TELTONIKA_PORT: ${MM_TELTONIKA_PORT:-5027}
@@ -136,8 +172,33 @@ services:
         condition: service_started
     environment:
       MM_MQTT_HOST: mqtt
+      MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
+      MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.adapters.simulator"]
+
+  # TLS reverse proxy. Enable with:  docker compose --profile tls up -d
+  # Terminates HTTPS in front of the API so Basic credentials ride TLS, giving a safe
+  # public/LAN URL instead of an SSH tunnel. Defaults to Caddy's internal CA for an
+  # on-prem host; for a public domain, set MM_SITE_DOMAIN and switch the Caddyfile's
+  # `tls internal` to `tls {$MM_TLS_EMAIL}` (Let's Encrypt). See deploy/DEPLOY.md.
+  caddy:
+    image: caddy:2
+    profiles: ["tls"]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      MM_SITE_DOMAIN: ${MM_SITE_DOMAIN:-localhost}
+      MM_TLS_EMAIL: ${MM_TLS_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
 
   # Scheduled database backup. Enable with:  docker compose --profile backup up -d
   # Dumps to ./backups on an interval and prunes old dumps. Restore with
@@ -175,3 +236,5 @@ volumes:
   db_data:
   mqtt_data:
   minio_data:
+  caddy_data:
+  caddy_config:

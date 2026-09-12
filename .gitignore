@@ -13,6 +13,10 @@ venv/
 # Environment / secrets
 .env
 
+# Generated Mosquitto broker credentials (hold credential hashes — never commit).
+docker/mosquitto/passwd
+docker/mosquitto/acl
+
 # uv
 # (uv.lock IS committed — reproducible builds)
 

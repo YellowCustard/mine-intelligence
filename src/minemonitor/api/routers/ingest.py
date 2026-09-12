@@ -10,21 +10,46 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from minemonitor.auth.deps import require_device, require_viewer
 from minemonitor.ingest.service import PositionIngest, store_and_process
 from minemonitor.storage.db import get_db
+from minemonitor.storage.models import User
 from minemonitor.storage.repositories import list_positions
 
 router = APIRouter(tags=["ingest"])
 log = logging.getLogger("minemonitor.ingest")
 
 
-@router.post("/ingest/positions", status_code=202, dependencies=[Depends(require_device)])
-def ingest_position(payload: PositionIngest, db: Session = Depends(get_db)) -> dict[str, object]:
-    """Validate, stamp, store, and run zone/rule processing for a position."""
+@router.post("/ingest/positions", status_code=202)
+def ingest_position(
+    payload: PositionIngest,
+    db: Session = Depends(get_db),
+    device: User = Depends(require_device),
+) -> dict[str, object]:
+    """Validate, stamp, store, and run zone/rule processing for a position.
+
+    Object-level authorisation (brief §6/§10): the ``site_id`` and ``asset_id``
+    ride in the device payload, so a site-scoped device credential must not be
+    able to publish telemetry for another site merely by changing the body. A
+    site-scoped device may write only its own site; a global (site-less) device
+    account — the shared ingestor/simulator — may still write any site.
+    """
+    if device.site_id is not None and payload.site_id != device.site_id:
+        log.warning(
+            "rejected cross-site ingest",
+            extra={
+                "device": device.username,
+                "device_site": device.site_id,
+                "payload_site": payload.site_id,
+                "asset_id": payload.asset_id,
+            },
+        )
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "device not authorised to publish for this site"
+        )
     created, events = store_and_process(db, payload)
     log.info(
         "position ingested",

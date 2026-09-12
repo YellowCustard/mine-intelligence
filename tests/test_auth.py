@@ -61,6 +61,25 @@ def test_device_ingest_gate(db_session: Session) -> None:
     assert viewer.post("/ingest/positions", json=_POS).status_code == 403
 
 
+def test_site_scoped_device_cannot_publish_other_site(db_session: Session) -> None:
+    """Object-level authz (brief §6/§10): a site-scoped device may write only its
+    own site — changing site_id in the payload must not cross the boundary."""
+    create_user(
+        db_session,
+        username="tracker-a",
+        password="testpass123",
+        role="device",
+        site_id="kn-zw-01",
+    )
+    db_session.commit()
+    dev = make_client(db_session, ("tracker-a", "testpass123"))
+    # Its own site: accepted.
+    assert dev.post("/ingest/positions", json=_POS).status_code == 202
+    # Another site by editing the body: rejected, telemetry not stored.
+    foreign = {**_POS, "site_id": "other-site"}
+    assert dev.post("/ingest/positions", json=foreign).status_code == 403
+
+
 def test_admin_can_write(db_session: Session) -> None:
     c = make_client(db_session, ADMIN)
     zone = {

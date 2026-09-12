@@ -226,20 +226,22 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
             "href", re.compile(r"/reports/shift\.html")
         )
 
-        # System view: platform-vs-field health and data-quality drill-down render.
+        # System view: platform-vs-field health and data-quality drill-down render,
+        # and the build/schema version is surfaced for multi-site support (brief §38).
         page.locator("#n-system").click()
         expect(page.locator("#sy-health")).to_contain_text("Verdict", timeout=10_000)
         expect(page.locator("#sy-dq")).to_contain_text("Confidence", timeout=10_000)
+        expect(page.locator("#sy-version")).to_contain_text("Mine Monitor v", timeout=10_000)
 
         # Back to Fleet to acknowledge the alarm.
         page.locator("#n-site").click()
         expect(page.locator("#atab")).to_contain_text("magazine", timeout=10_000)
 
         # Acknowledge the alarm in the UI; the button then clears on the next poll.
+        # Use a retrying locator assertion (not wait_for_function) so the check does
+        # not rely on page-side eval, which the production CSP correctly forbids.
         page.locator("#atab .ackbtn").first.click()
-        page.wait_for_function(
-            "document.querySelectorAll('#atab .ackbtn').length === 0", timeout=15_000
-        )
+        expect(page.locator("#atab .ackbtn")).to_have_count(0, timeout=15_000)
 
         browser.close()
 

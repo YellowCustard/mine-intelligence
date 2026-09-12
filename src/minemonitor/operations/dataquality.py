@@ -25,6 +25,7 @@ from minemonitor.storage.repositories import list_positions
 
 # Thresholds. Deliberately generous — we flag the clearly wrong, not GNSS jitter.
 _BACKFILL_LAG_S = 120.0  # received this long after the fix → late/backfilled
+_CLOCK_SKEW_S = 120.0  # device ts this far AHEAD of server receipt → bad device clock
 _IMPOSSIBLE_KPH = 160.0  # implied ground speed above this for a mine machine → suspect
 _SAMPLE = 1000  # most-recent positions inspected
 
@@ -45,15 +46,22 @@ def compute_data_quality(
 
     stale_feeds: list[str] = []
     late_fixes = 0
+    future_dated = 0
     out_of_order = 0
     impossible_moves = 0
     missing_fields = 0
 
     for p in positions:
         if p.received_at is not None and p.ts is not None:
+            # received_at is server-stamped at ingest; ts is device time. A large
+            # positive gap is late/backfilled data; a large NEGATIVE gap (device
+            # ahead of the server) is a bad device clock that would silently
+            # misplace fixes into the wrong shift — flag it rather than trust it.
             lag = (_aware(p.received_at) - _aware(p.ts)).total_seconds()
             if lag > _BACKFILL_LAG_S:
                 late_fixes += 1
+            elif lag < -_CLOCK_SKEW_S:
+                future_dated += 1
         if p.hdop is None or p.satellites is None:
             missing_fields += 1
 
@@ -76,7 +84,7 @@ def compute_data_quality(
                         impossible_moves += 1
             prev = cur
 
-    issues = late_fixes + out_of_order + impossible_moves + missing_fields
+    issues = late_fixes + future_dated + out_of_order + impossible_moves + missing_fields
     # A plain confidence label from the issue rate over the sample. Not a score to
     # optimise — a signal for how much to trust the derived numbers.
     rate = (issues / sample) if sample else 0.0
@@ -96,6 +104,7 @@ def compute_data_quality(
         "issues": {
             "stale_feeds": len(stale_feeds),
             "late_or_backfilled_fixes": late_fixes,
+            "future_dated_fixes": future_dated,
             "out_of_order_fixes": out_of_order,
             "impossible_moves": impossible_moves,
             "missing_quality_fields": missing_fields,
