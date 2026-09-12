@@ -21,12 +21,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from minemonitor.ingest.adapters.base import DeviceAdapter
 from minemonitor.ingest.service import PositionIngest
+
+# An IMEI resolver maps a handshake IMEI to the tracker's bound (site_id, asset_id),
+# or None to reject the connection (unprovisioned / disabled tracker).
+ImeiResolver = Callable[[str], "tuple[str, str] | None"]
 
 log = logging.getLogger("minemonitor.ingest.teltonika")
 
@@ -232,6 +236,31 @@ def default_asset_for(imei: str) -> str:
     return f"teltonika-{imei}"
 
 
+def make_device_resolver(session_factory, *, default_site_id: str, strict: bool) -> ImeiResolver:
+    """Build an IMEI resolver backed by the devices table (device_id == IMEI).
+
+    A provisioned, enabled device routes to its own ``(site_id, asset_id)``. When
+    ``strict`` (``MM_MQTT_REQUIRE_REGISTERED_DEVICE``), an unknown or disabled IMEI is
+    rejected at the handshake; otherwise it falls back to the synthetic single-site
+    mapping so a fresh/demo install still ingests without provisioning.
+    """
+    from minemonitor.devices import service
+
+    def resolve(imei: str) -> tuple[str, str] | None:
+        session = session_factory()
+        try:
+            dev = service.resolve_imei(session, imei)
+        finally:
+            session.close()
+        if dev is not None:
+            return dev.site_id, dev.asset_id
+        if strict:
+            return None
+        return default_site_id, default_asset_for(imei)
+
+    return resolve
+
+
 class TeltonikaServer:
     """Async TCP listener for live Teltonika trackers.
 
@@ -249,6 +278,8 @@ class TeltonikaServer:
         site_id: str,
         source: str = "teltonika",
         imei_to_asset=default_asset_for,
+        resolve: ImeiResolver | None = None,
+        idle_timeout_s: float | None = None,
     ) -> None:
         self._publisher = publisher
         self._host = host
@@ -256,25 +287,50 @@ class TeltonikaServer:
         self._site_id = site_id
         self._source = source
         self._imei_to_asset = imei_to_asset
+        # When set, ``resolve`` authorizes and routes each IMEI against the devices
+        # table; None from it rejects the handshake. When unset, fall back to the
+        # single-site synthetic mapping (dev/replay). ``idle_timeout_s`` closes a
+        # connection that stops sending, so a half-open socket cannot linger.
+        self._resolve = resolve
+        self._idle_timeout_s = idle_timeout_s
+
+    async def _read_exactly(self, reader: asyncio.StreamReader, n: int) -> bytes:
+        if self._idle_timeout_s is None:
+            return await reader.readexactly(n)
+        return await asyncio.wait_for(reader.readexactly(n), timeout=self._idle_timeout_s)
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         peer = writer.get_extra_info("peername")
         try:
-            length = int.from_bytes(await reader.readexactly(2), "big")
-            imei = parse_imei((length).to_bytes(2, "big") + await reader.readexactly(length))
+            length = int.from_bytes(await self._read_exactly(reader, 2), "big")
+            imei = parse_imei(
+                (length).to_bytes(2, "big") + await self._read_exactly(reader, length)
+            )
             if imei is None:
                 writer.write(IMEI_REJECT)
                 await writer.drain()
                 return
+            # Authorize + route. With a resolver, an unknown/disabled IMEI is refused
+            # at the handshake (never accepted, never ingested); without one, fall back
+            # to the single-site synthetic mapping for dev/replay.
+            if self._resolve is not None:
+                binding = self._resolve(imei)
+                if binding is None:
+                    log.warning("teltonika IMEI not provisioned or disabled", extra={"imei": imei})
+                    writer.write(IMEI_REJECT)
+                    await writer.drain()
+                    return
+                site_id, asset_id = binding
+            else:
+                site_id, asset_id = self._site_id, self._imei_to_asset(imei)
             writer.write(IMEI_ACCEPT)
             await writer.drain()
-            asset_id = self._imei_to_asset(imei)
-            log.info("teltonika connected", extra={"site_id": self._site_id, "asset_id": asset_id})
+            log.info("teltonika connected", extra={"site_id": site_id, "asset_id": asset_id})
 
             while True:
-                head = await reader.readexactly(8)
+                head = await self._read_exactly(reader, 8)
                 data_len = int.from_bytes(head[4:8], "big")
-                frame = head + await reader.readexactly(data_len + 4)
+                frame = head + await self._read_exactly(reader, data_len + 4)
                 try:
                     packet = decode_packet(frame)
                 except ValueError as exc:
@@ -285,7 +341,7 @@ class TeltonikaServer:
                     return  # drop unacknowledged
                 positions = records_to_positions(
                     packet.records,
-                    site_id=self._site_id,
+                    site_id=site_id,
                     asset_id=asset_id,
                     source=f"{self._source}:{imei}",
                 )
@@ -295,6 +351,8 @@ class TeltonikaServer:
                 await writer.drain()
         except asyncio.IncompleteReadError:
             pass  # device disconnected
+        except TimeoutError:
+            log.info("teltonika idle timeout", extra={"peer": str(peer)})  # half-open connection
         finally:
             log.info("teltonika disconnected", extra={"peer": str(peer)})
             writer.close()
@@ -311,16 +369,24 @@ def main() -> None:
     from minemonitor.config import get_settings
     from minemonitor.ingest.mqtt import MqttPublisher
     from minemonitor.logging_config import configure_logging
+    from minemonitor.storage.db import get_session_factory
 
     settings = get_settings()
     configure_logging(settings.log_level)
     publisher = MqttPublisher()
     publisher.start()
+    resolver = make_device_resolver(
+        get_session_factory(),
+        default_site_id=settings.default_site_id,
+        strict=settings.mqtt_require_registered_device,
+    )
     server = TeltonikaServer(
         publisher,
         host=settings.teltonika_host,
         port=settings.teltonika_port,
         site_id=settings.default_site_id,
+        resolve=resolver,
+        idle_timeout_s=settings.teltonika_idle_timeout_s,
     )
     try:
         asyncio.run(server.serve())

@@ -53,6 +53,18 @@ def get_device(session: Session, device_id: str) -> Device | None:
     return session.get(Device, device_id)
 
 
+def resolve_imei(session: Session, imei: str) -> Device | None:
+    """Resolve a Teltonika IMEI to its provisioned, enabled device (device_id == IMEI).
+
+    Returns None for an unknown or disabled IMEI. Used by the raw-TCP Teltonika
+    listener to route a real tracker to its bound ``(site_id, asset_id)`` and to
+    refuse an unprovisioned or decommissioned tracker at the handshake — the same
+    device model that governs the MQTT path (brief §5/§11).
+    """
+    dev = session.get(Device, imei)
+    return dev if dev is not None and dev.enabled else None
+
+
 def list_devices(session: Session, site_id: str) -> list[Device]:
     rows = session.execute(
         select(Device).where(Device.site_id == site_id).order_by(Device.device_id)
