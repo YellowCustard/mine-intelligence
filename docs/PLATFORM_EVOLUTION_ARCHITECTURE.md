@@ -211,10 +211,15 @@ labelled and evidenced.
 
 No big-bang. Every step is additive, migration-backed, tested, and reversible.
 
-1. **Foundation (in-core):** add `/api/v1` prefix alongside current routes
-   (compat shim); formalise an internal event-contracts package + a lightweight
-   in-process event bus abstraction over the existing calls; extend observability.
-   *No behaviour change.*
+1. **Foundation (in-core): ✅ DELIVERED.** `/api/v1` prefix mounted alongside the
+   current routes (compat shim, behaviour-preserving); an internal event-contract
+   **registry** (`minemonitor/platform/contracts.py`) over the existing `*.v1`
+   models; a synchronous, error-isolated in-process **event bus**
+   (`platform/bus.py`); and a process-local **metrics** registry (`platform/metrics.py`)
+   the bus feeds, exposed at `GET /api/v1/platform/{contracts,metrics}`. The
+   ingest/pipeline hot path is intentionally **not** rewired through the bus yet —
+   the seam is available for new domains; rewiring is a later, evidence-driven step.
+   *No existing behaviour changed; 10 new tests; full suite green.*
 2. **Vision (edge):** stand up the edge vision node as a new process publishing
    `vision.*.v1` into MQTT; core ingests into new vision tables + `event.v1`. One
    camera, one zone, one class, one event — then expand. Core unaffected if the edge

@@ -24,6 +24,7 @@ from minemonitor.api.routers import (
     ingest,
     notifications,
     operations,
+    platform,
     reports,
     stream,
     zones,
@@ -123,6 +124,11 @@ def _bootstrap_admin() -> None:
         session.close()
 
 
+# Versioned API prefix for new clients (mobile, integrations). Existing unprefixed
+# paths remain the compatibility surface; both are served (see create_app).
+API_V1 = "/api/v1"
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     _bootstrap_admin()
@@ -145,20 +151,31 @@ def create_app() -> FastAPI:
     # boundary produces.
     app.middleware("http")(_request_context)
     app.middleware("http")(_security_headers)
-    app.include_router(health.router)
-    app.include_router(ingest.router)
-    app.include_router(zones.router)
-    app.include_router(events.router)
-    app.include_router(cycles.router)
-    app.include_router(stream.router)
-    app.include_router(account.router)
-    app.include_router(operations.router)
-    app.include_router(incidents.router)
-    app.include_router(delays.router)
-    app.include_router(handovers.router)
-    app.include_router(reports.router)
-    app.include_router(devices.router)
-    app.include_router(notifications.router)
+    # Domain routers. Mounted at their historical unprefixed paths (the dashboard and
+    # existing clients) AND under /api/v1 (new clients: mobile, integrations). This is
+    # the additive versioning shim from the evolution plan — behaviour-preserving; the
+    # legacy paths keep working unchanged. See docs/PLATFORM_EVOLUTION_ARCHITECTURE.md.
+    _domain_routers = [
+        health.router,
+        ingest.router,
+        zones.router,
+        events.router,
+        cycles.router,
+        stream.router,
+        account.router,
+        operations.router,
+        incidents.router,
+        delays.router,
+        handovers.router,
+        reports.router,
+        devices.router,
+        notifications.router,
+    ]
+    for r in _domain_routers:
+        app.include_router(r)  # legacy unprefixed
+        app.include_router(r, prefix=API_V1)  # versioned
+    # New Phase-1 platform surface: versioned only.
+    app.include_router(platform.router, prefix=API_V1)
 
     @app.get("/", include_in_schema=False, dependencies=[Depends(require_viewer)])
     def dashboard() -> FileResponse:

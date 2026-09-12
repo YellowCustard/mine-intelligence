@@ -194,6 +194,16 @@ dashboard (`web/mine.html`) is framework-free: a `fetch()` of current state on l
 plus an `EventSource` subscription. It is **extended, not rewritten** — the inline-SVG
 site plan and alarm table are the UI contract.
 
+**API versioning.** Every domain router is served both at its historical unprefixed
+path (the dashboard and existing clients) and under **`/api/v1`** (new clients —
+mobile, integrations). The unprefixed paths are the compatibility surface and are
+unchanged. A Phase-1 **platform** surface is versioned-only:
+`GET /api/v1/platform/contracts` (the versioned event contracts the platform
+understands) and `GET /api/v1/platform/metrics` (admin; process-local observability
+counters). The extension substrate behind it — a contract registry, an in-process
+event bus, and a metrics registry — lives in `minemonitor/platform/`; see
+`docs/PLATFORM_EVOLUTION_ARCHITECTURE.md`.
+
 Route surface (roles: `viewer < supervisor < admin`, plus `device` for ingest only):
 
 - **Ops/health:** `/healthz` (liveness), `/health` (full-system, incl. MQTT +
