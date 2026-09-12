@@ -199,3 +199,25 @@ def test_maintenance_health_valid_instance_passes_both() -> None:
     model = MaintenanceHealthV1.model_validate(instance)
     dumped = json.loads(model.model_dump_json(by_alias=True))
     Draft202012Validator(_load_schema("maintenance.health.v1.json")).validate(dumped)
+
+
+def test_dispatch_recommendation_valid_instance_passes_both() -> None:
+    from minemonitor.contracts.dispatch import DispatchRecommendationV1
+
+    Draft202012Validator.check_schema(_load_schema("dispatch.recommendation.v1.json"))
+    instance = {
+        "schema": "dispatch.recommendation.v1",
+        "assignment_id": "01J9Z8ABCDEF",
+        "site_id": "kn-zw-01",
+        "job_id": "01J9Z8JOB",
+        "asset_id": "HT-102",
+        "ts": "2026-09-12T12:00:00Z",
+        "objective": "balanced",
+        "score": 5.0,
+        "rationale": ["job priority 5, material gold_ore", "HT-102 available"],
+        "advisory": True,
+    }
+    Draft202012Validator(_load_schema("dispatch.recommendation.v1.json")).validate(instance)
+    model = DispatchRecommendationV1.model_validate(instance)
+    dumped = json.loads(model.model_dump_json(by_alias=True))
+    Draft202012Validator(_load_schema("dispatch.recommendation.v1.json")).validate(dumped)

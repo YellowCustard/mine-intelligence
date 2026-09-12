@@ -17,6 +17,7 @@ from minemonitor.api.routers import (
     cycles,
     delays,
     devices,
+    dispatch,
     events,
     fuel,
     handovers,
@@ -176,6 +177,7 @@ def create_app() -> FastAPI:
         fuel.router,
         weighbridge.router,
         maintenance.router,
+        dispatch.router,
     ]
     for r in _domain_routers:
         app.include_router(r)  # legacy unprefixed

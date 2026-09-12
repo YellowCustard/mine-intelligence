@@ -16,6 +16,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from minemonitor.contracts import AssetMetricsV1, AssetPositionV1, EventV1
+from minemonitor.contracts.dispatch import DispatchRecommendationV1
 from minemonitor.contracts.fuel import FuelTransactionV1
 from minemonitor.contracts.maintenance import MaintenanceHealthV1
 from minemonitor.contracts.weighbridge import WeighbridgeTransactionV1
@@ -29,6 +30,7 @@ _REGISTRY: dict[str, type[BaseModel]] = {
     "fuel.transaction.v1": FuelTransactionV1,
     "weighbridge.transaction.v1": WeighbridgeTransactionV1,
     "maintenance.health.v1": MaintenanceHealthV1,
+    "dispatch.recommendation.v1": DispatchRecommendationV1,
 }
 
 

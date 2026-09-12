@@ -254,6 +254,16 @@ No big-bang. Every step is additive, migration-backed, tested, and reversible.
      fabricated. **No ML, no invented sensor values, never actuates a machine.**
      Anomaly detection and predictive models are deferred increments, gated on real
      historical data. *Additive; 11 tests; migration round-tripped on PG16; 309 passed.*
+   - **Dispatch (decision-support): ✅ DELIVERED (increment 1).** Migration 0018
+     (`dispatch_jobs`, `dispatch_assignments`); `minemonitor/dispatch/` service;
+     `dispatch.recommendation.v1` contract registered and published on the bus.
+     Recommend → supervisor approve → inform: an explainable priority+availability
+     heuristic pairs available haul trucks with the highest-priority open jobs, each
+     recommendation carrying its `rationale` and marked `advisory: true`; only a
+     supervisor's approval turns one into an instruction. **No optimality claim, and
+     the platform never actuates a machine.** Optimisation objectives and richer
+     state/proximity inputs are later increments. *Additive; 9 tests; migration
+     round-tripped on PG16; 318 passed.*
 4. **Mobile:** against `/api/v1` + a sync endpoint; offline-first.
 5. **Service extraction (evidence-driven):** notifications, then reporting/analytics,
    then telemetry — each behind its existing API/contract, strangler-style.

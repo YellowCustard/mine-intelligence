@@ -244,6 +244,13 @@ Route surface (roles: `viewer < supervisor < admin`, plus `device` for ingest on
   time/engine-hours since last service — inferred, evidenced, advisory; engine hours
   read from the latest fuel record when present, never fabricated. No ML in this
   increment.
+- **Dispatch** (Phase 6, decision-support): `POST/GET /sites/{id}/dispatch/jobs`
+  (supervisor/viewer), `POST /sites/{id}/dispatch/recommendations` (supervisor;
+  publishes `dispatch.recommendation.v1`), `GET /sites/{id}/dispatch/assignments`,
+  `POST .../assignments/{id}/approve|reject` (supervisor, audited). Recommendations
+  are **advisory** and explainable (priority + availability heuristic, `rationale`
+  evidence, no optimality claim); a supervisor approves one before it is a dispatched
+  instruction. The platform never actuates a machine.
 - **Governance:** operators (+ export), audit log, `POST /admin/retention/run`.
 
 ---

@@ -552,6 +552,55 @@ class FuelTankReading(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class DispatchJob(Base):
+    """A haulage demand: move ``material`` from a source to a dump (dispatch, Phase 6).
+
+    Decision-support only. A job describes what needs hauling and how many concurrent
+    trucks it wants; recommendations against it are advisory and require a supervisor's
+    approval before they become dispatched instructions. The platform never controls a
+    machine (brief §15).
+    """
+
+    __tablename__ = "dispatch_jobs"
+    __table_args__ = (Index("ix_dispatch_jobs_site_status", "site_id", "status"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    material: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_zone: Mapped[str | None] = mapped_column(String, nullable=True)  # loading point
+    dest_zone: Mapped[str | None] = mapped_column(String, nullable=True)  # dump point
+    target_trucks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="open")
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DispatchAssignment(Base):
+    """A recommended or approved truck→job pairing (dispatch, Phase 6).
+
+    ``state`` flows recommended → approved → active → complete (or rejected). A
+    ``recommended`` row is an **advisory** suggestion carrying its ``rationale`` (the
+    evidence); it becomes a dispatched instruction only when a supervisor approves it.
+    """
+
+    __tablename__ = "dispatch_assignments"
+    __table_args__ = (Index("ix_dispatch_assignments_site_state", "site_id", "state"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    job_id: Mapped[str] = mapped_column(ForeignKey("dispatch_jobs.id"), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String, nullable=False)
+    state: Mapped[str] = mapped_column(String, nullable=False, default="recommended")
+    objective: Mapped[str] = mapped_column(String, nullable=False, default="balanced")
+    score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    rationale: Mapped[list[Any]] = mapped_column(JsonType, nullable=False, default=list)
+    recommended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    approved_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Weighbridge(Base):
     """A weighbridge/scale at a site (weighbridge domain, Phase 4). Reference data."""
 

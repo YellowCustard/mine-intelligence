@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/dispatch.recommendation.v1.json",
+  "title": "dispatch.recommendation.v1",
+  "description": "An advisory truck-to-job dispatch recommendation. Decision-support only: a supervisor must approve before it becomes an instruction; the platform never actuates a machine.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "assignment_id", "site_id", "job_id", "asset_id", "ts", "score"],
+  "properties": {
+    "schema": { "const": "dispatch.recommendation.v1" },
+    "assignment_id": { "type": "string", "minLength": 1 },
+    "site_id": { "type": "string", "minLength": 1 },
+    "job_id": { "type": "string", "minLength": 1 },
+    "asset_id": { "type": "string", "minLength": 1 },
+    "ts": { "type": "string", "format": "date-time" },
+    "objective": { "type": "string", "default": "balanced" },
+    "score": { "type": "number", "description": "Transparent heuristic rank; not a claim of optimality." },
+    "rationale": { "type": "array", "items": { "type": "string" }, "description": "The evidence behind the recommendation." },
+    "advisory": { "const": true, "description": "A suggestion, not an instruction; requires supervisor approval." }
+  }
+}
