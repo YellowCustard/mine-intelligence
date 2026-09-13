@@ -4,6 +4,15 @@
 training has been introduced. This document and its siblings are the deliverable of
 the Computer Vision *foundation* phase; full implementation is gated on their review.**
 
+> **Re-prioritised by the RAN Mines proposal** (see `RAN_MINES_PROPOSAL_ALIGNMENT.md`).
+> This document remains the correct *edge-perception* reference, but the RAN Mines
+> direction sequences vision as proposal **Phase 2** (after gate security + laboratory
+> ingestion) and shifts the first commercial use-cases toward **people/security** in
+> fixed camera zones (headcount, restricted-area, dwell, two-person, tag-count
+> reconciliation) rather than haul-cycle corroboration. GPS/vision fusion
+> (`VISION_GPS_FUSION.md`) applies to mobile-plant safety here, not gold-room security.
+> The feature plans in `docs/feature-plans/` carry the corrected emphasis.
+
 Sibling documents:
 `VISION_MODEL_CATALOG.md` · `VISION_MODEL_LICENSES.md` ·
 `MINING_VISION_DATASET_STRATEGY.md` · `VISION_TRAINING.md` ·
