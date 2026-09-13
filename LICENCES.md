@@ -4,8 +4,8 @@ Every library, model and SDK that ships gets logged here with its exact licence
 and source. **Apache-2.0 / MIT / BSD only.** AGPL is a commercial licensing trap
 for a product we sell.
 
-> **Ultralytics YOLO is AGPL-3.0 and must not enter this codebase or the vision
-> repo.** Model licences vary per model and per release, not per vendor — check
+> **Ultralytics YOLO is AGPL-3.0 and must not enter this codebase or Mine Monitor
+> Vision.** Model licences vary per model and per release, not per vendor — check
 > each one individually.
 
 ## Python runtime dependencies

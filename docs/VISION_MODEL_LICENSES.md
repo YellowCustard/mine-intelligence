@@ -15,8 +15,8 @@ Mine Monitor is a **commercial product** eigenstate sells, deployable as **SaaS*
 - **AGPL-3.0 is forbidden.** Its network-use clause obliges source disclosure to remote
   users of a networked product — a licensing trap for what we sell. **Ultralytics YOLO
   (v5/v8/v11) and anything packaged by Ultralytics (including its RT-DETR, YOLO-World,
-  YOLOE, FastSAM builds) is AGPL-3.0 and must not enter this codebase or the vision
-  repo.**
+  YOLOE, FastSAM builds) is AGPL-3.0 and must not enter this codebase or Mine Monitor
+  Vision.**
 - **GPL-3.0** copyleft is avoided for shipped components (linking/derivative risk).
 - **Non-commercial** weights (CC-BY-NC, research-only) are forbidden regardless of code
   licence.

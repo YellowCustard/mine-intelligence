@@ -9,8 +9,8 @@ disagree, the license document wins.
 ## The governing constraint (read first)
 
 `CLAUDE.md` and `LICENCES.md` are absolute: **Apache-2.0 / MIT / BSD only** for anything
-that ships, and **Ultralytics YOLO is AGPL-3.0 and must not enter this codebase or the
-vision repo.** AGPL's network-use clause is a commercial trap for a product eigenstate
+that ships, and **Ultralytics YOLO is AGPL-3.0 and must not enter this codebase or Mine
+Monitor Vision.** AGPL's network-use clause is a commercial trap for a product eigenstate
 sells (including SaaS). This single rule removes the most "popular" default (Ultralytics
 YOLOv5/v8/v11, and Ultralytics-packaged RT-DETR/YOLO-World/YOLOE/FastSAM) from the
 production shortlist. Popularity is not a selection criterion; a clean commercial licence

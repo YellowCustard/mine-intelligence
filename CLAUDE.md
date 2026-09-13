@@ -46,7 +46,7 @@ project.
 
 | Not now | Why |
 |---|---|
-| Computer vision / detection models | Blocked on site footage that does not exist. Separate repo (`flockvision`). |
+| Computer vision / detection models | Blocked on site footage that does not exist. **Mine Monitor Vision** is its own new edge-perception subsystem, designed separately (`docs/VISION_ARCHITECTURE.md`) and built later — not part of Phase 1. |
 | Facial recognition / face matching | Bought as a commercial gate terminal, not built. We only ingest its events. |
 | Payload in tonnes | Requires OEM onboard weighing. A GNSS tracker cannot produce it. We report **loads counted**. |
 | Fuel level / burn rate | Requires a CAN/J1939 tap or fuel sender. Out until hardware is confirmed on site. |
@@ -106,15 +106,16 @@ Build so that a stricter answer costs us configuration, not architecture.
 
 ## 5. Architecture
 
-Five layers, mirroring the pattern already used in the poultry vision project so the two systems
-share contracts and operational habits.
+Five layers. The event contracts (§6) and operational habits are Mine Monitor's own; a later
+edge subsystem (Mine Monitor Vision) integrates *through* them — it does not inherit them from
+another project.
 
 ```
 L0  Devices        GNSS trackers on machines · (later: cameras, face terminal at the gate)
 L1  Edge/ingest    Protocol adapters → normalise → store-and-forward buffer
 L2  Platform core  Ingest gateway · zone engine · rules engine · cycle analytics · storage · API
 L3  Applications   Operations dashboard · alarm queue · reports · exports
-L4  Learning loop  (Phase 2+, in the vision repo — not here)
+L4  Learning loop  (Phase 2+, in Mine Monitor Vision — not here)
 ```
 
 The rule that keeps this extensible: **every source speaks the same event contract.** A geofence
@@ -127,8 +128,8 @@ queue. The control room does not care which sensor saw it. Anything that cannot 
 ## 6. Data contracts
 
 These are the spine. Version them, publish them as JSON Schema in `contracts/`, and validate at the
-ingest boundary. The vision repo already emits an `event.v1`-shaped record; keep them compatible so
-a camera node can publish into this platform with no translation layer.
+ingest boundary. `event.v1` is Mine Monitor's own contract; Mine Monitor Vision (a later edge
+subsystem) will publish into it, so a camera node lands in this platform with no translation layer.
 
 ### `asset.position.v1` — raw telemetry, high volume
 
@@ -198,8 +199,8 @@ dwell breakdown, loads completed. Derived, recomputable from positions, never ha
 
 | Layer | Choice | Reason |
 |---|---|---|
-| Language | **Python 3.11+** | The vision pipeline is already Python. One developer should not run two ecosystems. |
-| API | **FastAPI** + Pydantic v2 | Pydantic already used in the vision repo; the contracts above become models directly. |
+| Language | **Python 3.11+** | One language across the platform and (later) Mine Monitor Vision. One developer should not run two ecosystems. |
+| API | **FastAPI** + Pydantic v2 | Pydantic v2 maps the contracts above directly to models; one well-documented stack. |
 | DB | **PostgreSQL 16 + TimescaleDB** | One database. Hypertables for positions/metrics, ordinary tables for everything else. Avoids running Postgres *and* ClickHouse. |
 | ORM/migrations | SQLAlchemy 2.x + Alembic | Boring and well documented. |
 | Device transport | **MQTT (Mosquitto)** for anything that can speak it; raw **TCP** listener for trackers that cannot | Trackers mostly speak their own binary TCP protocol. Adapters normalise into MQTT internally. |
@@ -226,8 +227,8 @@ A solo developer rewriting a working dashboard is weeks spent for zero new capab
 ### Licence discipline
 
 Every model, SDK and library that ships gets logged in `LICENCES.md` with its exact licence and
-source. Specifically: **Ultralytics YOLO is AGPL-3.0 and must not enter this codebase or the vision
-repo** — it is a commercial licensing trap for a product we sell. Apache-2.0 / MIT / BSD only.
+source. Specifically: **Ultralytics YOLO is AGPL-3.0 and must not enter this codebase or Mine
+Monitor Vision** — it is a commercial licensing trap for a product we sell. Apache-2.0 / MIT / BSD only.
 Model licences vary per model and per release, not per vendor — check each one.
 
 ---
@@ -390,8 +391,9 @@ Copy these in from the current working directory before starting:
 - **`minemonitor/mine.html`** → `web/mine.html`. The dashboard to wire up. Its inline SVG site plan,
   zone rendering and alarm table are the UI contract — read it early, it tells you what the API has
   to return.
-- **`mining-addon/`** — a `coverage.py` rule and `configs/mine_crusher.yaml` for the vision repo.
-  Not used in Phase 1; keep for reference on how vision events are shaped.
+- **`mining-addon/`** — a `coverage.py` rule and `configs/mine_crusher.yaml` belonging to the
+  unrelated historical Flockvision project. **Not** a Mine Monitor asset and not a template for
+  Mine Monitor Vision, which defines its own contracts (`docs/VISION_EVENT_CONTRACTS.md`). Ignore here.
 - **`mpm/`** — working prospectivity implementation. Separate concern, runs offline on assay data.
   Do not merge it into this service.
 
