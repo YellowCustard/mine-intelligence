@@ -1,6 +1,9 @@
 # Feature Plan 01 — Camera Estate & AI Readiness
 
-**Status: plan for review. Recommended first engineering slice (non-blocked).**
+**Status: ✅ DELIVERED (increment 1) — registry + CRUD + AI-readiness assessment +
+estate rollup + `/api/v1` (admin-write, viewer-read, audited) + tests. Migration `0019`
+round-tripped on real PostgreSQL 16; `stream_url` is stored but never returned. Recommended
+first engineering slice (non-blocked).**
 Part of the RAN Mines alignment (`docs/RAN_MINES_PROPOSAL_ALIGNMENT.md`). Proposal Phase 0
 requires an audit of all **106 cameras**; this is the structured tool that captures it.
 

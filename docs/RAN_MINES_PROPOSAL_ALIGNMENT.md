@@ -177,7 +177,7 @@ additive, migration-backed, and reuses platform primitives.
 
 | Slice | Deliverable | Feature plan | Gating dependency |
 |---|---|---|---|
-| **1** | Camera inventory + AI-readiness registry (the Phase 0 audit tool) | FP-01 | none — **start here** |
+| **1** | Camera inventory + AI-readiness registry (the Phase 0 audit tool) — **✅ DELIVERED** (migration 0019, `cameras/` domain, `/api/v1`, tests; PG16 round-trip) | FP-01 | none — **start here** |
 | 2 | One camera → pretrained detector → tracked objects → `vision.observation.v1` | FP-02 | Phase 0 camera stream access |
 | 3 | Person counting in one configured zone | FP-03 | slice 2 |
 | 4 | Person↔plant proximity event | FP-06 | slice 2 |

@@ -697,3 +697,44 @@ class WorkOrder(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class Camera(Base):
+    """A camera in the site estate, with AI-readiness metadata (Mine Monitor Vision, FP-01).
+
+    Reference/config data — not telemetry, not an event, no video. It captures the RAN Mines
+    Phase 0 camera audit (which of the estate can support AI analytics, on which stream, in
+    which zone, with what calibration and health) and is the registry every vision capability
+    reads from. ``stream_url`` is a secret and is never returned by the API. ``zone_id`` is a
+    soft reference to a ``zones`` row (image-zone → operational zone mapping).
+    """
+
+    __tablename__ = "cameras"
+    __table_args__ = (Index("ix_cameras_site", "site_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    location_description: Mapped[str | None] = mapped_column(String, nullable=True)
+    make_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    stream_url: Mapped[str | None] = mapped_column(String, nullable=True)  # secret; never returned
+    stream_type: Mapped[str] = mapped_column(String, nullable=False, default="unknown")
+    stream_kind: Mapped[str] = mapped_column(String, nullable=False, default="unknown")
+    resolution: Mapped[str | None] = mapped_column(String, nullable=True)
+    fps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    codec: Mapped[str | None] = mapped_column(String, nullable=True)
+    lighting: Mapped[str] = mapped_column(String, nullable=False, default="unknown")
+    has_usable_ai_stream: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    ai_suitability: Mapped[str] = mapped_column(String, nullable=False, default="unknown")
+    blind_spot_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    zone_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    homography: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    calibration_status: Mapped[str] = mapped_column(String, nullable=False, default="none")
+    model_deployed: Mapped[str | None] = mapped_column(String, nullable=True)
+    model_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    health_state: Mapped[str] = mapped_column(String, nullable=False, default="unknown")
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
