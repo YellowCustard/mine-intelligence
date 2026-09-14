@@ -3,6 +3,12 @@
 **Status: plan for review.** Part of the RAN Mines alignment. Depends on FP-03 (vision
 headcount) and an external tag system (Phase 0 unknown).
 
+> **Requirements-meeting update (14 Sep 2026):** the site's tags are the **iHUA** visitor tag
+> and (recommended for staff) an **RFID wristband / tear-off strap** — **BLE has a helmet-swap
+> tamper risk**. This reconciliation is how the client's **99.9%** expectation is actually met:
+> two independent counts cross-checked, never a named individual from a camera. See
+> `../RAN_MINES_PROPOSAL_ALIGNMENT.md` §0.
+
 ## Purpose
 
 Reconcile a camera-derived headcount for an area against the count of active cap-lamp tags

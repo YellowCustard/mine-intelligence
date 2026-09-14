@@ -3,6 +3,11 @@
 **Status: plan for review.** Part of the RAN Mines alignment. Depends on FP-02, FP-03,
 `zones/`, and `shift_definitions`.
 
+> **Requirements-meeting update (14 Sep 2026):** the headline Phase-1 rule is a **zone-occupancy
+> breach** — "N people in an (N-1)-capacity sector = breach" — using per-sector capacities from
+> Derek. This is the recommended first *code* slice (works on any position/observation source;
+> vision plugs in later). See `../RAN_MINES_PROPOSAL_ALIGNMENT.md` §0.
+
 ## Purpose
 
 Detect security-relevant behaviour in fixed camera zones: restricted-area presence, dwell

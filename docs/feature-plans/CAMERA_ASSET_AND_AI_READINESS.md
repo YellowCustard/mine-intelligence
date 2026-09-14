@@ -7,6 +7,12 @@ first engineering slice (non-blocked).**
 Part of the RAN Mines alignment (`docs/RAN_MINES_PROPOSAL_ALIGNMENT.md`). Proposal Phase 0
 requires an audit of all **106 cameras**; this is the structured tool that captures it.
 
+> **Requirements-meeting update (14 Sep 2026):** the estate is **118 Alhua** cameras (closed
+> system). Primary integration is the **Alhua vendor/"backdoor" API + the NVR's existing AI
+> reports** (RTSP/ONVIF sub-stream is the fallback), so this registry also records the API/NVR
+> channel per camera. The **server room (a container next to a kitchen) must be relocated** for
+> edge compute. See `../RAN_MINES_PROPOSAL_ALIGNMENT.md` §0.
+
 ## Purpose
 
 Manage the camera estate and determine, per camera, whether it can support AI analytics —

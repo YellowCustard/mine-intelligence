@@ -3,6 +3,12 @@
 **Status: plan for review.** Part of the RAN Mines alignment. Proposal Phase 1 (gate
 security). External-integration-heavy — several Phase 0 unknowns.
 
+> **Requirements-meeting update (14 Sep 2026):** the client's Phase 1. Ingest **Alhua gate
+> face-events** (events only, no templates) + the **iHUA** visitor tag; tie entry to the
+> **roster/timesheet** (allow only if on shift; flag early/late); **random-search generator**
+> with an audit trail (alert if a selected search is skipped). Alerts pushed to **WhatsApp**.
+> See `../RAN_MINES_PROPOSAL_ALIGNMENT.md` §0.
+
 ## Purpose
 
 Connect the mine's existing identity/access infrastructure — face/payroll system, gates,

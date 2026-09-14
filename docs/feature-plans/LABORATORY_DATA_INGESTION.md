@@ -3,6 +3,11 @@
 **Status: plan for review.** Part of the RAN Mines alignment. Proposal Phase 1 (laboratory).
 Feeds gold reconciliation (FP-09) and loss-pathway intelligence (FP-10).
 
+> **Requirements-meeting update (14 Sep 2026):** the instrument is confirmed as an **Agilent
+> 2000-series spectrometer** (SpectrAA software) — currently fully manual. This is the client's
+> **Phase 4**. Integration target = SpectrAA's result export/watch-folder. See
+> `../RAN_MINES_PROPOSAL_ALIGNMENT.md` §0.
+
 ## Purpose
 
 Ingest laboratory instrument output **directly** — removing manual retyping — while

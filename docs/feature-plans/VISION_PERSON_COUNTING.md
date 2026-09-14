@@ -3,6 +3,12 @@
 **Status: plan for review.** Part of the RAN Mines alignment. Depends on FP-02 (edge
 platform) and FP-01 (camera→zone mapping).
 
+> **Requirements-meeting update (14 Sep 2026):** this is the core of the client's Phase-1
+> theft-*prevention* ask (gold-dust hand-coating). Per-zone headcount is reconciled against a
+> **physical tag** count; **count-not-identity** (masks defeat face ID on the floor). The 99.9%
+> bar is met by count reconciliation, not single-camera identity. See
+> `../RAN_MINES_PROPOSAL_ALIGNMENT.md` §0.
+
 ## Purpose
 
 Count people in defined areas and track area presence — **without facial recognition**.

@@ -17,6 +17,52 @@ integration/reconciliation layers the proposal makes central.
 
 ---
 
+## 0. Requirements-meeting update (14 Sep 2026)
+
+A subsequent team requirements meeting (the site is called **"Randmine"** in those minutes =
+this same RAN Mines) materially updates the picture. This section records the deltas; the rest
+of the document remains valid where not contradicted here. Two new standalone deliverables sit
+in [`docs/assessments/`](assessments/): the **Phase-1 personnel-tracking assessment** and the
+**questions for Derek**.
+
+**Facts that change our assumptions**
+- **Cameras: 118 Alhua** (not 106/50), a *closed* system with **no public API** — but a vendor
+  **"backdoor" API is on offer** (via Heath, who installed the CCTV) and the **NVR already has
+  unused AI reports / vehicle-tracking**. → The primary camera-integration path is now the
+  **Alhua API + NVR AI-event ingest**; RTSP/ONVIF sub-stream is the fallback. (Updates FP-01/02.)
+- **Theft mechanism named:** hand-coating in high-concentrate gold **slurry (dust, not
+  nuggets)**, post-crusher/post-cyanide. Client preference = **prevention via access control +
+  geofence headcount** ("6 people in a 5-person zone = breach") + **vision + physical tag**
+  combination (RFID/tear-off preferred; BLE has a helmet-swap tamper risk). → Sharpens FP-03/04/05.
+- **99.9% accuracy demanded before commit** — no single-modality vision meets this. Reframe to
+  **measured, per-capability targets + a one-month learning period**; count-reconciliation
+  (vision vs tag vs access) is the reliable signal, not single-camera identity through masks.
+- **New domains:** 5× **DSE generators** (fuel + run-hours — see new `GENERATOR_MONITORING.md`,
+  FP-11); **conveyor auto-adjust to 38 t/h** (⚠ **OUT of scope — crosses the advisory-only
+  line**; we monitor/alert, we do not control plant); tank-level + concentrate-box **leak
+  detection** (IR, if the liquid runs at a different temperature).
+- **Lab confirmed = Agilent 2000-series spectrometer** (vindicates the AAS/SpectrAA call in
+  FP-08), now the client's **Phase 4**.
+- **Infra:** single **Starlink** (on-prem only, reinforced); **server room is a container next
+  to a kitchen — relocation flagged**; **241 staff + 166 contractors**, 24/7 two-shift; **iHUA
+  visitor tag** + facial recognition at the gate; alerts wanted on **WhatsApp**.
+- **Access still gated:** NDA unsigned, Alhua API not yet granted → no real data yet.
+
+**Client phase order ≠ our engineering sequence.** They are different axes — map, don't
+conflate. Our engineering order stays value/risk/hardware-ranked (§5, §7).
+
+| Client phase (their priority) | Maps to our feature plans / slices |
+|---|---|
+| **P1** — entry security + personnel zone-tracking | FP-07 access, FP-03 counting, FP-04 security-behaviour, FP-05 tag reconciliation, FP-01 camera audit |
+| **P2** — drones + perimeter breach | (later phase; separate — vision-edge principles apply) |
+| **P3** — conveyor/process automation | **monitor/alert only**; auto belt-control is **OUT** (advisory line) |
+| **P4** — generators + lab | FP-11 generators, FP-08 lab (Agilent 2000-series) |
+
+**Out of Mine Monitor entirely** (company/BD context in the minutes): the team website / Lesotho
+event, Harris Auto, Finn & Wild, the rhino-poaching pipeline, and Notion/WhatsApp workspace admin.
+
+---
+
 ## 1. The headline change in direction
 
 The proposal reframes the product. It is **not** "add computer vision". It is:
@@ -233,6 +279,10 @@ Created under [`docs/feature-plans/`](feature-plans/):
 | 08 | `LABORATORY_DATA_INGESTION.md` | Instrument ingestion, provenance, immutable originals, corrections |
 | 09 | `GOLD_RECONCILIATION.md` | Continuous process/material reconciliation |
 | 10 | `LOSS_PATHWAY_INTELLIGENCE.md` | Cross-source correlated-discrepancy intelligence |
+| 11 | `GENERATOR_MONITORING.md` | DSE generator fuel + run-hours (added 14 Sep, §0) |
+
+Assessments (in [`docs/assessments/`](assessments/)): `PHASE1_PERSONNEL_TRACKING_ASSESSMENT.md`,
+`QUESTIONS_FOR_DEREK.md`.
 
 ---
 
