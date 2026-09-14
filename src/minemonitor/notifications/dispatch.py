@@ -37,6 +37,8 @@ class Sender(Protocol):
 
     def email(self, to: str, subject: str, body: str) -> None: ...
 
+    def whatsapp(self, to: str, text: str) -> None: ...
+
 
 def event_payload(ev: Event) -> dict[str, Any]:
     """The advisory, PII-free payload for an event (event.v1 fields only)."""
@@ -87,6 +89,27 @@ class UrllibSmtpSender:
                 smtp.login(s.notify_smtp_user, s.notify_smtp_password)
             smtp.send_message(msg)
 
+    def whatsapp(self, to: str, text: str) -> None:
+        s = self._s
+        body = {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "text",
+            "text": {"body": text},
+        }
+        req = urllib.request.Request(
+            s.notify_whatsapp_url,
+            data=json.dumps(body).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {s.notify_whatsapp_token}",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # noqa: S310 - operator-configured URL
+            if resp.status >= 300:
+                raise RuntimeError(f"whatsapp returned {resp.status}")
+
 
 def _deliver(sender: Sender, n: Notification, ev: Event) -> None:
     payload = event_payload(ev)
@@ -98,6 +121,10 @@ def _deliver(sender: Sender, n: Notification, ev: Event) -> None:
             payload, indent=2
         )
         sender.email(n.target, subject, body)
+    elif n.channel == "whatsapp":
+        # Concise, PII-free advisory line (no operator names; event.v1 fields only).
+        text = f"[{ev.severity}] {ev.site_id}: {ev.summary} (advisory)"
+        sender.whatsapp(n.target, text)
     else:  # pragma: no cover - guarded by enqueue
         raise RuntimeError(f"unknown channel {n.channel!r}")
 
