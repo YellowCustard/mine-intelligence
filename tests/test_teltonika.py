@@ -227,3 +227,58 @@ def test_listener_drops_malformed_frame_unacked() -> None:
     writer = _drive(server, _handshake("356307042441013") + bad)
     assert writer.buf == IMEI_ACCEPT  # accepted the handshake, but no ack for the bad frame
     assert pub.published == []
+
+
+# --- IMEI resolution / authorization (device-backed routing) ---
+
+
+def test_listener_routes_resolved_imei_to_its_asset() -> None:
+    pub = _FakePublisher()
+    # Resolver binds this IMEI to a real asset at a specific site.
+    server = TeltonikaServer(
+        pub,
+        host="127.0.0.1",
+        port=0,
+        site_id="unused",
+        resolve=lambda imei: ("kn-zw-01", "HT-102") if imei == "356307042441013" else None,
+    )
+    writer = _drive(server, _handshake("356307042441013") + _frame(0x08, [_record_c8({239: 1})]))
+    assert writer.buf[0:1] == IMEI_ACCEPT
+    assert len(pub.published) == 1
+    assert pub.published[0].asset_id == "HT-102" and pub.published[0].site_id == "kn-zw-01"
+
+
+def test_listener_rejects_unprovisioned_imei_under_resolver() -> None:
+    pub = _FakePublisher()
+    server = TeltonikaServer(
+        pub, host="127.0.0.1", port=0, site_id="unused", resolve=lambda imei: None
+    )
+    # Handshake is well-formed but the IMEI is not provisioned → rejected, nothing stored.
+    writer = _drive(server, _handshake("356307042441013") + _frame(0x08, [_record_c8({})]))
+    assert writer.buf == IMEI_REJECT
+    assert pub.published == []
+
+
+def test_device_resolver_honours_provisioning_and_strict_mode(db_session) -> None:
+    from sqlalchemy.orm import sessionmaker
+
+    from minemonitor.devices import service
+    from minemonitor.ingest.adapters.teltonika import make_device_resolver
+
+    service.register_device(
+        db_session, device_id="356307042441013", site_id="kn-zw-01", asset_id="HT-102"
+    )
+    db_session.commit()
+    factory = sessionmaker(bind=db_session.bind, expire_on_commit=False, future=True)
+
+    strict = make_device_resolver(factory, default_site_id="kn-zw-01", strict=True)
+    lenient = make_device_resolver(factory, default_site_id="kn-zw-01", strict=False)
+
+    assert strict("356307042441013") == ("kn-zw-01", "HT-102")  # provisioned → routed
+    assert strict("999999999999999") is None  # unknown + strict → rejected
+    # Lenient falls back to the synthetic mapping so a fresh/demo install still ingests.
+    assert lenient("999999999999999") == ("kn-zw-01", "teltonika-999999999999999")
+    # A disabled device is refused even when provisioned.
+    service.set_enabled(db_session, "356307042441013", False)
+    db_session.commit()
+    assert strict("356307042441013") is None

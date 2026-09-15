@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     # listener decodes and republishes into MQTT like any other adapter.
     teltonika_host: str = "0.0.0.0"  # noqa: S104 - a device listener binds all interfaces
     teltonika_port: int = 5027
+    # Close a Teltonika connection that stops sending for this long, so a half-open
+    # socket cannot linger. Trackers report far more often; keep it generous.
+    teltonika_idle_timeout_s: int = 900
 
     # Present for later milestones; unused now.
     s3_endpoint: str = "http://localhost:9000"

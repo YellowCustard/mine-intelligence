@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/fuel.transaction.v1.json",
+  "title": "fuel.transaction.v1",
+  "description": "A measured fuel movement: a dispense to a machine or a delivery into a tank.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "transaction_id", "site_id", "ts", "litres"],
+  "properties": {
+    "schema": { "const": "fuel.transaction.v1" },
+    "transaction_id": { "type": "string", "minLength": 1 },
+    "site_id": { "type": "string", "minLength": 1 },
+    "ts": { "type": "string", "format": "date-time", "description": "When the transaction occurred (UTC)." },
+    "litres": { "type": "number", "exclusiveMinimum": 0, "description": "Measured volume moved." },
+    "direction": { "enum": ["dispense", "delivery"], "default": "dispense" },
+    "source": { "enum": ["manual", "dispenser", "tank_meter", "import"], "default": "manual" },
+    "asset_id": { "type": ["string", "null"], "description": "Machine fuelled (dispense)." },
+    "tank_id": { "type": ["string", "null"], "description": "Source or target tank." },
+    "station": { "type": ["string", "null"] },
+    "odometer_km": { "type": ["number", "null"], "minimum": 0 },
+    "engine_hours": { "type": ["number", "null"], "minimum": 0 },
+    "measured": { "const": true, "description": "This event carries a measured quantity, not an estimate." }
+  }
+}

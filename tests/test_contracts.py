@@ -129,3 +129,24 @@ def test_metrics_valid_instance_passes_both() -> None:
     }
     Draft202012Validator(_load_schema("asset.metrics.v1.json")).validate(instance)
     AssetMetricsV1.model_validate(instance)
+
+
+def test_fuel_transaction_valid_instance_passes_both() -> None:
+    from minemonitor.contracts.fuel import FuelTransactionV1
+
+    Draft202012Validator.check_schema(_load_schema("fuel.transaction.v1.json"))
+    instance = {
+        "schema": "fuel.transaction.v1",
+        "transaction_id": "01J9Z8ABCDEF",
+        "site_id": "kn-zw-01",
+        "ts": "2026-09-05T11:42:07Z",
+        "litres": 120.5,
+        "direction": "dispense",
+        "source": "manual",
+        "asset_id": "HT-102",
+        "measured": True,
+    }
+    Draft202012Validator(_load_schema("fuel.transaction.v1.json")).validate(instance)
+    model = FuelTransactionV1.model_validate(instance)
+    dumped = json.loads(model.model_dump_json(by_alias=True))
+    Draft202012Validator(_load_schema("fuel.transaction.v1.json")).validate(dumped)
