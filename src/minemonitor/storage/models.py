@@ -550,3 +550,191 @@ class FuelTankReading(Base):
     level_l: Mapped[float] = mapped_column(Float, nullable=False)
     source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DispatchJob(Base):
+    """A haulage demand: move ``material`` from a source to a dump (dispatch, Phase 6).
+
+    Decision-support only. A job describes what needs hauling and how many concurrent
+    trucks it wants; recommendations against it are advisory and require a supervisor's
+    approval before they become dispatched instructions. The platform never controls a
+    machine (brief §15).
+    """
+
+    __tablename__ = "dispatch_jobs"
+    __table_args__ = (Index("ix_dispatch_jobs_site_status", "site_id", "status"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    material: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_zone: Mapped[str | None] = mapped_column(String, nullable=True)  # loading point
+    dest_zone: Mapped[str | None] = mapped_column(String, nullable=True)  # dump point
+    target_trucks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="open")
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DispatchAssignment(Base):
+    """A recommended or approved truck→job pairing (dispatch, Phase 6).
+
+    ``state`` flows recommended → approved → active → complete (or rejected). A
+    ``recommended`` row is an **advisory** suggestion carrying its ``rationale`` (the
+    evidence); it becomes a dispatched instruction only when a supervisor approves it.
+    """
+
+    __tablename__ = "dispatch_assignments"
+    __table_args__ = (Index("ix_dispatch_assignments_site_state", "site_id", "state"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    job_id: Mapped[str] = mapped_column(ForeignKey("dispatch_jobs.id"), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String, nullable=False)
+    state: Mapped[str] = mapped_column(String, nullable=False, default="recommended")
+    objective: Mapped[str] = mapped_column(String, nullable=False, default="balanced")
+    score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    rationale: Mapped[list[Any]] = mapped_column(JsonType, nullable=False, default=list)
+    recommended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    approved_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Weighbridge(Base):
+    """A weighbridge/scale at a site (weighbridge domain, Phase 4). Reference data."""
+
+    __tablename__ = "weighbridges"
+    __table_args__ = (Index("ix_weighbridges_site", "site_id"),)
+
+    scale_id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WeighTicket(Base):
+    """A **measured** weighbridge ticket — gross/tare/net for one weighing.
+
+    Manufacturer-neutral: every scale/adapter maps onto this shape via the
+    ``weighbridge.transaction.v1`` contract. Gross, tare and net are the measured
+    figures the bridge prints; net-consistency (net ≈ gross − tare) is *flagged*, never
+    silently corrected. ``ticket_no`` is unique per site, so re-importing a ticket (CSV
+    replays) is idempotent rather than double-counting production.
+    """
+
+    __tablename__ = "weigh_tickets"
+    __table_args__ = (
+        UniqueConstraint("site_id", "ticket_no", name="uq_weigh_tickets_site_ticket"),
+        Index("ix_weigh_tickets_site_ts", "site_id", "ts"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    ticket_no: Mapped[str] = mapped_column(String, nullable=False)
+    scale_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    direction: Mapped[str] = mapped_column(String, nullable=False, default="outbound")
+    gross_kg: Mapped[float] = mapped_column(Float, nullable=False)
+    tare_kg: Mapped[float] = mapped_column(Float, nullable=False)
+    net_kg: Mapped[float] = mapped_column(Float, nullable=False)
+    asset_id: Mapped[str | None] = mapped_column(String, nullable=True)  # the vehicle
+    trailer: Mapped[str | None] = mapped_column(String, nullable=True)
+    material: Mapped[str | None] = mapped_column(String, nullable=True)
+    destination: Mapped[str | None] = mapped_column(String, nullable=True)
+    customer: Mapped[str | None] = mapped_column(String, nullable=True)
+    operator_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class MaintenancePlan(Base):
+    """A service plan for an asset component (maintenance domain, Phase 5). Reference data.
+
+    A plan is an interval — by engine hours, calendar days, or both — against which a
+    **deterministic** health indicator is derived. No plan means health is ``Unknown``;
+    the system never invents a schedule.
+    """
+
+    __tablename__ = "maintenance_plans"
+    __table_args__ = (
+        UniqueConstraint("site_id", "asset_id", "component", name="uq_maint_plan_asset_component"),
+        Index("ix_maint_plans_site", "site_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String, nullable=False)
+    component: Mapped[str] = mapped_column(String, nullable=False, default="machine")
+    interval_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    interval_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WorkOrder(Base):
+    """A maintenance event: a service, repair or inspection on an asset component.
+
+    Completing a ``service`` work order (with the optional engine-hour reading taken at
+    the time) is the baseline the health indicator measures from — so a fresh service
+    resets the risk. An operational annotation, stored separately from telemetry.
+    """
+
+    __tablename__ = "work_orders"
+    __table_args__ = (Index("ix_work_orders_site_asset", "site_id", "asset_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String, nullable=False)
+    component: Mapped[str] = mapped_column(String, nullable=False, default="machine")
+    type: Mapped[str] = mapped_column(String, nullable=False, default="service")
+    status: Mapped[str] = mapped_column(String, nullable=False, default="open")
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    at_engine_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class Camera(Base):
+    """A camera in the site estate, with AI-readiness metadata (Mine Monitor Vision, FP-01).
+
+    Reference/config data — not telemetry, not an event, no video. It captures the RAN Mines
+    Phase 0 camera audit (which of the estate can support AI analytics, on which stream, in
+    which zone, with what calibration and health) and is the registry every vision capability
+    reads from. ``stream_url`` is a secret and is never returned by the API. ``zone_id`` is a
+    soft reference to a ``zones`` row (image-zone → operational zone mapping).
+    """
+
+    __tablename__ = "cameras"
+    __table_args__ = (Index("ix_cameras_site", "site_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    location_description: Mapped[str | None] = mapped_column(String, nullable=True)
+    make_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    stream_url: Mapped[str | None] = mapped_column(String, nullable=True)  # secret; never returned
+    stream_type: Mapped[str] = mapped_column(String, nullable=False, default="unknown")
+    stream_kind: Mapped[str] = mapped_column(String, nullable=False, default="unknown")
+    resolution: Mapped[str | None] = mapped_column(String, nullable=True)
+    fps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    codec: Mapped[str | None] = mapped_column(String, nullable=True)
+    lighting: Mapped[str] = mapped_column(String, nullable=False, default="unknown")
+    has_usable_ai_stream: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    ai_suitability: Mapped[str] = mapped_column(String, nullable=False, default="unknown")
+    blind_spot_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    zone_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    homography: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    calibration_status: Mapped[str] = mapped_column(String, nullable=False, default="none")
+    model_deployed: Mapped[str | None] = mapped_column(String, nullable=True)
+    model_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    health_state: Mapped[str] = mapped_column(String, nullable=False, default="unknown")
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

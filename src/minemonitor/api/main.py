@@ -14,20 +14,24 @@ from fastapi.responses import FileResponse, JSONResponse
 from minemonitor import __version__
 from minemonitor.api.routers import (
     account,
+    cameras,
     cycles,
     delays,
     devices,
+    dispatch,
     events,
     fuel,
     handovers,
     health,
     incidents,
     ingest,
+    maintenance,
     notifications,
     operations,
     platform,
     reports,
     stream,
+    weighbridge,
     zones,
 )
 from minemonitor.auth.deps import require_viewer
@@ -172,6 +176,10 @@ def create_app() -> FastAPI:
         devices.router,
         notifications.router,
         fuel.router,
+        weighbridge.router,
+        maintenance.router,
+        dispatch.router,
+        cameras.router,
     ]
     for r in _domain_routers:
         app.include_router(r)  # legacy unprefixed
