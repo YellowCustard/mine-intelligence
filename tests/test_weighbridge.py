@@ -224,3 +224,54 @@ def test_scale_is_admin_only(db_session: Session) -> None:
         .status_code
         == 201
     )
+
+
+def test_negative_net_weight_is_rejected(db_session: Session) -> None:
+    # A net mismatch stays flaggable, but a negative physical net is invalid input.
+    with pytest.raises(ValueError, match="non-negative"):
+        service.record_ticket(
+            db_session,
+            site_id="kn-zw-01",
+            ticket_no="NEG-1",
+            ts=_T0,
+            gross_kg=1000,
+            tare_kg=800,
+            net_kg=-100,
+            created_by="s",
+            now=_now(),
+        )
+
+
+def test_tonnage_summary_aggregates_full_window_beyond_list_cap(db_session: Session) -> None:
+    # More tickets than the internal list cap (1000): the summary must sum every ticket in
+    # the window, not just the newest N — the exact long-window case this endpoint serves.
+    from ulid import ULID
+
+    from minemonitor.storage.models import WeighTicket
+
+    n = 1050
+    for i in range(n):
+        db_session.add(
+            WeighTicket(
+                id=str(ULID()),
+                site_id="kn-zw-01",
+                ticket_no=f"B-{i}",
+                ts=_T0 + timedelta(seconds=i),
+                direction="outbound",
+                gross_kg=2000.0,
+                tare_kg=1000.0,
+                net_kg=1000.0,
+                material="gold_ore",
+                source="import",
+                created_at=_now(),
+                created_by="s",
+            )
+        )
+    db_session.commit()
+    s = service.tonnage_summary(
+        db_session, "kn-zw-01", since=_T0 - timedelta(hours=1), until=_now()
+    )
+    assert s["tickets"] == n
+    assert s["materials"]["gold_ore"]["tickets"] == n
+    assert s["materials"]["gold_ore"]["net_tonnes"] == 1050.0
+    assert s["net_inconsistent_tickets"] == 0

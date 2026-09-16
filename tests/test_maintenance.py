@@ -201,3 +201,47 @@ def test_workorder_lifecycle_and_audit(db_session: Session) -> None:
         "maintenance.work_order.open",
         "maintenance.work_order.complete",
     } <= actions
+
+
+def test_repeat_completion_preserves_the_original_baseline(db_session: Session) -> None:
+    wo = service.open_work_order(
+        db_session,
+        site_id="kn-zw-01",
+        asset_id="HT-102",
+        component="engine",
+        type="service",
+        created_by="s",
+        now=_NOW - timedelta(days=10),
+        at_engine_hours=1000.0,
+    )
+    first = service.complete_work_order(
+        db_session, "kn-zw-01", wo.id, now=_NOW - timedelta(days=10), at_engine_hours=1000.0
+    )
+    db_session.commit()
+    assert first is not None
+    closed_at, hours = first.closed_at, first.at_engine_hours
+
+    # A delayed retry must not move closed_at/at_engine_hours forward (which would silently
+    # reset an overdue asset's risk to Normal without a service having occurred).
+    again = service.complete_work_order(
+        db_session, "kn-zw-01", wo.id, now=_NOW, at_engine_hours=9999.0
+    )
+    db_session.commit()
+    assert again is not None and again.status == "done"
+    assert again.closed_at == closed_at and again.at_engine_hours == hours
+
+
+def test_completing_a_cancelled_work_order_is_rejected(db_session: Session) -> None:
+    wo = service.open_work_order(
+        db_session,
+        site_id="kn-zw-01",
+        asset_id="HT-102",
+        component="machine",
+        type="service",
+        created_by="s",
+        now=_NOW,
+    )
+    wo.status = "cancelled"
+    db_session.commit()
+    with pytest.raises(ValueError, match="only an open/in_progress"):
+        service.complete_work_order(db_session, "kn-zw-01", wo.id, now=_NOW)

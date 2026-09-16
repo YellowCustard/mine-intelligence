@@ -140,9 +140,23 @@ def complete_work_order(
     now: datetime,
     at_engine_hours: float | None = None,
 ) -> WorkOrder | None:
+    """Complete an open work order. Idempotent on the recorded baseline; guards bad states.
+
+    A work order already ``done`` is returned unchanged — a delayed retry must not move
+    ``closed_at``/``at_engine_hours`` forward, because ``assess_health`` measures the service
+    interval from the latest completed service and a moved baseline would silently reset an
+    overdue asset to Normal without a service having happened. Completing a ``cancelled`` work
+    order is rejected.
+    """
     wo = session.get(WorkOrder, wo_id)
     if wo is None or wo.site_id != site_id:
         return None
+    if wo.status == "done":
+        return wo  # idempotent: preserve the original completion baseline
+    if wo.status not in ("open", "in_progress"):
+        raise ValueError(
+            f"only an open/in_progress work order can be completed (status={wo.status})"
+        )
     wo.status = "done"
     wo.closed_at = now
     if at_engine_hours is not None:

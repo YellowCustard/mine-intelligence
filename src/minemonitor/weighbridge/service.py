@@ -12,7 +12,7 @@ import io
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from ulid import ULID
 
@@ -79,8 +79,10 @@ def record_ticket(
     """
     if direction not in _VALID_DIRECTIONS:
         raise ValueError(f"direction must be one of {sorted(_VALID_DIRECTIONS)}")
-    if gross_kg < 0 or tare_kg < 0:
-        raise ValueError("gross_kg and tare_kg must be non-negative")
+    # A net vs gross−tare *mismatch* stays flaggable (net_consistency), but a negative
+    # physical net weight is invalid input and is rejected so it cannot corrupt totals.
+    if gross_kg < 0 or tare_kg < 0 or net_kg < 0:
+        raise ValueError("gross_kg, tare_kg and net_kg must be non-negative")
     existing = get_ticket(session, site_id, ticket_no)
     if existing is not None:
         return existing, False
@@ -143,19 +145,41 @@ def list_tickets(
 
 
 def tonnage_summary(
-    session: Session, site_id: str, *, since: datetime, until: datetime
+    session: Session,
+    site_id: str,
+    *,
+    since: datetime,
+    until: datetime,
+    tolerance_kg: float = 20.0,
 ) -> dict[str, Any]:
-    """Measured net tonnage per material over a window, plus a net-consistency flag count."""
-    rows = list_tickets(session, site_id, since=since, until=until, limit=1000)
-    by_material: dict[str, dict[str, float]] = {}
-    flagged = 0
-    for t in rows:
-        if not net_consistency(t)["consistent"]:
-            flagged += 1
-        key = t.material or "unspecified"
-        agg = by_material.setdefault(key, {"tickets": 0, "net_kg": 0.0})
-        agg["tickets"] += 1
-        agg["net_kg"] += t.net_kg
+    """Measured net tonnage per material over a window, plus a net-consistency flag count.
+
+    Aggregates the **full** filtered set in SQL, not a paginated list — a long reporting
+    window with many thousands of tickets is summed completely, never silently truncated to
+    the newest N (the failure a list-limit would cause for exactly the windows this serves).
+    """
+    window = (
+        WeighTicket.site_id == site_id,
+        WeighTicket.ts >= since,
+        WeighTicket.ts < until,
+    )
+    mat_rows = session.execute(
+        select(
+            WeighTicket.material,
+            func.count().label("tickets"),
+            func.coalesce(func.sum(WeighTicket.net_kg), 0.0).label("net_kg"),
+        )
+        .where(*window)
+        .group_by(WeighTicket.material)
+    ).all()
+    raw: dict[str, dict[str, float]] = {}
+    total_tickets = 0
+    for material, tickets, net_kg in mat_rows:
+        key = material or "unspecified"
+        total_tickets += int(tickets)
+        agg = raw.setdefault(key, {"tickets": 0.0, "net_kg": 0.0})
+        agg["tickets"] += int(tickets)
+        agg["net_kg"] += float(net_kg)
     materials = {
         m: {
             "tickets": int(v["tickets"]),
@@ -163,11 +187,23 @@ def tonnage_summary(
             "net_tonnes": round(v["net_kg"] / 1000, 3),
             "basis": "measured",
         }
-        for m, v in sorted(by_material.items())
+        for m, v in sorted(raw.items())
     }
+    # Consistency flag over the full window too (net vs gross − tare beyond tolerance).
+    flagged = int(
+        session.execute(
+            select(func.count())
+            .select_from(WeighTicket)
+            .where(
+                *window,
+                func.abs(WeighTicket.net_kg - (WeighTicket.gross_kg - WeighTicket.tare_kg))
+                > tolerance_kg,
+            )
+        ).scalar_one()
+    )
     return {
         "window": {"since": since, "until": until},
-        "tickets": len(rows),
+        "tickets": total_tickets,
         "materials": materials,
         "net_inconsistent_tickets": flagged,
     }

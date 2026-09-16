@@ -143,3 +143,43 @@ def test_job_creation_is_audited(db_session: Session) -> None:
     )
     audit = make_client(db_session, ADMIN).get("/sites/kn-zw-01/audit").json()
     assert any(a["action"] == "dispatch.job.create" for a in audit)
+
+
+def test_completing_a_job_releases_its_committed_trucks(db_session: Session) -> None:
+    # Two trucks (HT-1 + seeded HT-102), one job that commits both.
+    _trucks(db_session, "HT-1")
+    job = service.create_job(
+        db_session, site_id="kn-zw-01", created_by="s", now=_NOW, priority=3, target_trucks=2
+    )
+    db_session.commit()
+    for r in service.recommend(db_session, "kn-zw-01", now=_NOW):
+        service.approve_assignment(db_session, "kn-zw-01", r.id, approved_by="s", now=_NOW)
+    db_session.commit()
+    assert len(service.list_assignments(db_session, "kn-zw-01", state="approved")) == 2
+
+    # While the job is live both trucks are committed → a new open job gets nothing.
+    other = service.create_job(db_session, site_id="kn-zw-01", created_by="s", now=_NOW, priority=9)
+    db_session.commit()
+    assert service.recommend(db_session, "kn-zw-01", now=_NOW) == []
+    db_session.commit()
+
+    # Completing the job releases its trucks; they become available again.
+    service.set_job_status(db_session, "kn-zw-01", job.id, "complete")
+    db_session.commit()
+    assert len(service.list_assignments(db_session, "kn-zw-01", state="released")) == 2
+    recs2 = service.recommend(db_session, "kn-zw-01", now=_NOW)
+    db_session.commit()
+    assert len(recs2) == 2 and {r.job_id for r in recs2} == {other.id}
+
+
+def test_cancelling_a_job_also_releases_trucks(db_session: Session) -> None:
+    service.create_job(db_session, site_id="kn-zw-01", created_by="s", now=_NOW, priority=1)
+    db_session.commit()
+    rec = service.recommend(db_session, "kn-zw-01", now=_NOW)[0]
+    committed_job = rec.job_id
+    service.approve_assignment(db_session, "kn-zw-01", rec.id, approved_by="s", now=_NOW)
+    db_session.commit()
+    service.set_job_status(db_session, "kn-zw-01", committed_job, "cancelled")
+    db_session.commit()
+    assert service.list_assignments(db_session, "kn-zw-01", state="approved") == []
+    assert len(service.list_assignments(db_session, "kn-zw-01", state="released")) == 1

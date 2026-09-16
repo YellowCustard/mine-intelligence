@@ -168,9 +168,12 @@ def complete_work_order(
     user: User = Depends(require_supervisor),
 ) -> dict[str, Any]:
     """Complete a work order (supervisor; audited). A completed service resets health."""
-    wo = service.complete_work_order(
-        db, site_id, wo_id, now=datetime.now(UTC), at_engine_hours=body.at_engine_hours
-    )
+    try:
+        wo = service.complete_work_order(
+            db, site_id, wo_id, now=datetime.now(UTC), at_engine_hours=body.at_engine_hours
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     if wo is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "work order not found")
     audit.record(
