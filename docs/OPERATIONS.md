@@ -110,13 +110,29 @@ plant. Workflow:
 If an alarm *storm* appears (many enter/exit events on one asset), that is a
 debounce/hysteresis symptom, not normal — see §8.
 
+**Zone-occupancy alarms.** A zone can carry a `max_occupancy` in its rule payload; when
+more assets are confirmed inside it than the cap (the "6 people in a 5-person sector"
+signal), the ingestor raises one `zone_occupancy` `event.v1` into the same queue and
+holds it open (deduped) until acknowledged. It is a cross-asset aggregate checked on the
+maintenance tick, source-agnostic (GNSS today, vision tracks later), and advisory.
+
+**Cameras.** The camera registry (`/api/v1/sites/{id}/cameras`, admin-managed, audited)
+inventories the site's fixed cameras and their AI-readiness metadata. It is the intake
+tool for the RAN Mines estate; no video passes through the platform — only structured
+events. Vision perception itself is a later edge subsystem (see `docs/VISION_*`).
+
 **Notifications (alert egress).** Because nobody watches the dashboard around the
 clock at a remote site, qualifying events are pushed out. It is **off by default**;
 turn it on in `.env`:
 
 - `MM_NOTIFY_MIN_SEVERITY` — `info` | `warning` | `critical` (blank = off).
-- A **webhook** (`MM_NOTIFY_WEBHOOK_URL`, POSTs the event JSON) and/or **email**
-  (`MM_NOTIFY_SMTP_*`, `MM_NOTIFY_EMAIL_TO`). Both self-hostable.
+- A **webhook** (`MM_NOTIFY_WEBHOOK_URL`, POSTs the event JSON), **email**
+  (`MM_NOTIFY_SMTP_*`, `MM_NOTIFY_EMAIL_TO`), and/or **WhatsApp**
+  (`MM_NOTIFY_WHATSAPP_URL` + `MM_NOTIFY_WHATSAPP_TOKEN` + `MM_NOTIFY_WHATSAPP_TO`, the
+  WhatsApp Cloud API). WhatsApp is off unless both URL and recipients are set; its
+  message is a single advisory line (`[severity] site: summary (advisory)`), never an
+  operator name. All channels are self-hostable except WhatsApp, which uses the operator's
+  own Cloud API credentials.
 
 Delivery is **store-and-forward**: a notification is written in the same transaction
 as its event, then a background dispatcher sends it with exponential backoff

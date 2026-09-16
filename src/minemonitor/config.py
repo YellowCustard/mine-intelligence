@@ -88,7 +88,8 @@ class Settings(BaseSettings):
     notify_email_from: str = ""
     notify_email_to: str = ""  # comma-separated recipients
     # WhatsApp Cloud API (or a compatible gateway). Blank url or recipients = no WhatsApp.
-    notify_whatsapp_url: str = ""  # messages endpoint, e.g. https://graph.facebook.com/v20.0/<id>/messages
+    # url = the messages endpoint, e.g. https://graph.facebook.com/v20.0/<id>/messages
+    notify_whatsapp_url: str = ""
     notify_whatsapp_token: str = ""  # bearer token
     notify_whatsapp_to: str = ""  # comma-separated recipient phone numbers (E.164)
     notify_max_attempts: int = 5  # then the row is marked failed (visible in the queue)
