@@ -40,6 +40,11 @@ def channel_targets(s: Settings) -> list[tuple[str, str]]:
             addr = addr.strip()
             if addr:
                 out.append(("email", addr))
+    if s.notify_whatsapp_url and s.notify_whatsapp_to:
+        for num in s.notify_whatsapp_to.split(","):
+            num = num.strip()
+            if num:
+                out.append(("whatsapp", num))
     return out
 
 

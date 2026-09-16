@@ -246,6 +246,7 @@ class MqttIngestor:
         from minemonitor.cycles.recompute import recompute
         from minemonitor.notifications.dispatch import UrllibSmtpSender, dispatch_pending
         from minemonitor.retention import run_from_config
+        from minemonitor.rules.occupancy import detect_zone_occupancy
         from minemonitor.rules.offline import detect_offline
 
         notify_sender = UrllibSmtpSender(get_settings())
@@ -263,6 +264,12 @@ class MqttIngestor:
                     log.info(
                         "asset offline",
                         extra={"site_id": ev.site_id, "asset_id": ev.asset_id},
+                    )
+                occ = detect_zone_occupancy(session, self._site_id)
+                for ev in occ:
+                    log.info(
+                        "zone occupancy breach",
+                        extra={"site_id": ev.site_id, "zone_id": ev.zone_id},
                     )
                 recompute(session, self._site_id)
                 # Drain the notification outbox (store-and-forward alerts, brief §3).

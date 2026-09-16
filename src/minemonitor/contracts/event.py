@@ -11,6 +11,7 @@ EventType = Literal[
     "zone_breach",
     "overspeed",
     "zone_dwell",
+    "zone_occupancy",
     "asset_offline",
     "geofence_exit",
     "proximity",

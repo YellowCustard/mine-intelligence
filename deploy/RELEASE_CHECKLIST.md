@@ -35,7 +35,7 @@ Tick every box. A red box is a blocked release, not a note for later.
 - [ ] Any contract change is **versioned** (`*.v1` untouched, or a new version added),
       published as JSON Schema in `/contracts`, and mirrored in the Pydantic models.
 - [ ] `event.v1` payloads still carry `advisory: true`.
-- [ ] Changes stay compatible with the vision repo's `event.v1` shape.
+- [ ] Changes stay compatible with the `event.v1` contract (Mine Monitor's own; Mine Monitor Vision integrates through it).
 
 ## 4. Security & compliance
 

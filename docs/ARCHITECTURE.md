@@ -22,8 +22,8 @@ multi-tenant by `site_id`, advisory-only, audited, and self-hostable on one box.
 
 ## 2. The five layers
 
-Mirrors the pattern from the vision project so the two systems share contracts and
-operational habits.
+Mine Monitor's own layering. The event contracts are Mine Monitor's; a later edge
+subsystem (Mine Monitor Vision) integrates through them rather than inheriting them.
 
 ```
 L0  Devices        GNSS trackers · simulator · (later: cameras, gate face terminal)
@@ -31,7 +31,7 @@ L1  Edge/ingest    Protocol adapters → normalise → store-and-forward spool
 L2  Platform core  Ingest gateway · zone engine · rules engine · cycle analytics ·
                    events · storage · API · SSE
 L3  Applications   Operations dashboard · alarm queue · reports · exports
-L4  Learning loop  (Phase 2+, in the vision repo — not here)
+L4  Learning loop  (Phase 2+, in Mine Monitor Vision — not here)
 ```
 
 **The rule that keeps it extensible:** every source speaks the same event contract.
@@ -79,8 +79,8 @@ loudly — never silently coerce.
 - **`asset.metrics.v1`** — derived rollups per asset per 5-minute bucket. Never
   hand-edited; always recomputable from `positions`.
 
-Keeping these compatible with the vision repo's `event.v1` means a camera node can
-publish into this platform with no translation layer.
+`event.v1` is Mine Monitor's own contract; Mine Monitor Vision publishes into it, so a
+camera node lands in this platform with no translation layer.
 
 ---
 
@@ -230,6 +230,27 @@ Route surface (roles: `viewer < supervisor < admin`, plus `device` for ingest on
   `GET /sites/{id}/fuel/consumption` (measured litres + calculated efficiency,
   labelled), `GET /sites/{id}/fuel/reconciliation/{tank_id}` (flags variance, never
   corrects). Measured facts only; anomaly detection is a later increment.
+- **Weighbridge** (Phase 4): `POST/GET /sites/{id}/weighbridge/scales` (admin/viewer),
+  `POST/GET /sites/{id}/weighbridge/tickets` (supervisor/viewer, audited, idempotent
+  per `ticket_no`; publishes `weighbridge.transaction.v1`),
+  `POST /sites/{id}/weighbridge/import` (CSV adapter, supervisor),
+  `GET /sites/{id}/weighbridge/tonnage` (measured net per material). Manufacturer-
+  neutral; net-consistency (`net ≈ gross − tare`) is flagged, never corrected.
+- **Maintenance** (Phase 5): `POST/GET /sites/{id}/maintenance/plans` (admin/viewer),
+  `POST /sites/{id}/maintenance/work-orders` + `/{id}/complete` (supervisor, audited),
+  `GET /sites/{id}/maintenance/work-orders`,
+  `GET /sites/{id}/maintenance/health` (viewer). Health is a **deterministic** risk
+  (`maintenance.health.v1`: Normal→Critical/Unknown) from service interval vs
+  time/engine-hours since last service — inferred, evidenced, advisory; engine hours
+  read from the latest fuel record when present, never fabricated. No ML in this
+  increment.
+- **Dispatch** (Phase 6, decision-support): `POST/GET /sites/{id}/dispatch/jobs`
+  (supervisor/viewer), `POST /sites/{id}/dispatch/recommendations` (supervisor;
+  publishes `dispatch.recommendation.v1`), `GET /sites/{id}/dispatch/assignments`,
+  `POST .../assignments/{id}/approve|reject` (supervisor, audited). Recommendations
+  are **advisory** and explainable (priority + availability heuristic, `rationale`
+  evidence, no optimality claim); a supervisor approves one before it is a dispatched
+  instruction. The platform never actuates a machine.
 - **Governance:** operators (+ export), audit log, `POST /admin/retention/run`.
 
 ---
