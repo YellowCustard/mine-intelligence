@@ -53,9 +53,19 @@ event id — NOT a template or image) · operator_ref (FK|null) · gate_id · ts
 
 ## Slices
 
-1. Ingest access events (adapter) → `access.event.v1` stored with provenance.
+1. Ingest access events (adapter) → `access.event.v1` stored with provenance. **✅ DELIVERED**
+   — `access.event.v1` contract (registered), migration `0020` (`access_events` table), the
+   `access/` service, a simulator-first adapter (`ingest/adapters/access_sim.py`) that refuses
+   biometric payloads, and `/api/v1/sites/{id}/access/events`.
 2. Authorisation rules (off-shift/suspended/non-inducted) → decision + `event.v1` on deny.
+   **✅ DELIVERED** — `authorize()` (reads new `operators.suspended`/`inducted` + `resolve_shift`
+   for off-shift); a gate *grant* to someone the rules would reject raises a critical
+   `access_denied` `event.v1`; admin `access-status` endpoint sets operator status.
 3. Metal-detector association + random-search selection + missed-search escalation.
+   **Deferred** (the `search_selected`/`search_completed` fields already ride on the contract).
+
+The live gate/face/turnstile poller is a thin driver added when the Phase-0 interfaces are
+known; it calls the same `ingest_access_event`, and the normaliser/rules do not change.
 
 ## Safety / provenance / data protection
 

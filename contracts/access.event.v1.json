@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/access.event.v1.json",
+  "title": "access.event.v1",
+  "description": "A gate/turnstile access decision. Event-only: no biometric template or image ever; credential_ref is opaque and identity is a foreign key to operators.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "event_id", "site_id", "ts", "source_system", "gate_id", "decision"],
+  "properties": {
+    "schema": { "const": "access.event.v1" },
+    "event_id": { "type": "string", "minLength": 1 },
+    "site_id": { "type": "string", "minLength": 1 },
+    "ts": { "type": "string", "format": "date-time" },
+    "source_system": { "type": "string", "minLength": 1, "description": "e.g. alhua_gate, ihua_tag, turnstile." },
+    "gate_id": { "type": "string", "minLength": 1 },
+    "credential_ref": { "type": ["string", "null"], "description": "Opaque tag/card/face-event id — NEVER a template or image." },
+    "operator_ref": { "type": ["string", "null"], "description": "FK to operators; identity lives there, not in this payload." },
+    "decision": { "enum": ["granted", "denied"], "description": "The source system's own decision." },
+    "reason": { "type": ["string", "null"] },
+    "search_selected": { "type": "boolean", "default": false },
+    "search_completed": { "type": ["boolean", "null"], "default": null },
+    "advisory": { "const": true }
+  }
+}
