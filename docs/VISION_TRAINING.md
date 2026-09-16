@@ -19,6 +19,15 @@ do we train the first mining model.
   person`. (PPE and infrastructure are later, separate capabilities.)
 - **Method:** transfer learning — freeze/adapt the backbone, retrain the head on the
   mining classes, then unfreeze for full fine-tuning. Never from scratch.
+- **Optional label-efficient backbone (DINOv3/DINOv2):** where site labels are scarce, a
+  **frozen self-supervised backbone** (DINOv3 ⭐ accepted, or DINOv2 Apache-2.0) with a
+  lightweight head (linear / DETR / Mask2Former / DPT) is an alternative to a
+  COCO-pretrained detector for reaching useful accuracy from few labels. It is an
+  *option alongside*, **not** a replacement for, the YOLOX/RT-DETR defaults — the large
+  DINOv3 variants are training/offline-grade (7B/H+), so use the **distilled ViT-S /
+  ConvNeXt-T** for anything edge-bound. Any such model is licence-gated and must beat the
+  permissive default on the site validation set before promotion (`VISION_MODEL_CATALOG.md
+  §5a`, `VISION_MODEL_LICENSES.md §1a`).
 - **Registry:** `mine-equipment-detector`, `version: 0.1.0`, `status: experimental`,
   `base: yolox-s` (or `rt-detrv2-r50`), `dataset: mine-vision-v1` — recorded in the
   model registry with its dataset version and licence line before any inference is used.

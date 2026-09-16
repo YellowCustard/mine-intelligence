@@ -94,8 +94,13 @@ vendor.
  frames  ── sample: adaptive rate + hard-example mining (keep frames the model is unsure on)
    │
    ▼
+ embed    ── DINOv3 frozen backbone (⭐ accepted) / DINOv2 (Apache) → per-frame features
+   │        · retrieval: surface scenes similar to a rare example
+   │        · active-learning: rank the most novel/uncertain frames to label first
+   │        · anomaly/novelty: flag "unlike anything labelled" for review (advisory)
+   ▼
  pre-label  ── Grounding DINO / OWLv2 (Apache, dev-only) proposes boxes  →  HUMAN REVIEW
-   │           (auto-labels are never trusted unreviewed)
+   │           (auto-labels + backbone proposals are never trusted unreviewed)
    ▼
  annotations  ── stored in a neutral canonical form; export to COCO JSON *or* YOLO txt
    │
@@ -115,6 +120,16 @@ Requirements:
 - **Sampling:** don't label every frame — adaptive sampling plus **active learning /
   hard-example mining** (prioritise frames where the current model is low-confidence or
   where tracking id-switched), so annotation effort buys the most accuracy.
+- **Backbone-accelerated selection (DINOv3/DINOv2):** embed sampled frames with a **frozen
+  self-supervised backbone** and use the features to drive selection *before* a detector
+  even exists — **retrieval** (find more scenes like a rare one), **few-shot** proposal for
+  rare mining classes, and **active-learning frame ranking** (label the most novel/uncertain
+  first). The backbone accelerates *which frames a human labels*; it never produces trusted
+  labels, and it emits **features, never identity** (`CLAUDE.md §4`). Licence-gated and
+  dev/offline only — see `VISION_MODEL_CATALOG.md §5a`, `VISION_MODEL_LICENSES.md §1a`, and
+  `feature-plans/VISION_DATASET_BOOTSTRAPPING.md`.
+- **Anomaly / novelty flags:** backbone feature distance can flag a scene as "unlike anything
+  labelled" for review — advisory and evidence-carrying, never a standalone conclusion.
 - **Class balance:** track per-class counts; synthetic/public data fills gaps for rare
   classes so the site set isn't skewed to haul trucks.
 - **Splits are fixed and leakage-free:** the same *scene/day/camera* never spans train

@@ -280,6 +280,7 @@ Created under [`docs/feature-plans/`](feature-plans/):
 | 09 | `GOLD_RECONCILIATION.md` | Continuous process/material reconciliation |
 | 10 | `LOSS_PATHWAY_INTELLIGENCE.md` | Cross-source correlated-discrepancy intelligence |
 | 11 | `GENERATOR_MONITORING.md` | DSE generator fuel + run-hours (added 14 Sep, §0) |
+| 12 | `VISION_DATASET_BOOTSTRAPPING.md` | DINOv3/DINOv2 frozen-backbone dataset bootstrapping (few-shot, retrieval, active-learning, anomaly) — dev/offline, licence-gated |
 
 Assessments (in [`docs/assessments/`](assessments/)): `PHASE1_PERSONNEL_TRACKING_ASSESSMENT.md`,
 `QUESTIONS_FOR_DEREK.md`.

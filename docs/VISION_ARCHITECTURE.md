@@ -241,6 +241,15 @@ Concrete adapters (all behind the same interface; see `VISION_MODEL_CATALOG.md`)
 `RfDetrAdapter`, etc. **Tracking is a distinct layer**, never folded into the detector —
 so the tracker and detector version independently, and a detector swap keeps track ids.
 
+A **feature-extractor / backbone** is a first-class, licence-gated adapter type too: a
+`DinoBackboneAdapter` (DINOv3 ⭐ accepted / DINOv2 Apache-2.0) would add an
+`.embed(frame|crop) -> FeatureVector` capability while leaving `detect`/`segment`/`classify`
+`NotImplemented` — used **dev/offline** for dataset bootstrapping (retrieval, few-shot,
+active-learning frame selection, anomaly scoring), never in the real-time hot path, and
+emitting **features, never identity** (`CLAUDE.md §4`). It is scoped in
+`feature-plans/VISION_DATASET_BOOTSTRAPPING.md` and, like all vision code, **built only after
+this foundation is reviewed** (§14) — this is an interface note, not an implementation.
+
 Two hard rules the adapter boundary enforces:
 1. Every adapter normalises to the *same* `Detection`/`Mask`/`Label` shapes. The
    perception→operational code never learns which model produced them.

@@ -25,6 +25,12 @@ Mine Monitor is a **commercial product** eigenstate sells, deployable as **SaaS*
 - **Transitive dependencies count.** A permissive wrapper that pulls a GPL/AGPL codec or
   ReID model poisons the ship; the audit follows the dependency tree, not just the top
   package.
+- **Custom-but-accepted is a distinct state from permissive.** A model under a bespoke
+  vendor licence (not Apache/MIT/BSD) that nonetheless permits commercial + SaaS +
+  on-prem use may ship **only** after an explicit recorded decision, and is marked
+  distinctly (⭐) — never silently grouped with the ✅ permissive rows. A custom licence
+  can change terms between releases more freely than a standard OSI licence, so the
+  per-release re-audit matters more, not less, for these.
 
 ## The eight commercial questions (answered for every candidate below)
 
@@ -56,6 +62,41 @@ Notes:
   it: a permissive alternative (YOLOX/RT-DETR) gives equivalent capability with no
   per-product licence cost or ongoing commercial dependency. Policy: prefer permissive
   over paid-to-escape-copyleft.
+
+---
+
+## 1a. Self-supervised backbones (feature extractors — not detectors)
+
+These are **frozen feature extractors**, not detectors or trackers. They do not sit in the
+real-time hot path; their use here is **dev/offline dataset bootstrapping** (few-shot,
+retrieval, active-learning frame selection, anomaly scoring) and, later, optional
+dense-feature heads (segmentation / relative depth) behind the adapter interface
+(`VISION_MODEL_CATALOG.md §5a`). A backbone emits **feature vectors, never identity** —
+it produces no face templates and does no person re-identification (`CLAUDE.md §4`).
+
+| Model | Code | Weights | 1 Comm | 2 Embed | 3 Redist wts | 4 Finetune | 5 Attrib | 6 Comm licence | 7 SaaS | 8 On-prem | Ship? |
+|---|---|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| **DINOv3** | **custom "DINOv3 License"** | same | ✅ | ✅ | ⚠️ per licence | ✅ | per licence | reviewed & **accepted** | ✅ | ✅ | **⭐ accepted by decision** |
+| **DINOv2** | Apache-2.0 | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | notice file | no | ✅ | ✅ | **✅ (permissive fallback)** |
+
+Notes:
+- **DINOv3** (Meta, Aug 2025) ships under a **custom "DINOv3 License"**, *not* Apache/MIT/BSD.
+  Its terms permit commercial use, embedding in a commercial product, SaaS and on-prem
+  deployment, and commercial fine-tuning. The licence has been **reviewed and accepted by
+  explicit decision** (this is the recorded decision), so DINOv3 is marked **⭐ accepted**,
+  distinct from the ✅-permissive rows. Redistribution of the *weights* is **⚠️ conditional**
+  on the DINOv3 License — **do not re-host the weights publicly**; ship them inside the
+  product per its terms only. Re-audit on every DINOv3 release (custom licences can change
+  between versions).
+- **Pretraining corpora:** the web-image checkpoints are pretrained on **LVD-1689M**; the
+  **satellite** checkpoints on **SAT-493M**. The **SAT (satellite) weights may carry
+  separate terms** — verify per checkpoint before use; our mining use relies on the
+  web-image variants unless a satellite need is established.
+- **Edge variants:** the large variants (**ViT-H+/7B**) are offline / GPU-accuracy grade
+  only. The **distilled ViT-S/S+/B and ConvNeXt-T/S** are the edge-viable variants if a
+  DINO-based head is ever promoted toward the edge.
+- **DINOv2** remains **Apache-2.0 in code and weights** — the fully-permissive fallback if
+  the custom DINOv3 licence is ever revisited or its terms become unacceptable.
 
 ---
 
@@ -165,3 +206,7 @@ rejected outright.
 **Current position:** nothing is shipped. The permissive default stack
 (`VISION_MODEL_CATALOG.md` §7) is pre-cleared by this audit; Ultralytics/AGPL,
 YOLO-NAS weights, non-commercial depth weights, and GPL trackers/codecs are pre-excluded.
+The one **custom-but-accepted** entry is **DINOv3** (§1a) — a dev/offline feature-extractor
+cleared by explicit decision, with its weights redistribution conditional on the DINOv3
+License and its satellite weights to be verified per checkpoint. **DINOv2** (Apache-2.0)
+is the pre-cleared permissive fallback.

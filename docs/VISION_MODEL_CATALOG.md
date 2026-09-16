@@ -24,7 +24,9 @@ Two consequences worth stating up front:
    (e.g. YOLO-NAS, some Depth-Anything checkpoints). Code licence ≠ weights licence —
    both are checked, per model, per release.
 
-Licence legend below: ✅ commercial-OK (Apache/MIT/BSD, code+weights) · ⚠️ conditional
+Licence legend below: ✅ commercial-OK (Apache/MIT/BSD, code+weights) · ⭐ custom-but-accepted
+(a bespoke vendor licence that permits commercial + SaaS + on-prem use, cleared by an explicit
+recorded decision — **not** auto-permissive; see `VISION_MODEL_LICENSES.md`) · ⚠️ conditional
 (check weights, or copyleft/attribution) · ⛔ do not ship (AGPL / non-commercial).
 
 ---
@@ -137,6 +139,39 @@ treat learned monocular depth as an optional *relative* enhancement (Depth-Anyth
 
 ---
 
+## 5a. Self-supervised backbones / dense features (dev-and-offline, not the hot path)
+
+A **self-supervised backbone** is a frozen feature extractor, **not a detector** — it turns a
+frame (or crop) into a dense feature map / embedding. It does not replace YOLOX/RT-DETR and is
+**not** wired into the real-time detection+tracking hot path. Its value sits *upstream* of
+detection, where labelled mining data is scarce and expensive.
+
+| Model | Provider | Code licence | Weights | Variants | Edge | What it buys us | Verdict |
+|---|---|---|---|---|---|---|---|
+| **DINOv3** | Meta (Aug 2025) | **custom "DINOv3 License"** ⭐ | same ⭐ (redistribute per licence) | ViT-S/S+/B/L/H+/7B · ConvNeXt-T/S/B/L; LVD-1689M (web) / SAT-493M (satellite); optional `dinotxt` text head | 7B/H+ = offline/GPU-accuracy; **distilled ViT-S / ConvNeXt-T** = edge-viable | strongest label-efficiency + dense features | **⭐ accepted (dev/offline) — licence-gated** |
+| **DINOv2** | Meta | **Apache-2.0** ✅ | Apache ✅ | ViT-S/B/L/g | ViT-S edge-viable | same family, fully permissive | **✅ permissive fallback** |
+
+Three concrete uses here (all **dev / offline**, none in the shipped real-time path):
+1. **Dataset bootstrapping** — embed sampled frames and use nearest-neighbour **retrieval**
+   (surface similar/rare scenes), **few-shot** proposal for rare mining classes, and
+   **active-learning frame selection** (label the most novel/uncertain frames first). This
+   feeds the annotation pipeline in `MINING_VISION_DATASET_STRATEGY.md §5`; auto-proposals are
+   **never trusted unreviewed**.
+2. **Anomaly / novelty scoring** — feature distance flags "this scene is unlike anything
+   labelled" for human review. Advisory and evidence-carrying, never a standalone conclusion.
+3. **Optional dense-feature heads (later)** — DETR / Mask2Former / DPT / linear heads on the
+   frozen backbone for segmentation or *relative* depth, behind the adapter interface — only if
+   it beats the permissive defaults on our validation set, and only after the licence gate.
+
+**Identity boundary:** a backbone emits **feature vectors, never identity**. No face templates,
+no person re-identification (`CLAUDE.md §4`). This capability is explicitly count/scene-level.
+
+**Backbone takeaway:** adopt **DINOv3** (⭐ custom-accepted, see `VISION_MODEL_LICENSES.md §1a`)
+as the **dev/offline** dataset-bootstrapping backbone, with **DINOv2** (Apache-2.0) as the
+fully-permissive fallback. Feature plan: `feature-plans/VISION_DATASET_BOOTSTRAPPING.md`.
+
+---
+
 ## 6. Inference runtime & supporting libraries (all must be permissive)
 
 | Component | Choice | Licence | Notes |
@@ -190,7 +225,9 @@ and always replaceable behind the adapter interface (`VISION_ARCHITECTURE.md` §
                                   │
                              Mine Monitor core
        Runtime: ONNX Runtime (default) · OpenVINO (Intel) · TensorRT (NVIDIA, EULA)
-       Dev-only bootstrap: Grounding DINO / OWLv2 (Apache) for pre-labelling
+       Dev-only bootstrap: Grounding DINO / OWLv2 (Apache) for pre-labelling ·
+                           DINOv3 (⭐ accepted) / DINOv2 (Apache) for retrieval,
+                           few-shot & active-learning frame selection
 ```
 
 | Role | Default | Licence | Alternates (all permissive) |
@@ -201,6 +238,7 @@ and always replaceable behind the adapter interface (`VISION_ARCHITECTURE.md` §
 | Segmentation (offline) | **SAM2 / MobileSAM** | Apache-2.0 | RTMDet-Ins / YOLOX-Seg |
 | Ground distance | **calibrated homography** | n/a (our code) | Depth-Anything-V2-Small (relative) |
 | Open-vocab (dev only) | **Grounding DINO** | Apache-2.0 | OWLv2 |
+| Dataset backbone (dev/offline) | **DINOv3** | ⭐ custom (accepted) | DINOv2 (Apache-2.0) |
 | Inference runtime | **ONNX Runtime** | MIT | OpenVINO (Intel), TensorRT (NVIDIA, EULA) |
 
 **Do not hard-code any of these into the platform core.** The core sees only
@@ -209,7 +247,10 @@ site. This table is the *starting* default, chosen to be replaceable — not a v
 commitment.
 
 Selection rule for any future addition: **licence gate first** (Apache/MIT/BSD, code
-*and* weights, commercial + SaaS + redistribution OK), then measured mining accuracy on
-our validation set (`VISION_TRAINING.md`), then edge cost. A model never reaches
-`production` status in the registry until all three pass and its licence line is in
-`VISION_MODEL_LICENSES.md`.
+*and* weights, commercial + SaaS + redistribution OK — or a ⭐ custom licence explicitly
+reviewed and accepted, as DINOv3 is), then measured mining accuracy on our validation set
+(`VISION_TRAINING.md`), then edge cost. A model never reaches `production` status in the
+registry until all three pass and its licence line is in `VISION_MODEL_LICENSES.md`.
+DINOv3's ⭐ acceptance clears **only** the licence gate; promoting any DINO-based head to
+`production` still requires it to beat the permissive defaults on the mining validation
+set — the same bar as every other model.
