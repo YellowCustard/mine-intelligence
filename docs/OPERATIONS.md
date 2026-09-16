@@ -121,6 +121,15 @@ inventories the site's fixed cameras and their AI-readiness metadata. It is the 
 tool for the RAN Mines estate; no video passes through the platform — only structured
 events. Vision perception itself is a later edge subsystem (see `docs/VISION_*`).
 
+**Access control.** Gate/turnstile access decisions are ingested as `access.event.v1`
+(`/api/v1/sites/{id}/access/events`) — a record only; the gate hardware enforces. **No
+biometric template or image ever enters the platform**: `credential_ref` is opaque and
+identity is a foreign key to an operator. Mine Monitor then applies its own authorisation
+rules — an operator who is **suspended**, **not inducted**, or **off-shift** should be
+rejected — and when the gate *granted* entry to such a person, a critical `access_denied`
+`event.v1` is raised (an unauthorised entry the gate let through). An admin sets an
+operator's access status via `POST /sites/{id}/operators/{operator_id}/access-status`.
+
 **Notifications (alert egress).** Because nobody watches the dashboard around the
 clock at a remote site, qualifying events are pushed out. It is **off by default**;
 turn it on in `.env`:

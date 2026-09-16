@@ -221,3 +221,28 @@ def test_dispatch_recommendation_valid_instance_passes_both() -> None:
     model = DispatchRecommendationV1.model_validate(instance)
     dumped = json.loads(model.model_dump_json(by_alias=True))
     Draft202012Validator(_load_schema("dispatch.recommendation.v1.json")).validate(dumped)
+
+
+def test_access_event_valid_instance_passes_both() -> None:
+    from minemonitor.contracts.access import AccessEventV1
+
+    Draft202012Validator.check_schema(_load_schema("access.event.v1.json"))
+    instance = {
+        "schema": "access.event.v1",
+        "event_id": "access-kn-zw-01-alhua_gate-g-1",
+        "site_id": "kn-zw-01",
+        "ts": "2026-09-12T06:02:11+02:00",
+        "source_system": "alhua_gate",
+        "gate_id": "main-gate",
+        "credential_ref": "face-evt-5521",
+        "operator_ref": "OP-001",
+        "decision": "granted",
+        "reason": None,
+        "search_selected": True,
+        "search_completed": True,
+        "advisory": True,
+    }
+    Draft202012Validator(_load_schema("access.event.v1.json")).validate(instance)
+    model = AccessEventV1.model_validate(instance)
+    dumped = json.loads(model.model_dump_json(by_alias=True))
+    Draft202012Validator(_load_schema("access.event.v1.json")).validate(dumped)

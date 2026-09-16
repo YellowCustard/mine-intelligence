@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from minemonitor import __version__
 from minemonitor.api.routers import (
+    access,
     account,
     cameras,
     cycles,
@@ -180,6 +181,7 @@ def create_app() -> FastAPI:
         maintenance.router,
         dispatch.router,
         cameras.router,
+        access.router,
     ]
     for r in _domain_routers:
         app.include_router(r)  # legacy unprefixed

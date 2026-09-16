@@ -80,6 +80,10 @@ class Operator(Base):
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
     employee_ref: Mapped[str | None] = mapped_column(String, nullable=True)
     contact: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Access-control status (not PII) — drives gate authorisation (FP-07). Defaults let an
+    # existing install behave as "all inducted, none suspended" until set by an admin.
+    suspended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    inducted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     erased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -738,3 +742,30 @@ class Camera(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AccessEvent(Base):
+    """A gate/turnstile access decision (access-control domain, FP-07).
+
+    A record only — the gate hardware enforces; Mine Monitor records and reasons. **No
+    biometric template or image, ever** (brief §4): ``credential_ref`` is an opaque
+    tag/card/face-event id, and ``operator_ref`` is a soft reference to ``operators`` (kept a
+    plain column, not a hard FK, so an event referencing an unknown/not-yet-provisioned person
+    still ingests). ``decision`` is the source system's own decision; Mine Monitor's
+    authorisation verdict is raised separately as an ``event.v1``.
+    """
+
+    __tablename__ = "access_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False, index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source_system: Mapped[str] = mapped_column(String, nullable=False)
+    gate_id: Mapped[str] = mapped_column(String, nullable=False)
+    credential_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    operator_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    decision: Mapped[str] = mapped_column(String, nullable=False)
+    reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    search_selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    search_completed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
