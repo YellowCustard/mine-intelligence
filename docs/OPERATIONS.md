@@ -130,6 +130,13 @@ rejected — and when the gate *granted* entry to such a person, a critical `acc
 `event.v1` is raised (an unauthorised entry the gate let through). An admin sets an
 operator's access status via `POST /sites/{id}/operators/{operator_id}/access-status`.
 
+*Random search & metal detector.* With `MM_ACCESS_SEARCH_RATE_PERCENT` set, Mine Monitor
+deterministically selects that share of passages for a physical search. A guard records the
+outcome via `POST /sites/{id}/access/events/{event_id}/search` (with the metal-detector
+result); a positive detection raises a critical `metal_detected` alarm. A selected passage
+left unsearched past `MM_ACCESS_SEARCH_GRACE_S` raises a `search_missed` alarm on the
+maintenance tick — the audit trail that a required search was skipped.
+
 **Notifications (alert egress).** Because nobody watches the dashboard around the
 clock at a remote site, qualifying events are pushed out. It is **off by default**;
 turn it on in `.env`:

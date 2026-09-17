@@ -14,15 +14,17 @@ Two responsibilities, kept separate:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import hashlib
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from minemonitor.config import get_settings
 from minemonitor.contracts import EventV1
 from minemonitor.events.repository import new_event_id, persist_event
 from minemonitor.operations.shifts import resolve_shift
-from minemonitor.storage.models import AccessEvent, Operator
+from minemonitor.storage.models import AccessEvent, Event, Operator
 
 _VALID_DECISIONS = {"granted", "denied"}
 SOURCE = "access_gate"
@@ -35,6 +37,18 @@ Verdict = str  # "granted" | "denied" | "unknown"
 def _access_id(site_id: str, source_system: str, source_event_id: str) -> str:
     """Deterministic primary key, so replay/backfill of the same event is idempotent."""
     return f"access-{site_id}-{source_system}-{source_event_id}"
+
+
+def _select_for_search(access_id: str, rate_percent: int) -> bool:
+    """Deterministically select a passage for a physical search at ``rate_percent`` (0–100).
+
+    Keyed on the (stable) access id, so the choice is reproducible and idempotent — replaying
+    the same event selects it the same way, never a fresh coin flip. ``0`` disables it.
+    """
+    if rate_percent <= 0:
+        return False
+    bucket = int(hashlib.sha256(access_id.encode()).hexdigest(), 16) % 100
+    return bucket < min(rate_percent, 100)
 
 
 def record_access_event(
@@ -123,6 +137,7 @@ def ingest_access_event(
     reason: str | None = None,
     search_selected: bool = False,
     search_completed: bool | None = None,
+    search_rate_percent: int | None = None,
 ) -> tuple[AccessEvent, bool, EventV1 | None]:
     """Record an access event and run authorisation over it. No commit (caller commits).
 
@@ -130,8 +145,21 @@ def ingest_access_event(
     entry to someone Mine Monitor's rules would **deny**, a critical ``access_denied``
     ``event.v1`` is raised into the unified alarm queue — an unauthorised entry the gate let
     through. A duplicate (already recorded) never re-alarms.
+
+    If the source did not already flag the passage for a physical search, Mine Monitor's
+    **random-search generator** may select it deterministically at the configured rate
+    (``search_rate_percent``, default from settings) — recorded on the passage for the
+    missed-search audit trail.
     """
     now = now or datetime.now(UTC)
+    rate = (
+        search_rate_percent
+        if search_rate_percent is not None
+        else get_settings().access_search_rate_percent
+    )
+    effective_selected = search_selected or _select_for_search(
+        _access_id(site_id, source_system, source_event_id), rate
+    )
     row, created = record_access_event(
         session,
         site_id=site_id,
@@ -144,7 +172,7 @@ def ingest_access_event(
         credential_ref=credential_ref,
         operator_ref=operator_ref,
         reason=reason,
-        search_selected=search_selected,
+        search_selected=effective_selected,
         search_completed=search_completed,
     )
     if not created:
@@ -207,3 +235,109 @@ def list_access_events(
         stmt = stmt.where(AccessEvent.decision == decision)
     stmt = stmt.order_by(AccessEvent.ts.desc()).limit(min(limit, 1000))
     return list(session.execute(stmt).scalars().all())
+
+
+def complete_search(
+    session: Session,
+    site_id: str,
+    access_event_id: str,
+    *,
+    metal_detected: bool | None = None,
+    now: datetime | None = None,
+) -> tuple[AccessEvent | None, EventV1 | None]:
+    """Record that a passage's physical search was completed. No commit (caller commits).
+
+    Marks ``search_completed`` (stopping any future missed-search escalation) and records the
+    metal-detector outcome — the detector's association with the gate passage. A positive
+    detection raises a critical ``metal_detected`` ``event.v1`` (deduped per passage). Returns
+    (row, alarm), or (None, None) if the passage is not found for this site.
+    """
+    now = now or datetime.now(UTC)
+    row = session.get(AccessEvent, access_event_id)
+    if row is None or row.site_id != site_id:
+        return None, None
+    row.search_completed = True
+    if metal_detected is not None:
+        row.metal_detected = metal_detected
+    alarm: EventV1 | None = None
+    if metal_detected:
+        ev_id = f"metal-{row.id}"
+        if session.get(Event, ev_id) is None:
+            alarm = EventV1(
+                schema="event.v1",
+                event_id=ev_id,
+                site_id=site_id,
+                ts=now,
+                type="metal_detected",
+                severity="critical",
+                asset_id=None,
+                zone_id=None,
+                source=f"{SOURCE}:{row.gate_id}",
+                summary=f"Metal detected in search at {row.gate_id}",
+                detail={"gate_id": row.gate_id, "access_event_id": row.id},
+                evidence={"access_event_id": row.id},
+                advisory=True,
+                state="open",
+            )
+            persist_event(session, alarm)
+    return row, alarm
+
+
+def detect_missed_searches(
+    session: Session,
+    site_id: str,
+    *,
+    now: datetime | None = None,
+    grace_s: int | None = None,
+) -> list[EventV1]:
+    """Escalate passages selected for search but never completed. Commits.
+
+    A passage flagged ``search_selected`` whose search is still not completed ``grace_s`` after
+    the passage time raises one ``search_missed`` ``event.v1`` (warning), deduped per passage —
+    the "a selected search was skipped" alert (FP-07). Runs on the maintenance tick.
+    """
+    now = now or datetime.now(UTC)
+    grace = grace_s if grace_s is not None else get_settings().access_search_grace_s
+    cutoff = now - timedelta(seconds=grace)
+    rows = (
+        session.execute(
+            select(AccessEvent).where(
+                AccessEvent.site_id == site_id,
+                AccessEvent.search_selected.is_(True),
+                or_(
+                    AccessEvent.search_completed.is_(None),
+                    AccessEvent.search_completed.is_(False),
+                ),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    events: list[EventV1] = []
+    for row in rows:
+        ts = row.ts if row.ts.tzinfo else row.ts.replace(tzinfo=UTC)
+        if ts > cutoff:  # still within the grace window
+            continue
+        ev_id = f"search-missed-{row.id}"
+        if session.get(Event, ev_id) is not None:
+            continue  # already escalated (deduped)
+        ev = EventV1(
+            schema="event.v1",
+            event_id=ev_id,
+            site_id=site_id,
+            ts=now,
+            type="search_missed",
+            severity="warning",
+            asset_id=None,
+            zone_id=None,
+            source=f"{SOURCE}:{row.gate_id}",
+            summary=f"Selected search not completed at {row.gate_id}",
+            detail={"gate_id": row.gate_id, "access_event_id": row.id},
+            evidence={"access_event_id": row.id},
+            advisory=True,
+            state="open",
+        )
+        persist_event(session, ev)
+        events.append(ev)
+    session.commit()
+    return events

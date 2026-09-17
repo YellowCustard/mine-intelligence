@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     offline_threshold_s: int = 600  # silent this long (while active) = offline
     offline_check_interval_s: int = 60  # how often the ingestor scans for offline
     default_site_id: str = "kn-zw-01"
+    # Access-control random search (FP-07). 0 = off; otherwise the % of gate passages
+    # Mine Monitor deterministically selects for a physical search when the source did not.
+    access_search_rate_percent: int = 0
+    # A passage selected for search but not completed after this long escalates
+    # (search_missed event.v1) on the maintenance tick.
+    access_search_grace_s: int = 900
 
     # Retention per data class, in days. 0 = keep forever (brief §4). Generous
     # defaults; a stricter legal answer costs configuration, not architecture.

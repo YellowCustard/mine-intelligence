@@ -36,7 +36,9 @@
         "bog_precursor",
         "belt_state",
         "access_granted",
-        "access_denied"
+        "access_denied",
+        "search_missed",
+        "metal_detected"
       ]
     },
     "severity": {

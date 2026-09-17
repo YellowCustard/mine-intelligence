@@ -768,4 +768,5 @@ class AccessEvent(Base):
     reason: Mapped[str | None] = mapped_column(String, nullable=True)
     search_selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     search_completed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    metal_detected: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
