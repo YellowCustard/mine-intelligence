@@ -17,7 +17,7 @@ from minemonitor.ingest.adapters.access_sim import (
     normalise_access_event,
 )
 from minemonitor.platform import contracts
-from minemonitor.storage.models import Operator, ShiftDefinition
+from minemonitor.storage.models import Event, Operator, ShiftDefinition
 from tests.conftest import ADMIN, SUPERVISOR, VIEWER, make_client
 
 SITE = "kn-zw-01"
@@ -193,3 +193,165 @@ def test_api_rbac_and_biometric_rejection(db_session: Session) -> None:
         ).status_code
         == 403
     )
+
+
+# -- slice 3: random search, metal-detector association, missed-search escalation ------
+
+
+_LATE = datetime(2026, 9, 12, 9, 0, tzinfo=UTC)  # 1h after the default passage ts (08:00Z)
+
+
+def _selected_passage(db: Session, sid: str = "m1"):
+    """Ingest one authorised passage deterministically selected for search (rate 100)."""
+    row, _created, _alarm = service.ingest_access_event(
+        db,
+        SITE,
+        source_system="g",
+        source_event_id=sid,
+        gate_id="main-gate",
+        decision="granted",
+        ts=_TS,
+        now=_NOW,
+        operator_ref="OP-001",
+        search_rate_percent=100,
+    )
+    db.commit()
+    return row
+
+
+def test_random_search_selection_is_deterministic() -> None:
+    assert service._select_for_search("access-x", 100) is True
+    assert service._select_for_search("access-x", 0) is False
+    assert service._select_for_search("access-x", 50) == service._select_for_search("access-x", 50)
+
+
+def test_full_rate_selects_and_zero_rate_does_not(db_session: Session) -> None:
+    _operator(db_session, "OP-001")
+    sel = _selected_passage(db_session, "s-full")
+    assert sel.search_selected is True
+    row, _c, _a = service.ingest_access_event(
+        db_session,
+        SITE,
+        source_system="g",
+        source_event_id="s-zero",
+        gate_id="main-gate",
+        decision="granted",
+        ts=_TS,
+        now=_NOW,
+        operator_ref="OP-001",
+        search_rate_percent=0,
+    )
+    assert row.search_selected is False
+
+
+def test_complete_search_records_and_metal_alarms(db_session: Session) -> None:
+    _operator(db_session, "OP-001")
+    passage = _selected_passage(db_session, "m-metal")
+    row, alarm = service.complete_search(
+        db_session, SITE, passage.id, metal_detected=True, now=_NOW
+    )
+    db_session.commit()
+    assert row is not None and row.search_completed is True and row.metal_detected is True
+    assert alarm is not None and alarm.type == "metal_detected" and alarm.severity == "critical"
+    # Re-completing does not re-alarm (deduped per passage).
+    _row2, alarm2 = service.complete_search(db_session, SITE, passage.id, metal_detected=True)
+    assert alarm2 is None
+
+
+def test_complete_search_missing_passage_returns_none(db_session: Session) -> None:
+    assert service.complete_search(db_session, SITE, "nope", now=_NOW) == (None, None)
+
+
+def test_missed_search_escalates_once_after_grace(db_session: Session) -> None:
+    _operator(db_session, "OP-001")
+    _selected_passage(db_session, "miss-1")
+    evs = service.detect_missed_searches(db_session, SITE, now=_LATE, grace_s=900)
+    assert len(evs) == 1 and evs[0].type == "search_missed" and evs[0].severity == "warning"
+    # Deduped: a re-run raises nothing while it stays open.
+    assert service.detect_missed_searches(db_session, SITE, now=_LATE, grace_s=900) == []
+
+
+def test_missed_search_respects_grace_window(db_session: Session) -> None:
+    _operator(db_session, "OP-001")
+    _selected_passage(db_session, "miss-2")
+    soon = datetime(2026, 9, 12, 8, 5, tzinfo=UTC)  # within the 15-min grace
+    assert service.detect_missed_searches(db_session, SITE, now=soon, grace_s=900) == []
+
+
+def test_completed_search_never_escalates(db_session: Session) -> None:
+    _operator(db_session, "OP-001")
+    passage = _selected_passage(db_session, "miss-3")
+    service.complete_search(db_session, SITE, passage.id, now=_NOW)
+    db_session.commit()
+    assert service.detect_missed_searches(db_session, SITE, now=_LATE, grace_s=900) == []
+
+
+def test_api_complete_search_and_metal_alarm(db_session: Session) -> None:
+    _operator(db_session, "OP-001")
+    sup = make_client(db_session, SUPERVISOR)
+    eid = sup.post(f"/sites/{SITE}/access/events", json=_raw(id="api-s1")).json()["event"]["id"]
+    r = sup.post(f"/sites/{SITE}/access/events/{eid}/search", json={"metal_detected": True})
+    assert r.status_code == 200
+    assert r.json()["alarm_raised"] is True and r.json()["event"]["search_completed"] is True
+    # Viewer cannot complete a search.
+    v = make_client(db_session, VIEWER)
+    assert v.post(f"/sites/{SITE}/access/events/{eid}/search", json={}).status_code == 403
+
+
+def test_denied_passage_is_not_auto_selected_for_search(db_session: Session) -> None:
+    _operator(db_session, "OP-001")
+    # A denied attempt did not enter → never auto-selected, even at a 100% rate.
+    row, _c, _a = service.ingest_access_event(
+        db_session,
+        SITE,
+        source_system="g",
+        source_event_id="d-1",
+        gate_id="main-gate",
+        decision="denied",
+        ts=_TS,
+        now=_NOW,
+        operator_ref="OP-001",
+        search_rate_percent=100,
+    )
+    assert row.search_selected is False
+    # But an explicit source-provided selection is still honoured on a denied decision.
+    row2, _c2, _a2 = service.ingest_access_event(
+        db_session,
+        SITE,
+        source_system="g",
+        source_event_id="d-2",
+        gate_id="main-gate",
+        decision="denied",
+        ts=_TS,
+        now=_NOW,
+        operator_ref="OP-001",
+        search_selected=True,
+        search_rate_percent=100,
+    )
+    assert row2.search_selected is True
+
+
+def test_metal_alarm_dedups_when_event_already_recorded(db_session: Session) -> None:
+    _operator(db_session, "OP-001")
+    passage = _selected_passage(db_session, "m-conc")
+    # Simulate a concurrent completion having already recorded the alarm for this passage.
+    db_session.add(
+        Event(
+            event_id=f"metal-{passage.id}",
+            site_id=SITE,
+            ts=_NOW,
+            type="metal_detected",
+            severity="critical",
+            source="x",
+            summary="pre-existing",
+            advisory=True,
+            state="open",
+        )
+    )
+    db_session.commit()
+    # Completion succeeds (no 500) and does not raise a second alarm.
+    row, alarm = service.complete_search(
+        db_session, SITE, passage.id, metal_detected=True, now=_NOW
+    )
+    db_session.commit()
+    assert alarm is None and row is not None and row.metal_detected is True

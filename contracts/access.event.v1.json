@@ -19,6 +19,7 @@
     "reason": { "type": ["string", "null"] },
     "search_selected": { "type": "boolean", "default": false },
     "search_completed": { "type": ["boolean", "null"], "default": null },
+    "metal_detected": { "type": ["boolean", "null"], "default": null, "description": "Metal-detector outcome of a physical search, when one ran." },
     "advisory": { "const": true }
   }
 }

@@ -19,6 +19,8 @@ EventType = Literal[
     "belt_state",
     "access_granted",
     "access_denied",
+    "search_missed",
+    "metal_detected",
 ]
 Severity = Literal["info", "warning", "critical"]
 EventState = Literal["open", "acknowledged", "resolved"]

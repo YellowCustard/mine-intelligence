@@ -62,7 +62,13 @@ event id — NOT a template or image) · operator_ref (FK|null) · gate_id · ts
    for off-shift); a gate *grant* to someone the rules would reject raises a critical
    `access_denied` `event.v1`; admin `access-status` endpoint sets operator status.
 3. Metal-detector association + random-search selection + missed-search escalation.
-   **Deferred** (the `search_selected`/`search_completed` fields already ride on the contract).
+   **✅ DELIVERED** — a deterministic **random-search generator** selects passages at a
+   configurable rate (`MM_ACCESS_SEARCH_RATE_PERCENT`) when the source did not; a
+   **search-completion** endpoint records the search + the **metal-detector** result
+   (migration `0021`, `access_events.metal_detected`), raising a critical `metal_detected`
+   `event.v1` on a positive detection; and **missed-search escalation**
+   (`detect_missed_searches`, on the maintenance tick) raises a `search_missed` `event.v1`
+   when a selected passage is not searched within the grace window (`MM_ACCESS_SEARCH_GRACE_S`).
 
 The live gate/face/turnstile poller is a thin driver added when the Phase-0 interfaces are
 known; it calls the same `ingest_access_event`, and the normaliser/rules do not change.

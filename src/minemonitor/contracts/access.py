@@ -39,4 +39,5 @@ class AccessEventV1(BaseModel):
     reason: str | None = None
     search_selected: bool = False
     search_completed: bool | None = None
+    metal_detected: bool | None = None
     advisory: Literal[True] = True

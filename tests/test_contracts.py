@@ -240,6 +240,7 @@ def test_access_event_valid_instance_passes_both() -> None:
         "reason": None,
         "search_selected": True,
         "search_completed": True,
+        "metal_detected": False,
         "advisory": True,
     }
     Draft202012Validator(_load_schema("access.event.v1.json")).validate(instance)

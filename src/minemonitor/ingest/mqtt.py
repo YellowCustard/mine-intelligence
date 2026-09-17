@@ -242,6 +242,7 @@ class MqttIngestor:
         analytics to ingest.
         """
         from minemonitor import heartbeat
+        from minemonitor.access.service import detect_missed_searches
         from minemonitor.config import get_settings
         from minemonitor.cycles.recompute import recompute
         from minemonitor.notifications.dispatch import UrllibSmtpSender, dispatch_pending
@@ -270,6 +271,12 @@ class MqttIngestor:
                     log.info(
                         "zone occupancy breach",
                         extra={"site_id": ev.site_id, "zone_id": ev.zone_id},
+                    )
+                missed = detect_missed_searches(session, self._site_id)
+                for ev in missed:
+                    log.info(
+                        "search missed",
+                        extra={"site_id": ev.site_id, "detail": ev.detail},
                     )
                 recompute(session, self._site_id)
                 # Drain the notification outbox (store-and-forward alerts, brief §3).
