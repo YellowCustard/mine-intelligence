@@ -245,12 +245,25 @@ class MqttIngestor:
         from minemonitor.access.service import detect_missed_searches
         from minemonitor.config import get_settings
         from minemonitor.cycles.recompute import recompute
+        from minemonitor.ingest.adapters.alhua_gate import AlhuaHttpGateSource, poll_once
         from minemonitor.notifications.dispatch import UrllibSmtpSender, dispatch_pending
         from minemonitor.retention import run_from_config
         from minemonitor.rules.occupancy import detect_zone_occupancy
         from minemonitor.rules.offline import detect_offline
 
-        notify_sender = UrllibSmtpSender(get_settings())
+        settings = get_settings()
+        notify_sender = UrllibSmtpSender(settings)
+        # Live gate poller — off unless a gate URL is configured (brief §10: the simulator and
+        # HTTP-ingest paths work without it). Built once; polled each tick.
+        gate_source = (
+            AlhuaHttpGateSource(
+                settings.access_gate_url,
+                settings.access_gate_token,
+                source_system=settings.access_gate_source_system,
+            )
+            if settings.access_gate_url
+            else None
+        )
 
         while not self._stop.wait(self._offline_interval_s):
             session = self._session_factory()
@@ -277,6 +290,14 @@ class MqttIngestor:
                     log.info(
                         "search missed",
                         extra={"site_id": ev.site_id, "detail": ev.detail},
+                    )
+                if gate_source is not None:
+                    poll_once(
+                        session,
+                        self._site_id,
+                        gate_source,
+                        source_system=settings.access_gate_source_system,
+                        overlap_s=settings.access_gate_overlap_s,
                     )
                 recompute(session, self._site_id)
                 # Drain the notification outbox (store-and-forward alerts, brief §3).

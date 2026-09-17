@@ -137,6 +137,12 @@ result); a positive detection raises a critical `metal_detected` alarm. A select
 left unsearched past `MM_ACCESS_SEARCH_GRACE_S` raises a `search_missed` alarm on the
 maintenance tick — the audit trail that a required search was skipped.
 
+*Live gate feed.* Set `MM_ACCESS_GATE_URL` (+ `MM_ACCESS_GATE_TOKEN`) to have the ingestor
+poll the Alhua gate API each tick and ingest new access events automatically; blank = off
+(the HTTP-ingest endpoint and simulator still work). It resumes cleanly after a restart or a
+link outage (the cursor is the last stored event; ingest is idempotent). **Verify the vendor
+response mapping against the real backdoor-API spec before relying on it in production.**
+
 **Notifications (alert egress).** Because nobody watches the dashboard around the
 clock at a remote site, qualifying events are pushed out. It is **off by default**;
 turn it on in `.env`:
