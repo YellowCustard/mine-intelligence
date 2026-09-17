@@ -18,6 +18,7 @@ import hashlib
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from minemonitor.config import get_settings
@@ -157,8 +158,12 @@ def ingest_access_event(
         if search_rate_percent is not None
         else get_settings().access_search_rate_percent
     )
-    effective_selected = search_selected or _select_for_search(
-        _access_id(site_id, source_system, source_event_id), rate
+    # Only a *granted* passage (someone who actually entered) is auto-selected for a physical
+    # search; a denied attempt did not come in, so selecting it — and later escalating a missed
+    # search — would be noise. An explicit source-provided selection is still honoured.
+    effective_selected = search_selected or (
+        decision == "granted"
+        and _select_for_search(_access_id(site_id, source_system, source_event_id), rate)
     )
     row, created = record_access_event(
         session,
@@ -260,26 +265,33 @@ def complete_search(
     if metal_detected is not None:
         row.metal_detected = metal_detected
     alarm: EventV1 | None = None
-    if metal_detected:
-        ev_id = f"metal-{row.id}"
-        if session.get(Event, ev_id) is None:
-            alarm = EventV1(
-                schema="event.v1",
-                event_id=ev_id,
-                site_id=site_id,
-                ts=now,
-                type="metal_detected",
-                severity="critical",
-                asset_id=None,
-                zone_id=None,
-                source=f"{SOURCE}:{row.gate_id}",
-                summary=f"Metal detected in search at {row.gate_id}",
-                detail={"gate_id": row.gate_id, "access_event_id": row.id},
-                evidence={"access_event_id": row.id},
-                advisory=True,
-                state="open",
-            )
-            persist_event(session, alarm)
+    if metal_detected and session.get(Event, f"metal-{row.id}") is None:
+        candidate = EventV1(
+            schema="event.v1",
+            event_id=f"metal-{row.id}",
+            site_id=site_id,
+            ts=now,
+            type="metal_detected",
+            severity="critical",
+            asset_id=None,
+            zone_id=None,
+            source=f"{SOURCE}:{row.gate_id}",
+            summary=f"Metal detected in search at {row.gate_id}",
+            detail={"gate_id": row.gate_id, "access_event_id": row.id},
+            evidence={"access_event_id": row.id},
+            advisory=True,
+            state="open",
+        )
+        # Deterministic id + a savepoint'd flush: a concurrent completion of the same passage
+        # collides on the primary key here (not at the caller's commit → no 500), and is
+        # treated as the documented per-passage dedup rather than an error.
+        try:
+            with session.begin_nested():
+                persist_event(session, candidate)
+                session.flush()
+            alarm = candidate
+        except IntegrityError:
+            alarm = None
     return row, alarm
 
 
