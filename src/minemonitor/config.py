@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     # A passage selected for search but not completed after this long escalates
     # (search_missed event.v1) on the maintenance tick.
     access_search_grace_s: int = 900
+    # Live Alhua gate/turnstile event poller (FP-07). Blank url = off (the simulator and
+    # HTTP-ingest path still work). When set, the ingestor polls the gate API each tick and
+    # ingests new access events. `token` is the bearer credential; `source_system` labels them.
+    access_gate_url: str = ""
+    access_gate_token: str = ""
+    access_gate_source_system: str = "alhua_gate"
+    # On each poll, refetch this far behind the last-seen event so a boundary event is never
+    # missed; idempotent ingest drops the overlap.
+    access_gate_overlap_s: int = 30
 
     # Retention per data class, in days. 0 = keep forever (brief §4). Generous
     # defaults; a stricter legal answer costs configuration, not architecture.
