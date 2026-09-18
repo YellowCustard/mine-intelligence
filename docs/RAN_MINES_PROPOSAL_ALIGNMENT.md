@@ -283,7 +283,7 @@ Created under [`docs/feature-plans/`](feature-plans/):
 | 12 | `VISION_DATASET_BOOTSTRAPPING.md` | DINOv3/DINOv2 frozen-backbone dataset bootstrapping (few-shot, retrieval, active-learning, anomaly) — dev/offline, licence-gated |
 
 Assessments (in [`docs/assessments/`](assessments/)): `PHASE1_PERSONNEL_TRACKING_ASSESSMENT.md`,
-`QUESTIONS_FOR_DEREK.md`.
+`QUESTIONS_FOR_DEREK.md`, `RANMINES_CAMERA_AI_ASSESSMENT.md`.
 
 ---
 
