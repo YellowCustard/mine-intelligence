@@ -26,6 +26,7 @@ from minemonitor.api.routers import (
     health,
     incidents,
     ingest,
+    laboratory,
     maintenance,
     notifications,
     operations,
@@ -182,6 +183,7 @@ def create_app() -> FastAPI:
         dispatch.router,
         cameras.router,
         access.router,
+        laboratory.router,
     ]
     for r in _domain_routers:
         app.include_router(r)  # legacy unprefixed

@@ -167,11 +167,13 @@ validation.
 | Cross-source loss-pathway correlation | **N** | FP-10; correlates events from all sources |
 | Drones / conveyor / stockpile / stock-take (Phase 4) | **later** | keep architecturally possible; do not build now |
 
-**Contracts:** likely-required new contracts, to add **only when their slice lands** (not
-speculatively): `vision.observation.v1`, `vision.operational_event.v1` (specified),
-`access.event.v1`, `laboratory.result.v1`, `laboratory.correction.v1`,
-`material.measurement.v1`, `reconciliation.exception.v1`. Security/safety vision events
-that need a human still ride the **existing** `event.v1` (add `type` values additively).
+**Contracts:** `access.event.v1` (FP-07), `laboratory.result.v1` and
+`laboratory.correction.v1` (FP-08) are **published and registered** — their slices have landed.
+Still to add **only when their slice lands** (not speculatively): `vision.observation.v1`,
+`vision.operational_event.v1` (specified), `material.measurement.v1`,
+`reconciliation.exception.v1`. Security/safety vision events that need a human still ride the
+**existing** `event.v1` (add `type` values additively — FP-08 added `lab_anomaly` and
+`lab_result_conflict`).
 
 ---
 

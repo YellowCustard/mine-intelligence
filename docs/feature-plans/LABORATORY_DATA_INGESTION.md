@@ -1,7 +1,16 @@
 # Feature Plan 08 — Laboratory Data Ingestion
 
-**Status: plan for review.** Part of the RAN Mines alignment. Proposal Phase 1 (laboratory).
-Feeds gold reconciliation (FP-09) and loss-pathway intelligence (FP-10).
+**Status: slices 1–3 built (simulator-first).** Part of the RAN Mines alignment. Proposal
+Phase 1 (laboratory). Feeds gold reconciliation (FP-09) and loss-pathway intelligence (FP-10).
+
+> **Built:** `laboratory.result.v1` + `laboratory.correction.v1` contracts (published,
+> registered), `laboratory_results` / `laboratory_corrections` tables (migration 0022), the
+> `laboratory/` service (write-once + SHA-256 hash, append-only corrections with actor,
+> deterministic anomaly bounds → `lab_anomaly`, divergent-reimport → `lab_result_conflict`),
+> a simulator-first SpectrAA adapter (`ingest/adapters/spectraa.py`, incl. CSV parse), and the
+> dual-mounted `/api/v1/.../laboratory/*` router (RBAC + audited). The one live-integration
+> unknown — the real SpectrAA export layout — is isolated to `spectraa.py::_row_to_raw`, to
+> confirm on the site visit and flip to the live watch-folder driver with no other change.
 
 > **Requirements-meeting update (14 Sep 2026):** the instrument is confirmed as an **Agilent
 > 2000-series spectrometer** (SpectrAA software) — currently fully manual. This is the client's

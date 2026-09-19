@@ -744,6 +744,73 @@ class Camera(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class LaboratoryResult(Base):
+    """A **measured** laboratory assay result, ingested directly from an instrument (FP-08).
+
+    The immutable-original / reproducible-derived split the platform already enforces for
+    telemetry applies here: ``value``/``element``/``unit`` are the parsed measured figures,
+    while ``original`` holds the raw instrument record **write-once** and ``original_hash`` is
+    its SHA-256 — so tampering with the stored original is detectable and the record can be
+    reconciled against the source file. ``original_file_ref`` points at the full export in
+    object storage (MinIO) once offloaded; null until then.
+
+    Corrections **never** mutate this row — they are separate append-only
+    ``LaboratoryCorrection`` entries. ``sample_ref`` is an opaque lab label, never personal
+    data. ``result_id`` is deterministic so re-importing the same result is idempotent.
+    """
+
+    __tablename__ = "laboratory_results"
+    __table_args__ = (
+        Index("ix_laboratory_results_site", "site_id"),
+        Index("ix_laboratory_results_site_ts", "site_id", "ts"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    instrument: Mapped[str] = mapped_column(String, nullable=False)
+    sample_ref: Mapped[str] = mapped_column(String, nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    element: Mapped[str] = mapped_column(String, nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    unit: Mapped[str] = mapped_column(String, nullable=False)
+    method: Mapped[str | None] = mapped_column(String, nullable=True)
+    batch_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The immutable original: the raw instrument record (write-once) and its hash.
+    original: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False)
+    original_hash: Mapped[str] = mapped_column(String, nullable=False)
+    original_file_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="spectraa")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class LaboratoryCorrection(Base):
+    """An **append-only** correction to a laboratory result — an annotation, never a mutation.
+
+    A correction references the original ``LaboratoryResult`` by ``result_id`` and records the
+    corrected value, the **actor** who made it and the reason. The original measured record is
+    preserved untouched, so the full history — and "who changed it, when, and why" — is always
+    reconstructable (the audit backbone FP-09 reconciliation depends on). Rows are never
+    updated or deleted.
+    """
+
+    __tablename__ = "laboratory_corrections"
+    __table_args__ = (
+        Index("ix_laboratory_corrections_site", "site_id"),
+        Index("ix_laboratory_corrections_result", "result_id", "ts"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    result_id: Mapped[str] = mapped_column(ForeignKey("laboratory_results.id"), nullable=False)
+    corrected_value: Mapped[float] = mapped_column(Float, nullable=False)
+    unit: Mapped[str | None] = mapped_column(String, nullable=True)
+    actor: Mapped[str] = mapped_column(String, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class AccessEvent(Base):
     """A gate/turnstile access decision (access-control domain, FP-07).
 

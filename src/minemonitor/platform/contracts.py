@@ -19,6 +19,7 @@ from minemonitor.contracts import AssetMetricsV1, AssetPositionV1, EventV1
 from minemonitor.contracts.access import AccessEventV1
 from minemonitor.contracts.dispatch import DispatchRecommendationV1
 from minemonitor.contracts.fuel import FuelTransactionV1
+from minemonitor.contracts.laboratory import LaboratoryCorrectionV1, LaboratoryResultV1
 from minemonitor.contracts.maintenance import MaintenanceHealthV1
 from minemonitor.contracts.weighbridge import WeighbridgeTransactionV1
 
@@ -33,6 +34,8 @@ _REGISTRY: dict[str, type[BaseModel]] = {
     "maintenance.health.v1": MaintenanceHealthV1,
     "dispatch.recommendation.v1": DispatchRecommendationV1,
     "access.event.v1": AccessEventV1,
+    "laboratory.result.v1": LaboratoryResultV1,
+    "laboratory.correction.v1": LaboratoryCorrectionV1,
 }
 
 
