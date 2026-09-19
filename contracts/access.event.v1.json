@@ -11,7 +11,7 @@
     "event_id": { "type": "string", "minLength": 1 },
     "site_id": { "type": "string", "minLength": 1 },
     "ts": { "type": "string", "format": "date-time" },
-    "source_system": { "type": "string", "minLength": 1, "description": "e.g. alhua_gate, ihua_tag, turnstile." },
+    "source_system": { "type": "string", "minLength": 1, "description": "e.g. dahua_gate, ihua_tag, turnstile." },
     "gate_id": { "type": "string", "minLength": 1 },
     "credential_ref": { "type": ["string", "null"], "description": "Opaque tag/card/face-event id — NEVER a template or image." },
     "operator_ref": { "type": ["string", "null"], "description": "FK to operators; identity lives there, not in this payload." },

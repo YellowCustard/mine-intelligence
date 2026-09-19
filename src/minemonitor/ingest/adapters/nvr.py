@@ -1,6 +1,6 @@
-"""Alhua/Dahua NVR AI-event normaliser — raw NVR "smart" event → ``event.v1``.
+"""Dahua NVR AI-event normaliser — raw NVR "smart" event → ``event.v1``.
 
-The RAN Mines site runs a closed 118-camera Alhua estate whose NVR already produces AI
+The RAN Mines site runs a closed 118-camera Dahua estate whose NVR already produces AI
 "smart" events (line-crossing, area intrusion, loitering) that currently go unused. This
 turns one such raw event into a validated, advisory ``event.v1`` so it lands in the *same*
 unified alarm queue as a GNSS geofence breach — the control room groups by severity, not by
@@ -8,7 +8,7 @@ which sensor saw it (brief §5).
 
 This module is the **pure boundary**: a raw NVR event dict in, a validated ``EventV1`` out,
 no I/O and no database — so it is fully testable without hardware or the vendor API. The
-replay driver and the (future) live poller live in :mod:`alhua_nvr_sim`; they call this.
+replay driver and the (future) live poller live in :mod:`dahua_nvr_sim`; they call this.
 
 Two invariants are enforced *here*, at the boundary:
 
@@ -29,8 +29,9 @@ from typing import Any
 
 from minemonitor.contracts import EventV1
 from minemonitor.contracts.event import EventType, Severity
+from minemonitor.contracts.vision import VisionVendorEventV1
 
-# Dahua/Alhua IVS "smart" event codes we map to operational alarm types. Each maps to an
+# Dahua IVS "smart" event codes we map to operational alarm types. Each maps to an
 # ``event.v1`` (type, severity). Kept small and explicit: an unmapped code is rejected, not
 # guessed, so a new NVR capability is a deliberate addition here, not a silent passthrough.
 _TYPE_MAP: dict[str, tuple[EventType, Severity]] = {
@@ -50,6 +51,20 @@ _LABEL: dict[str, str] = {
     "LoiteringDetection": "Loitering",
     "Loitering": "Loitering",
 }
+
+# Platform-normalised type per vendor code (VISION_BUILD_GATE §8): the stable name the vendor
+# event maps to, carried on the ``vision.vendor_event.v1`` record independently of the
+# ``event.v1`` alarm type. Isolated here so a new vendor code is a deliberate addition.
+_NORMALIZED_TYPE: dict[str, str] = {
+    "CrossLineDetection": "nvr_line_crossing",
+    "CrossRegionDetection": "nvr_intrusion",
+    "IntrusionDetection": "nvr_intrusion",
+    "LoiteringDetection": "nvr_loitering",
+    "Loitering": "nvr_loitering",
+}
+
+# The vendor system these events come from (Stage A: the Dahua NVR).
+SOURCE_SYSTEM = "dahua_nvr"
 
 # Identity-bearing NVR event types. We refuse these outright: face templates/identities stay
 # inside the vendor appliance on the mine's own network (brief §4). If a gate ever needs an
@@ -124,13 +139,24 @@ def normalise_nvr_event(
     event_id = f"nvr-{site_id}-{channel}-{raw['id']}"
 
     # PII-free detail from a strict allow-list — an identity field in ``raw`` cannot pass.
-    detail: dict[str, Any] = {"nvr_event_type": ev_type, "channel": channel}
+    # ``provenance`` marks this alarm as a vendor NVR inference, a distinct class from
+    # first-party perception; ``vendor_confidence`` is the vendor's own score, carried
+    # verbatim and never presented as a first-party confidence (VISION_BUILD_GATE §3.6).
+    detail: dict[str, Any] = {
+        "nvr_event_type": ev_type,
+        "channel": channel,
+        "provenance": "vendor_inferred",
+    }
     for key in _DETAIL_KEYS:
         val = raw.get(key)
         if val is not None:
             detail[key] = val
+    if raw.get("confidence") is not None:
+        detail["vendor_confidence"] = raw["confidence"]
 
-    evidence: dict[str, Any] = {"nvr_event_id": str(raw["id"])}
+    # The alarm points back at its stored vendor record (same deterministic id) so an
+    # operator can always trace the vendor-inferred origin.
+    evidence: dict[str, Any] = {"nvr_event_id": str(raw["id"]), "vendor_event_id": event_id}
     if raw.get("clip"):
         evidence["clip_uri"] = raw["clip"]  # a reference only; the clip stays on the edge
 
@@ -152,4 +178,53 @@ def normalise_nvr_event(
         evidence=evidence,
         advisory=True,
         state="open",
+    )
+
+
+def build_vendor_event(
+    raw: dict[str, Any],
+    *,
+    site_id: str,
+    camera_id: str | None = None,
+) -> VisionVendorEventV1:
+    """Build the ``vision.vendor_event.v1`` record for a raw NVR event. Pure; no I/O.
+
+    The normalised, stored vendor record (VISION_BUILD_GATE §4.5) — **vendor-inferred**
+    provenance, the vendor's ``confidence`` carried verbatim as ``vendor_confidence`` (never a
+    first-party confidence). Shares the deterministic id with the promoted ``event.v1`` so the
+    two cross-link. Applies the same required-field / identity / unknown-type validation as
+    :func:`normalise_nvr_event`, so an identity-bearing or malformed event is refused here too.
+
+    ``camera_id`` is the registered camera id resolved by the caller, or a
+    ``dahua_nvr:<channel>`` placeholder when the channel is unmapped — never dropped.
+    """
+    for key in _REQUIRED:
+        if raw.get(key) in (None, ""):
+            raise ValueError(f"NVR event missing required field {key!r}")
+    ev_type = str(raw["type"])
+    if ev_type in _IDENTITY_TYPES:
+        raise ValueError(
+            f"refusing to ingest identity-bearing NVR event {ev_type!r}: "
+            "biometric identity stays in the vendor appliance (brief §4)"
+        )
+    if ev_type not in _NORMALIZED_TYPE:
+        raise ValueError(f"unknown NVR event type {ev_type!r}")
+    channel = str(raw["channel"])
+    conf = raw.get("confidence")
+    return VisionVendorEventV1(
+        schema="vision.vendor_event.v1",
+        vendor_event_id=f"nvr-{site_id}-{channel}-{raw['id']}",
+        site_id=site_id,
+        source_system=SOURCE_SYSTEM,
+        source_event_id=str(raw["id"]),
+        camera_id=camera_id or f"{SOURCE_SYSTEM}:{channel}",
+        channel=channel,
+        vendor_type=ev_type,
+        normalized_type=_NORMALIZED_TYPE[ev_type],
+        vendor_confidence=float(conf) if conf is not None else None,
+        vendor_rule_name=(str(raw["rule"]) if raw.get("rule") else None),
+        ts=_parse_ts(raw["time"]),
+        clip_ref=(str(raw["clip"]) if raw.get("clip") else None),
+        provenance="vendor_inferred",
+        advisory=True,
     )

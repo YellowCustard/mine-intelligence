@@ -4,13 +4,13 @@
 build Phases 1–4 honestly. Ordered so the **blockers come first**. Post to the WhatsApp
 general group; Shayne to call Derek. Prepared following the requirements meeting.
 
-> Nothing below can be firmly priced or promised until the **NDA is signed** and **Alhua API
+> Nothing below can be firmly priced or promised until the **NDA is signed** and **Dahua API
 > access** is granted — those two unblock almost everything else.
 
 ## A. Access & legal (blockers — do these first)
 1. **NDA** — can we get the NDA signed with you (and with Heath) so we can be granted system
    access? Nothing deeper starts without it.
-2. **Alhua camera API** — please authorise Heath to grant the **private/"backdoor" API** for
+2. **Dahua camera API** — please authorise Heath to grant the **private/"backdoor" API** for
    the 118 cameras, plus **NVR admin login** and access to the NVR's existing **AI reports /
    vehicle-tracking** features (currently unused). API docs / SDK if any.
 3. Who is our **on-site point of contact** for the server room, network and cameras day to day?

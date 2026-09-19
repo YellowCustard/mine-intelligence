@@ -245,7 +245,7 @@ class MqttIngestor:
         from minemonitor.access.service import detect_missed_searches
         from minemonitor.config import get_settings
         from minemonitor.cycles.recompute import recompute
-        from minemonitor.ingest.adapters.alhua_gate import AlhuaHttpGateSource, poll_once
+        from minemonitor.ingest.adapters.dahua_gate import DahuaHttpGateSource, poll_once
         from minemonitor.notifications.dispatch import UrllibSmtpSender, dispatch_pending
         from minemonitor.retention import run_from_config
         from minemonitor.rules.occupancy import detect_zone_occupancy
@@ -256,7 +256,7 @@ class MqttIngestor:
         # Live gate poller — off unless a gate URL is configured (brief §10: the simulator and
         # HTTP-ingest paths work without it). Built once; polled each tick.
         gate_source = (
-            AlhuaHttpGateSource(
+            DahuaHttpGateSource(
                 settings.access_gate_url,
                 settings.access_gate_token,
                 source_system=settings.access_gate_source_system,

@@ -26,10 +26,10 @@ in [`docs/assessments/`](assessments/): the **Phase-1 personnel-tracking assessm
 **questions for Derek**.
 
 **Facts that change our assumptions**
-- **Cameras: 118 Alhua** (not 106/50), a *closed* system with **no public API** — but a vendor
+- **Cameras: 118 Dahua** (not 106/50), a *closed* system with **no public API** — but a vendor
   **"backdoor" API is on offer** (via Heath, who installed the CCTV) and the **NVR already has
   unused AI reports / vehicle-tracking**. → The primary camera-integration path is now the
-  **Alhua API + NVR AI-event ingest**; RTSP/ONVIF sub-stream is the fallback. (Updates FP-01/02.)
+  **Dahua API + NVR AI-event ingest**; RTSP/ONVIF sub-stream is the fallback. (Updates FP-01/02.)
 - **Theft mechanism named:** hand-coating in high-concentrate gold **slurry (dust, not
   nuggets)**, post-crusher/post-cyanide. Client preference = **prevention via access control +
   geofence headcount** ("6 people in a 5-person zone = breach") + **vision + physical tag**
@@ -46,7 +46,7 @@ in [`docs/assessments/`](assessments/): the **Phase-1 personnel-tracking assessm
 - **Infra:** single **Starlink** (on-prem only, reinforced); **server room is a container next
   to a kitchen — relocation flagged**; **241 staff + 166 contractors**, 24/7 two-shift; **iHUA
   visitor tag** + facial recognition at the gate; alerts wanted on **WhatsApp**.
-- **Access still gated:** NDA unsigned, Alhua API not yet granted → no real data yet.
+- **Access still gated:** NDA unsigned, Dahua API not yet granted → no real data yet.
 
 **Client phase order ≠ our engineering sequence.** They are different axes — map, don't
 conflate. Our engineering order stays value/risk/hardware-ranked (§5, §7).

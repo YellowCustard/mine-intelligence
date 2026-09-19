@@ -121,6 +121,19 @@ inventories the site's fixed cameras and their AI-readiness metadata. It is the 
 tool for the RAN Mines estate; no video passes through the platform — only structured
 events. Vision perception itself is a later edge subsystem (see `docs/VISION_*`).
 
+**NVR AI-event ingestion (Vision Stage A).** The near-term, no-new-hardware vision path
+(`docs/VISION_BUILD_GATE.md` §4.5/§8): the Dahua NVR's existing AI "smart" events
+(line-crossing, intrusion, loitering) are normalised to `vision.vendor_event.v1` and promoted
+into the **same** unified alarm queue as GNSS/gate events (`source: "nvr:<cam>"`). This is
+**vendor event ingestion, not first-party perception** — every record and alarm is labelled
+`provenance: vendor_inferred`, the NVR's own `vendor_confidence` is carried verbatim and never
+shown as a first-party confidence, and **identity-bearing NVR types (face) are refused at the
+boundary** — no biometric field ever lands. A camera channel resolves to a registered camera
+(a `dahua_nvr:<channel>` placeholder when unmapped). Ingest is idempotent on a deterministic
+id, so replay/backfill never double-alarms. The path is developed simulator-first
+(`ingest/adapters/dahua_nvr_sim.py`); the live poller and the exact vendor field mapping
+(`nvr.py`) are confirmed against the real Dahua backdoor-API on the site visit before go-live.
+
 **Access control.** Gate/turnstile access decisions are ingested as `access.event.v1`
 (`/api/v1/sites/{id}/access/events`) — a record only; the gate hardware enforces. **No
 biometric template or image ever enters the platform**: `credential_ref` is opaque and
@@ -138,7 +151,7 @@ left unsearched past `MM_ACCESS_SEARCH_GRACE_S` raises a `search_missed` alarm o
 maintenance tick — the audit trail that a required search was skipped.
 
 *Live gate feed.* Set `MM_ACCESS_GATE_URL` (+ `MM_ACCESS_GATE_TOKEN`) to have the ingestor
-poll the Alhua gate API each tick and ingest new access events automatically; blank = off
+poll the Dahua gate API each tick and ingest new access events automatically; blank = off
 (the HTTP-ingest endpoint and simulator still work). It resumes cleanly after a restart or a
 link outage (the cursor is the last stored event; ingest is idempotent). **Verify the vendor
 response mapping against the real backdoor-API spec before relying on it in production.**

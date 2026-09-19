@@ -1,4 +1,4 @@
-"""Live Alhua gate poller (FP-07): vendor mapping, cursor, idempotent + resilient polling."""
+"""Live Dahua gate poller (FP-07): vendor mapping, cursor, idempotent + resilient polling."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from minemonitor.ingest.adapters.alhua_gate import (
-    AlhuaHttpGateSource,
+from minemonitor.ingest.adapters.dahua_gate import (
+    DahuaHttpGateSource,
     SimulatedGateSource,
     _since_cursor,
     poll_once,
@@ -32,7 +32,7 @@ def _operator(db: Session, oid: str = "OP-001", *, suspended: bool = False) -> N
 def _graw(**over: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "id": "r1",
-        "source_system": "alhua_gate",
+        "source_system": "dahua_gate",
         "gate_id": "main-gate",
         "time": "2026-09-12T10:00:07+02:00",
         "decision": "granted",
@@ -59,7 +59,7 @@ class _FakeSource:
 
 
 def test_to_raw_maps_vendor_event_and_carries_no_biometric() -> None:
-    src = AlhuaHttpGateSource("http://x", "tok")
+    src = DahuaHttpGateSource("http://x", "tok")
     raw = src._to_raw(
         {
             "RecordID": "r9",
@@ -73,12 +73,12 @@ def test_to_raw_maps_vendor_event_and_carries_no_biometric() -> None:
     )
     assert raw["id"] == "r9" and raw["gate_id"] == "gold-room-gate"
     assert raw["decision"] == "granted" and raw["credential_ref"] == "card-9"
-    assert raw["operator_ref"] == "OP-7" and raw["source_system"] == "alhua_gate"
+    assert raw["operator_ref"] == "OP-7" and raw["source_system"] == "dahua_gate"
     assert not any("face" in k.lower() or "template" in k.lower() for k in raw)
 
 
 def test_to_raw_denies_non_pass_status() -> None:
-    src = AlhuaHttpGateSource("http://x", "tok")
+    src = DahuaHttpGateSource("http://x", "tok")
     assert src._to_raw({"RecordID": "r", "Status": "Deny"})["decision"] == "denied"
 
 
@@ -94,7 +94,7 @@ def test_http_fetch_parses_and_passes_since() -> None:
             {"events": [{"RecordID": "r1", "DeviceName": "g", "AlarmTime": "t", "Status": "Pass"}]}
         ).encode()
 
-    src = AlhuaHttpGateSource("http://gate/api", "tok", transport=transport)
+    src = DahuaHttpGateSource("http://gate/api", "tok", transport=transport)
     raws = src.fetch(datetime(2026, 9, 12, 8, 0, tzinfo=UTC))
     assert len(raws) == 1 and raws[0]["id"] == "r1" and raws[0]["decision"] == "granted"
     assert "since=" in seen["url"]
@@ -122,36 +122,36 @@ def test_since_cursor_none_then_derived(db_session: Session) -> None:
 
     from minemonitor.storage.models import AccessEvent
 
-    assert _since_cursor(db_session, SITE, "alhua_gate", 30) is None
+    assert _since_cursor(db_session, SITE, "dahua_gate", 30) is None
     _operator(db_session)
-    poll_once(db_session, SITE, _FakeSource([_graw()]), source_system="alhua_gate", now=_NOW)
+    poll_once(db_session, SITE, _FakeSource([_graw()]), source_system="dahua_gate", now=_NOW)
     stored = db_session.execute(select(func.max(AccessEvent.ts))).scalar_one()
     stored = stored if stored.tzinfo else stored.replace(tzinfo=UTC)
-    cur = _since_cursor(db_session, SITE, "alhua_gate", 30)
+    cur = _since_cursor(db_session, SITE, "dahua_gate", 30)
     assert cur is not None and cur == stored - timedelta(seconds=30)  # last ts − overlap
 
 
 def test_poll_ingests_and_is_idempotent(db_session: Session) -> None:
     _operator(db_session)
     src = _FakeSource([_graw()])
-    new, alarms = poll_once(db_session, SITE, src, source_system="alhua_gate", now=_NOW)
+    new, alarms = poll_once(db_session, SITE, src, source_system="dahua_gate", now=_NOW)
     assert len(new) == 1 and alarms == []
     # Same event again (overlap refetch) → deduped, no new rows.
-    new2, _ = poll_once(db_session, SITE, src, source_system="alhua_gate", now=_NOW)
+    new2, _ = poll_once(db_session, SITE, src, source_system="dahua_gate", now=_NOW)
     assert new2 == []
 
 
 def test_poll_raises_alarm_for_unauthorised_grant(db_session: Session) -> None:
     _operator(db_session, "OP-001", suspended=True)  # gate grants a suspended operator
     _new, alarms = poll_once(
-        db_session, SITE, _FakeSource([_graw()]), source_system="alhua_gate", now=_NOW
+        db_session, SITE, _FakeSource([_graw()]), source_system="dahua_gate", now=_NOW
     )
     assert len(alarms) == 1 and alarms[0].type == "access_denied"
 
 
 def test_poll_fetch_failure_is_swallowed(db_session: Session) -> None:
     new, alarms = poll_once(
-        db_session, SITE, _FakeSource([], fail=True), source_system="alhua_gate", now=_NOW
+        db_session, SITE, _FakeSource([], fail=True), source_system="dahua_gate", now=_NOW
     )
     assert new == [] and alarms == []  # no raise; retries next tick
 
@@ -159,5 +159,5 @@ def test_poll_fetch_failure_is_swallowed(db_session: Session) -> None:
 def test_poll_skips_bad_event_keeps_good(db_session: Session) -> None:
     _operator(db_session)
     src = _FakeSource([_graw(id="ok"), _graw(id="bad", face_template="x")])  # one biometric payload
-    new, _ = poll_once(db_session, SITE, src, source_system="alhua_gate", now=_NOW)
+    new, _ = poll_once(db_session, SITE, src, source_system="dahua_gate", now=_NOW)
     assert len(new) == 1 and new[0].id.endswith("-ok")

@@ -30,7 +30,7 @@ class AccessEventV1(BaseModel):
     event_id: str = Field(min_length=1)
     site_id: str = Field(min_length=1)
     ts: datetime
-    source_system: str = Field(min_length=1)  # e.g. "alhua_gate", "ihua_tag", "turnstile"
+    source_system: str = Field(min_length=1)  # e.g. "dahua_gate", "ihua_tag", "turnstile"
     gate_id: str = Field(min_length=1)
     # An opaque credential reference (tag/card/face-event id) — NEVER a template or image.
     credential_ref: str | None = None

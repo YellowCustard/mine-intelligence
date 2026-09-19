@@ -18,6 +18,14 @@ Sibling documents:
 `MINING_VISION_DATASET_STRATEGY.md` · `VISION_TRAINING.md` ·
 `VISION_DEPLOYMENT.md` · `VISION_EVENT_CONTRACTS.md` · `VISION_GPS_FUSION.md`.
 
+> **For the Phase 2 build gate, read [`VISION_BUILD_GATE.md`](VISION_BUILD_GATE.md).** It
+> sharpens this foundation into a review-ready design: the executive brief, the two-path
+> (Dahua NVR ingestion vs. first-party perception) architecture and four maturity stages,
+> the eight data contracts, the observation volume/transport policy, the versioned
+> ontology, the per-event temporal-rule framework, the NVR adapter contract, and a
+> hardware-free MVP. This master document remains the perception reference; the STOP still
+> holds — nothing is built until the build-gate design is approved.
+
 This document is the master. It defines the pipeline, the hard boundary between
 perception and operational meaning, the object and operational ontologies, the model
 adapter and registry abstractions, the edge service boundary, temporal reasoning, the

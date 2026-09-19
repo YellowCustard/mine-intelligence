@@ -2,7 +2,7 @@
 
 Mirrors the "build against a simulator, not hardware" rule (brief §10): the whole access
 path — normalise → record → authorise → alarm — is developed and tested here against
-**recorded** gate events, so it is ready the moment the Alhua gate / iHUA tag / turnstile
+**recorded** gate events, so it is ready the moment the Dahua gate / iHUA tag / turnstile
 interfaces are available (a Phase-0 unknown). The live poller is a thin driver added later; it
 will call the same :func:`minemonitor.access.service.ingest_access_event`, and the normaliser
 and its tests do not change.
@@ -116,7 +116,7 @@ def ingest_access_events(
 SAMPLE_EVENTS: list[dict[str, Any]] = [
     {
         "id": "g-1001",
-        "source_system": "alhua_gate",
+        "source_system": "dahua_gate",
         "gate_id": "main-gate",
         "time": "2026-09-12T06:02:11+02:00",
         "decision": "granted",

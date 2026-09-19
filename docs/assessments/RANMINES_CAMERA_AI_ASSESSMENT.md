@@ -9,7 +9,7 @@ use-cases, or do we need new hardware?
 
 ## Estate baseline (known)
 
-~**118 Alhua** (Dahua-OEM) cameras on a **closed** system with no public API — but a vendor
+~**118 Dahua** (Dahua-OEM) cameras on a **closed** system with no public API — but a vendor
 **"backdoor" API is on offer** (via Heath, who installed the CCTV), and the **NVR already
 generates AI reports** (incl. vehicle tracking) that currently go **unused**. Single **Starlink**
 (on-prem only); the **server room is a container beside a kitchen** (relocation flagged).

@@ -229,10 +229,10 @@ def test_access_event_valid_instance_passes_both() -> None:
     Draft202012Validator.check_schema(_load_schema("access.event.v1.json"))
     instance = {
         "schema": "access.event.v1",
-        "event_id": "access-kn-zw-01-alhua_gate-g-1",
+        "event_id": "access-kn-zw-01-dahua_gate-g-1",
         "site_id": "kn-zw-01",
         "ts": "2026-09-12T06:02:11+02:00",
-        "source_system": "alhua_gate",
+        "source_system": "dahua_gate",
         "gate_id": "main-gate",
         "credential_ref": "face-evt-5521",
         "operator_ref": "OP-001",
@@ -319,3 +319,52 @@ def test_laboratory_correction_valid_instance_passes_both() -> None:
     model = LaboratoryCorrectionV1.model_validate(instance)
     dumped = json.loads(model.model_dump_json(by_alias=True))
     Draft202012Validator(_load_schema("laboratory.correction.v1.json")).validate(dumped)
+
+
+def test_vision_vendor_event_valid_instance_passes_both() -> None:
+    from minemonitor.contracts.vision import VisionVendorEventV1
+
+    Draft202012Validator.check_schema(_load_schema("vision.vendor_event.v1.json"))
+    instance = {
+        "schema": "vision.vendor_event.v1",
+        "vendor_event_id": "nvr-kn-zw-01-3-evt-1001",
+        "site_id": "kn-zw-01",
+        "source_system": "dahua_nvr",
+        "source_event_id": "evt-1001",
+        "camera_id": "CAM-03",
+        "channel": "3",
+        "vendor_type": "CrossRegionDetection",
+        "normalized_type": "nvr_intrusion",
+        "vendor_confidence": 0.91,
+        "vendor_rule_name": "GoldRoom-Intrusion",
+        "ts": "2026-09-12T22:14:07+02:00",
+        "clip_ref": "nvr://ch3/x.mp4",
+        "provenance": "vendor_inferred",
+        "advisory": True,
+    }
+    Draft202012Validator(_load_schema("vision.vendor_event.v1.json")).validate(instance)
+    model = VisionVendorEventV1.model_validate(instance)
+    dumped = json.loads(model.model_dump_json(by_alias=True))
+    Draft202012Validator(_load_schema("vision.vendor_event.v1.json")).validate(dumped)
+
+
+def test_vision_vendor_event_provenance_must_be_vendor_inferred() -> None:
+    """An NVR event is a distinct provenance class — never first-party 'observed'."""
+    from minemonitor.contracts.vision import VisionVendorEventV1
+
+    instance = {
+        "schema": "vision.vendor_event.v1",
+        "vendor_event_id": "nvr-1",
+        "site_id": "kn-zw-01",
+        "source_system": "dahua_nvr",
+        "source_event_id": "evt-1",
+        "vendor_type": "CrossLineDetection",
+        "normalized_type": "nvr_line_crossing",
+        "ts": "2026-09-12T22:14:07+02:00",
+        "provenance": "observed",
+        "advisory": True,
+    }
+    with pytest.raises(Exception):
+        VisionVendorEventV1.model_validate(instance)
+    with pytest.raises(Exception):
+        Draft202012Validator(_load_schema("vision.vendor_event.v1.json")).validate(instance)
