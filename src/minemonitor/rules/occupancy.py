@@ -19,16 +19,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import cast
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from minemonitor.contracts import EventV1
 from minemonitor.contracts.event import Severity
 from minemonitor.events.repository import new_event_id, persist_event
-from minemonitor.storage.models import AssetZoneState, Event, Zone
+from minemonitor.storage.models import Event, Zone
+from minemonitor.zones.occupancy import cap_severity, current_occupancy, parse_cap
 
 SOURCE = "gnss_occupancy"
-_SEVERITIES = {"info", "warning", "critical"}
 
 
 def _has_open_occupancy(session: Session, site_id: str, zone_id: str) -> bool:
@@ -50,20 +50,6 @@ def _has_open_occupancy(session: Session, site_id: str, zone_id: str) -> bool:
     return session.execute(stmt).first() is not None
 
 
-def _occupancy(session: Session, site_id: str, zone_id: str) -> int:
-    return int(
-        session.execute(
-            select(func.count())
-            .select_from(AssetZoneState)
-            .where(
-                AssetZoneState.site_id == site_id,
-                AssetZoneState.zone_id == zone_id,
-                AssetZoneState.inside.is_(True),
-            )
-        ).scalar_one()
-    )
-
-
 def detect_zone_occupancy(
     session: Session, site_id: str, *, now: datetime | None = None
 ) -> list[EventV1]:
@@ -77,23 +63,15 @@ def detect_zone_occupancy(
     zones = list(session.execute(select(Zone).where(Zone.site_id == site_id)).scalars().all())
     events: list[EventV1] = []
     for z in zones:
-        rules = z.rules or {}
-        raw_cap = rules.get("max_occupancy")
-        if raw_cap is None:
-            continue
-        try:
-            cap = int(raw_cap)
-        except (TypeError, ValueError):
-            continue  # malformed cap → ignore, never guess
-        if cap < 0:
-            continue
-        count = _occupancy(session, site_id, z.zone_id)
+        cap = parse_cap(z.rules)
+        if cap is None:
+            continue  # not opted in, or a malformed cap → ignore, never guess
+        count = current_occupancy(session, site_id, z.zone_id)
         if count <= cap:
             continue
         if _has_open_occupancy(session, site_id, z.zone_id):
             continue
-        severity_raw = str(rules.get("severity", "warning"))
-        severity = cast(Severity, severity_raw if severity_raw in _SEVERITIES else "warning")
+        severity = cast(Severity, cap_severity(z.rules))
         events.append(
             EventV1(
                 schema="event.v1",
