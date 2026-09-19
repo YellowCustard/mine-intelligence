@@ -283,6 +283,13 @@ svg{display:block;width:100%;height:auto}
       <th style="width:120px">Type</th><th>Detail</th><th style="width:88px">Severity</th>
       <th style="width:100px">Source</th><th style="width:96px">Action</th></tr></thead><tbody id="atab"></tbody></table></div>
   </section>
+
+  <section class="panel">
+    <header><h2>Zone occupancy</h2><span class="meta" id="occmeta">capacity vs confirmed · advisory</span></header>
+    <div class="body"><table><thead><tr><th>Sector</th><th style="width:120px">Occupancy</th>
+      <th style="width:96px">Capacity</th><th style="width:96px">Status</th></tr></thead>
+      <tbody id="occtab"></tbody></table></div>
+  </section>
 </div>
 
 <!-- ══════════════════ ANALYTICS ══════════════════ -->
@@ -637,6 +644,20 @@ function renderTables(){
       <td class="sub2">${E(x.src)}</td><td>${action}</td></tr>`;}).join('')
     : `<tr><td colspan="7" class="sub2" style="text-align:center;padding:18px">No alarms — all clear.</td></tr>`;
 }
+// Zone-occupancy readout: capacity vs confirmed membership per capped sector. Advisory;
+// an over-capacity sector also raises a zone_occupancy alarm into the queue above.
+async function renderOccupancy(){
+  const tab=document.getElementById('occtab'); if(!tab) return;
+  let rows=[];
+  try{ const r=await fetch(`/sites/${SITE}/zones/occupancy`); if(r.ok) rows=await r.json(); }catch(e){}
+  const meta=document.getElementById('occmeta');
+  if(meta) meta.textContent = rows.length ? `${rows.filter(z=>z.over).length} over · ${rows.length} capped` : 'no sectors capped';
+  tab.innerHTML = rows.length ? rows.map(z=>
+    `<tr><td><b>${E(z.name||z.zone_id)}</b></td>
+      <td class="m">${z.occupancy}</td><td class="m">${z.max_occupancy}</td>
+      <td><span class="tag ${z.over?(z.severity==='critical'?'t-crit':'t-warn'):'t-ok'}">${z.over?'Over':'OK'}</span></td></tr>`).join('')
+    : `<tr><td colspan="4" class="sub2" style="text-align:center;padding:14px">No sector capacities configured.</td></tr>`;
+}
 function selectAsset(id){
   if(id!==SELECTED) clearHistory();  // don't show one machine's track under another
   SELECTED=id; drawMap('map'); renderTables(); renderMachineDetail(id);
@@ -781,7 +802,7 @@ function go(v){
   if(v==='system') loadSystem();
 }
 function paint(){
-  drawMap('map'); renderTables(); cycleBar();
+  drawMap('map'); renderTables(); cycleBar(); renderOccupancy();
 }
 
 /* ───────────────────────── live data (M5) ───────────────────────── */
