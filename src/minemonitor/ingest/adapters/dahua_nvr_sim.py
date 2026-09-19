@@ -1,9 +1,9 @@
-"""Alhua NVR AI-event replay — the simulator-first driver for NVR smart events.
+"""Dahua NVR AI-event replay — the simulator-first driver for NVR smart events.
 
 Mirrors the "build against a simulator, not hardware" rule (brief §10) that governs
 :mod:`simulator`: the whole NVR ingest path — normalise → dedup → land in the alarm queue —
 is developed and tested here against **recorded** NVR events, so it is ready the moment the
-Alhua backdoor-API credentials arrive. The live poller/subscriber is a thin driver added
+Dahua backdoor-API credentials arrive. The live poller/subscriber is a thin driver added
 later; it will call the same :func:`ingest_nvr_events`, and the normaliser and its tests do
 not change.
 

@@ -1,11 +1,11 @@
-"""Live Alhua gate/turnstile access-event poller (FP-07) — the thin driver.
+"""Live Dahua gate/turnstile access-event poller (FP-07) — the thin driver.
 
 Simulator-first still governs (brief §10): the whole ingest path (normalise → record →
 authorise → alarm) is already built and tested via :mod:`access_sim`; this module only
 *fetches* raw gate events from the live vendor API and hands each to the same
 :func:`minemonitor.access.service.ingest_access_event`. The vendor's exact wire shape is a
-Phase-0 unknown — :meth:`AlhuaHttpGateSource._to_raw` is a **documented best-effort** mapping to
-verify against the real Alhua backdoor-API spec when credentials arrive; nothing downstream
+Phase-0 unknown — :meth:`DahuaHttpGateSource._to_raw` is a **documented best-effort** mapping to
+verify against the real Dahua backdoor-API spec when credentials arrive; nothing downstream
 changes when it is corrected.
 
 Resilience (brief §3): the poll cursor is derived from the **latest stored access event** for the
@@ -54,8 +54,8 @@ def _urllib_get(url: str, token: str, timeout_s: float) -> bytes:
         return bytes(resp.read())
 
 
-class AlhuaHttpGateSource:
-    """Fetches gate access events from the Alhua backdoor API over HTTPS.
+class DahuaHttpGateSource:
+    """Fetches gate access events from the Dahua backdoor API over HTTPS.
 
     The response *shape* below is an assumption to confirm against the real API when the
     credentials/spec arrive — only ``_to_raw`` and the query need adjusting; the poller,
@@ -67,7 +67,7 @@ class AlhuaHttpGateSource:
         url: str,
         token: str,
         *,
-        source_system: str = "alhua_gate",
+        source_system: str = "dahua_gate",
         timeout_s: float = 10.0,
         transport: Any = None,
     ) -> None:
@@ -79,7 +79,7 @@ class AlhuaHttpGateSource:
 
     def _to_raw(self, vendor: dict[str, Any]) -> dict[str, Any]:
         """Map one vendor event to our raw access-event shape. **Verify field names against the
-        real Alhua API.** Deliberately carries no biometric field — templates/images stay on the
+        real Dahua API.** Deliberately carries no biometric field — templates/images stay on the
         appliance (brief §4).
         """
         status = str(vendor.get("Status", vendor.get("Result", ""))).lower()
@@ -111,7 +111,7 @@ class AlhuaHttpGateSource:
 class SimulatedGateSource:
     """A source backed by an in-memory list — the simulator-first fixture for the live poller."""
 
-    def __init__(self, events: list[dict[str, Any]], *, source_system: str = "alhua_gate") -> None:
+    def __init__(self, events: list[dict[str, Any]], *, source_system: str = "dahua_gate") -> None:
         self._events = events
         self.source_system = source_system
 

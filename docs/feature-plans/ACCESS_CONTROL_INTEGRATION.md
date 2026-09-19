@@ -3,7 +3,7 @@
 **Status: plan for review.** Part of the RAN Mines alignment. Proposal Phase 1 (gate
 security). External-integration-heavy — several Phase 0 unknowns.
 
-> **Requirements-meeting update (14 Sep 2026):** the client's Phase 1. Ingest **Alhua gate
+> **Requirements-meeting update (14 Sep 2026):** the client's Phase 1. Ingest **Dahua gate
 > face-events** (events only, no templates) + the **iHUA** visitor tag; tie entry to the
 > **roster/timesheet** (allow only if on shift; flag early/late); **random-search generator**
 > with an audit trail (alert if a selected search is skipped). Alerts pushed to **WhatsApp**.
@@ -70,13 +70,13 @@ event id — NOT a template or image) · operator_ref (FK|null) · gate_id · ts
    (`detect_missed_searches`, on the maintenance tick) raises a `search_missed` `event.v1`
    when a selected passage is not searched within the grace window (`MM_ACCESS_SEARCH_GRACE_S`).
 
-**Live gate poller — ✅ SCAFFOLDED** (`ingest/adapters/alhua_gate.py`). A thin driver polls the
-Alhua gate API each maintenance tick (`MM_ACCESS_GATE_URL`, off by default) and feeds each raw
+**Live gate poller — ✅ SCAFFOLDED** (`ingest/adapters/dahua_gate.py`). A thin driver polls the
+Dahua gate API each maintenance tick (`MM_ACCESS_GATE_URL`, off by default) and feeds each raw
 event to the same `ingest_access_event` — the normaliser/rules do not change. Resilient:
 the poll cursor is derived from the latest stored event (no in-memory state, so a restart
 resumes), ingest is idempotent (refetch overlap never double-records), a fetch failure retries
 next tick, and one malformed/biometric event is skipped without blocking the batch. The vendor
-response shape (`AlhuaHttpGateSource._to_raw`) is a **documented best-effort to verify against
+response shape (`DahuaHttpGateSource._to_raw`) is a **documented best-effort to verify against
 the real backdoor-API spec** when credentials arrive; only that mapping needs adjusting.
 
 ## Safety / provenance / data protection

@@ -138,7 +138,7 @@ left unsearched past `MM_ACCESS_SEARCH_GRACE_S` raises a `search_missed` alarm o
 maintenance tick — the audit trail that a required search was skipped.
 
 *Live gate feed.* Set `MM_ACCESS_GATE_URL` (+ `MM_ACCESS_GATE_TOKEN`) to have the ingestor
-poll the Alhua gate API each tick and ingest new access events automatically; blank = off
+poll the Dahua gate API each tick and ingest new access events automatically; blank = off
 (the HTTP-ingest endpoint and simulator still work). It resumes cleanly after a restart or a
 link outage (the cursor is the last stored event; ingest is idempotent). **Verify the vendor
 response mapping against the real backdoor-API spec before relying on it in production.**

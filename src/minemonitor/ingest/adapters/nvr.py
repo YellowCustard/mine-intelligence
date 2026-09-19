@@ -1,6 +1,6 @@
-"""Alhua/Dahua NVR AI-event normaliser — raw NVR "smart" event → ``event.v1``.
+"""Dahua/Dahua NVR AI-event normaliser — raw NVR "smart" event → ``event.v1``.
 
-The RAN Mines site runs a closed 118-camera Alhua estate whose NVR already produces AI
+The RAN Mines site runs a closed 118-camera Dahua estate whose NVR already produces AI
 "smart" events (line-crossing, area intrusion, loitering) that currently go unused. This
 turns one such raw event into a validated, advisory ``event.v1`` so it lands in the *same*
 unified alarm queue as a GNSS geofence breach — the control room groups by severity, not by
@@ -8,7 +8,7 @@ which sensor saw it (brief §5).
 
 This module is the **pure boundary**: a raw NVR event dict in, a validated ``EventV1`` out,
 no I/O and no database — so it is fully testable without hardware or the vendor API. The
-replay driver and the (future) live poller live in :mod:`alhua_nvr_sim`; they call this.
+replay driver and the (future) live poller live in :mod:`dahua_nvr_sim`; they call this.
 
 Two invariants are enforced *here*, at the boundary:
 
@@ -30,7 +30,7 @@ from typing import Any
 from minemonitor.contracts import EventV1
 from minemonitor.contracts.event import EventType, Severity
 
-# Dahua/Alhua IVS "smart" event codes we map to operational alarm types. Each maps to an
+# Dahua/Dahua IVS "smart" event codes we map to operational alarm types. Each maps to an
 # ``event.v1`` (type, severity). Kept small and explicit: an unmapped code is rejected, not
 # guessed, so a new NVR capability is a deliberate addition here, not a silent passthrough.
 _TYPE_MAP: dict[str, tuple[EventType, Severity]] = {

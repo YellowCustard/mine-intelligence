@@ -229,10 +229,10 @@ def test_access_event_valid_instance_passes_both() -> None:
     Draft202012Validator.check_schema(_load_schema("access.event.v1.json"))
     instance = {
         "schema": "access.event.v1",
-        "event_id": "access-kn-zw-01-alhua_gate-g-1",
+        "event_id": "access-kn-zw-01-dahua_gate-g-1",
         "site_id": "kn-zw-01",
         "ts": "2026-09-12T06:02:11+02:00",
-        "source_system": "alhua_gate",
+        "source_system": "dahua_gate",
         "gate_id": "main-gate",
         "credential_ref": "face-evt-5521",
         "operator_ref": "OP-001",

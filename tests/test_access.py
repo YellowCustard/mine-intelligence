@@ -43,7 +43,7 @@ def _operator(db: Session, oid: str = "OP-001", *, suspended: bool = False, indu
 def _raw(**over: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "id": "g-1",
-        "source_system": "alhua_gate",
+        "source_system": "dahua_gate",
         "gate_id": "main-gate",
         "time": "2026-09-12T10:00:07+02:00",
         "decision": "granted",
@@ -59,7 +59,7 @@ def _raw(**over: Any) -> dict[str, Any]:
 
 def test_normalise_maps_fields() -> None:
     kw = normalise_access_event(_raw())
-    assert kw["source_system"] == "alhua_gate" and kw["gate_id"] == "main-gate"
+    assert kw["source_system"] == "dahua_gate" and kw["gate_id"] == "main-gate"
     assert kw["source_event_id"] == "g-1" and kw["decision"] == "granted"
     assert kw["ts"].tzinfo is not None and kw["operator_ref"] == "OP-001"
 

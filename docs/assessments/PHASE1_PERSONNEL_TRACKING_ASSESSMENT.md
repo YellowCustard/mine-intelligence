@@ -1,9 +1,9 @@
 # Phase 1 — Personnel Tracking Feasibility Assessment
 
-**Owner:** Adeel (AI vision specialist). **Status:** preliminary, pending Alhua API access +
+**Owner:** Adeel (AI vision specialist). **Status:** preliminary, pending Dahua API access +
 NDA + a coverage map. Prepared following the requirements meeting.
 
-**The question I was asked to answer:** *can the existing **118 Alhua cameras** (via the
+**The question I was asked to answer:** *can the existing **118 Dahua cameras** (via the
 vendor "backdoor" API / NVR AI reports) do reliable per-zone personnel tracking across the
 mine, or do we need new hardware?*
 
@@ -52,7 +52,7 @@ Prevention-first personnel accountability, built on the existing Mine Monitor sp
   discrepancy alarm. **Never names a person** without an independently validated identity.
 - **Restricted-area / dwell / behaviour** = `VISION_SECURITY_BEHAVIOUR.md` (FP-04).
 - **Entry rules** (allow only if on shift; flag early/late; random search) =
-  `ACCESS_CONTROL_INTEGRATION.md` (FP-07), fed by the Alhua gate face-events (events only) +
+  `ACCESS_CONTROL_INTEGRATION.md` (FP-07), fed by the Dahua gate face-events (events only) +
   the timesheet/roster.
 - **Alerts to WhatsApp** = the notifications outbox with a WhatsApp channel added.
 
@@ -63,7 +63,7 @@ the client's; the reconciliation logic is tag-agnostic.
 ## Camera sufficiency — what the audit must establish
 
 Run the **camera AI-readiness audit** (`CAMERA_ASSET_AND_AI_READINESS.md`, FP-01 — the registry
-is already built) against all 118, capturing per camera: usable AI stream (via the Alhua API or
+is already built) against all 118, capturing per camera: usable AI stream (via the Dahua API or
 sub-stream), resolution/fps/codec, lighting, **coverage of the target zone**, **overlap with
 neighbours** (for hand-off), blind spots, and mounting. Likely findings:
 - Fixed high-value rooms (gold room, elution) — usable for counting/presence.
@@ -73,7 +73,7 @@ neighbours** (for hand-off), blind spots, and mounting. Likely findings:
 - **Edge compute** must live in a real server room, not the kitchen container.
 
 ## Dependencies / what unblocks this
-- **Alhua API access + NDA** (blockers).
+- **Dahua API access + NDA** (blockers).
 - **Coverage map** + per-sector capacities from Derek (`QUESTIONS_FOR_DEREK.md` §B, §C).
 - A **tag decision** (RFID recommended).
 

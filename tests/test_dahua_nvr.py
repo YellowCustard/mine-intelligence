@@ -1,4 +1,4 @@
-"""Alhua NVR AI-event ingest: normalisation, the no-identity boundary, and idempotency.
+"""Dahua NVR AI-event ingest: normalisation, the no-identity boundary, and idempotency.
 
 The acceptance bar mirrors M3's for GNSS geofencing: a real detection raises exactly one
 alarm, a replay raises none, malformed input is rejected loudly, and no identity ever lands.
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from minemonitor.cameras.service import create_camera
 from minemonitor.events.repository import list_events
-from minemonitor.ingest.adapters.alhua_nvr_sim import SAMPLE_EVENTS, ingest_nvr_events
+from minemonitor.ingest.adapters.dahua_nvr_sim import SAMPLE_EVENTS, ingest_nvr_events
 from minemonitor.ingest.adapters.nvr import normalise_nvr_event
 
 SITE = "kn-zw-01"
