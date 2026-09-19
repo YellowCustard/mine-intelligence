@@ -870,6 +870,37 @@ class GeneratorReading(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class MaterialMeasurement(Base):
+    """A **measured** quantity of material at a circuit stage (reconciliation domain, FP-09).
+
+    The ingestion groundwork for gold reconciliation: measured quantities through
+    ore→crusher→mill→tanks→carbon→furnace→output→gate, recorded with source provenance and an
+    optional assay reference (→ FP-08 lab), so the later expected-vs-observed slices are
+    reproducible from stored measurements. Write-once and idempotent on ``measurement_id`` (a
+    re-import never double-counts production). This table holds only **measured** inputs — never
+    an expectation, a variance, or a theft conclusion (that boundary lives in the deferred
+    reconciliation engine; the platform flags, a human concludes).
+    """
+
+    __tablename__ = "material_measurements"
+    __table_args__ = (
+        Index("ix_material_measurements_site", "site_id"),
+        Index("ix_material_measurements_site_stage_ts", "site_id", "stage", "ts"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    stage: Mapped[str] = mapped_column(String, nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False)
+    unit: Mapped[str] = mapped_column(String, nullable=False)
+    assay_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    quality: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+
+
 class VisionVendorEvent(Base):
     """A normalised NVR AI event (vision domain, Stage A — ``docs/VISION_BUILD_GATE.md`` §4.5).
 

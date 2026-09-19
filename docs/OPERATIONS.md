@@ -146,6 +146,16 @@ engine hours (`GET .../generators/{asset_id}/health`; `Unknown` until a plan + b
 Simulator-first (`ingest/adapters/dse_sim.py`); the live DSE **Modbus** poller and register map
 (`MM_GENERATOR_MODBUS_*`) are confirmed per DSE model on site before go-live.
 
+**Gold reconciliation (FP-09, groundwork).** Measured material quantities through the circuit
+(ore→crusher→mill→tanks→carbon→furnace→output→gate) are ingested as `material.measurement.v1`
+(`POST /api/v1/sites/{id}/reconciliation/measurements`, supervisor, audited; list at the same
+path, viewer). Each carries its stage, unit, `source`, an optional `assay_ref` (→ FP-08 lab), and
+`provenance: measured`; ingest is idempotent on a deterministic id (per source ref), so
+re-imports never double-count production. **This is ingestion only** — the platform records the
+measured facts; it does **not** yet compute an expectation, a variance, or a theft conclusion
+(those slices are gated on weightometer feeds + baselined historical variation). The conclusion
+is always a human's: the system will flag *unexplained variance*, never assert theft.
+
 **Access control.** Gate/turnstile access decisions are ingested as `access.event.v1`
 (`/api/v1/sites/{id}/access/events`) — a record only; the gate hardware enforces. **No
 biometric template or image ever enters the platform**: `credential_ref` is opaque and

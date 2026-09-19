@@ -373,6 +373,48 @@ def test_generator_reading_valid_instance_passes_both() -> None:
     Draft202012Validator(_load_schema("generator.reading.v1.json")).validate(dumped)
 
 
+def test_material_measurement_valid_instance_passes_both() -> None:
+    from minemonitor.contracts.reconciliation import MaterialMeasurementV1
+
+    Draft202012Validator.check_schema(_load_schema("material.measurement.v1.json"))
+    instance = {
+        "schema": "material.measurement.v1",
+        "measurement_id": "mm-kn-zw-01-crusher-weightometer-W-500",
+        "site_id": "kn-zw-01",
+        "stage": "crusher",
+        "ts": "2026-09-12T09:15:00Z",
+        "quantity": 128.5,
+        "unit": "t",
+        "assay_ref": "lab-kn-zw-01-agilent-aa-2000-S-1001-Au",
+        "quality": "ok",
+        "source": "weightometer",
+        "provenance": "measured",
+    }
+    Draft202012Validator(_load_schema("material.measurement.v1.json")).validate(instance)
+    model = MaterialMeasurementV1.model_validate(instance)
+    dumped = json.loads(model.model_dump_json(by_alias=True))
+    Draft202012Validator(_load_schema("material.measurement.v1.json")).validate(dumped)
+
+
+def test_material_measurement_rejects_unknown_stage() -> None:
+    from minemonitor.contracts.reconciliation import MaterialMeasurementV1
+
+    instance = {
+        "schema": "material.measurement.v1",
+        "measurement_id": "mm-1",
+        "site_id": "kn-zw-01",
+        "stage": "smelter",  # not in the circuit enum
+        "ts": "2026-09-12T09:15:00Z",
+        "quantity": 1.0,
+        "unit": "t",
+        "provenance": "measured",
+    }
+    with pytest.raises(Exception):
+        MaterialMeasurementV1.model_validate(instance)
+    with pytest.raises(Exception):
+        Draft202012Validator(_load_schema("material.measurement.v1.json")).validate(instance)
+
+
 def test_vision_vendor_event_provenance_must_be_vendor_inferred() -> None:
     """An NVR event is a distinct provenance class — never first-party 'observed'."""
     from minemonitor.contracts.vision import VisionVendorEventV1

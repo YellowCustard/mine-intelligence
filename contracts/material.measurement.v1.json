@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/material.measurement.v1.json",
+  "title": "material.measurement.v1",
+  "description": "A measured quantity of material at a stage of the gold circuit (ore→crusher→mill→tanks→carbon→furnace→output→gate). The ingestion groundwork for gold reconciliation (FP-09): measurements are recorded with source provenance so downstream slices can compute expected-vs-observed variance. This contract carries only MEASURED inputs; it never asserts an expectation, a variance, or a theft conclusion. See docs/feature-plans/GOLD_RECONCILIATION.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "measurement_id", "site_id", "stage", "ts", "quantity", "unit", "provenance"],
+  "properties": {
+    "schema": { "const": "material.measurement.v1" },
+    "measurement_id": { "type": "string", "minLength": 1, "description": "Deterministic id so replay/backfill of the same measurement is idempotent." },
+    "site_id": { "type": "string", "minLength": 1 },
+    "stage": { "enum": ["ore", "crusher", "mill", "tanks", "carbon", "furnace", "output", "gate"], "description": "Where in the circuit the measurement was taken." },
+    "ts": { "type": "string", "format": "date-time", "description": "When the material was measured (UTC)." },
+    "quantity": { "type": "number", "minimum": 0, "description": "The measured amount (in unit)." },
+    "unit": { "type": "string", "minLength": 1, "description": "Unit of quantity, e.g. t, kg, g." },
+    "assay_ref": { "type": ["string", "null"], "description": "Reference to a laboratory.result.v1 assay (FP-08), when applicable." },
+    "quality": { "type": ["string", "null"], "description": "Source quality/status flag, when the source provides one." },
+    "source": { "type": "string", "minLength": 1, "default": "manual", "description": "Where the measurement came from, e.g. weightometer, crusher_scale, production, manual, import." },
+    "provenance": { "const": "measured", "description": "This record carries a measured quantity, not an estimate or an expectation." }
+  }
+}
