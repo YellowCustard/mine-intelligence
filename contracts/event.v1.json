@@ -38,7 +38,9 @@
         "access_granted",
         "access_denied",
         "search_missed",
-        "metal_detected"
+        "metal_detected",
+        "lab_anomaly",
+        "lab_result_conflict"
       ]
     },
     "severity": {

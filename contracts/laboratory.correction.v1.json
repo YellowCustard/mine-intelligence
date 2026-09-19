@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/laboratory.correction.v1.json",
+  "title": "laboratory.correction.v1",
+  "description": "An append-only correction to a laboratory.result.v1. A correction never overwrites the original measured record — it references it and carries the corrected value, the actor who made it, and a reason. Full history is retained so 'what was measured, when, and who changed it' is always answerable.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "correction_id", "site_id", "result_id", "corrected_value", "actor", "reason", "ts"],
+  "properties": {
+    "schema": { "const": "laboratory.correction.v1" },
+    "correction_id": { "type": "string", "minLength": 1 },
+    "site_id": { "type": "string", "minLength": 1 },
+    "result_id": { "type": "string", "minLength": 1, "description": "The original result this correction references (never mutated)." },
+    "corrected_value": { "type": "number", "description": "The corrected concentration (in the result's unit unless unit is given)." },
+    "unit": { "type": ["string", "null"], "description": "Unit of corrected_value if it differs from the original result's unit." },
+    "actor": { "type": "string", "minLength": 1, "description": "Who made the correction — a user/operator reference, audited." },
+    "reason": { "type": "string", "minLength": 1, "description": "Why the value was corrected (transcription error, re-assay, etc.)." },
+    "ts": { "type": "string", "format": "date-time", "description": "When the correction was made (UTC)." },
+    "provenance": { "const": "corrected", "description": "An annotation on the observed record, never a mutation of it." }
+  }
+}

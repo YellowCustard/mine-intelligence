@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     # missed; idempotent ingest drops the overlap.
     access_gate_overlap_s: int = 30
 
+    # Laboratory anomaly bounds (FP-08). A JSON object mapping element → [min, max] in the
+    # result's unit; a measured value outside its element's range raises an advisory
+    # `lab_anomaly` event.v1 for review (flag, never alter). Blank = anomaly detection off.
+    # e.g. {"Au": [0, 100], "Ag": [0, 500]}. Deterministic bounds first; models only later.
+    lab_anomaly_bounds: str = ""
+
     # Retention per data class, in days. 0 = keep forever (brief §4). Generous
     # defaults; a stricter legal answer costs configuration, not architecture.
     retain_positions_days: int = 90

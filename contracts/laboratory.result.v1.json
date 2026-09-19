@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/laboratory.result.v1.json",
+  "title": "laboratory.result.v1",
+  "description": "A measured laboratory assay/analysis result ingested directly from an instrument (e.g. an Agilent 2000-series AA spectrometer via SpectrAA). The measured value is stored write-once; the original raw record is preserved and hashed so tampering is detectable. Corrections never mutate this record — they are separate laboratory.correction.v1 entries.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "result_id", "site_id", "instrument", "sample_ref", "ts", "element", "value", "unit", "original_hash"],
+  "properties": {
+    "schema": { "const": "laboratory.result.v1" },
+    "result_id": { "type": "string", "minLength": 1, "description": "Deterministic id so replay/backfill of the same result is idempotent." },
+    "site_id": { "type": "string", "minLength": 1 },
+    "instrument": { "type": "string", "minLength": 1, "description": "The instrument that produced the result, e.g. agilent-aa-2000." },
+    "sample_ref": { "type": "string", "minLength": 1, "description": "Opaque sample identifier — how the lab labels the sample. Never personal data." },
+    "ts": { "type": "string", "format": "date-time", "description": "When the sample was measured (UTC)." },
+    "element": { "type": "string", "minLength": 1, "description": "The analyte, e.g. Au, Ag, Cu." },
+    "value": { "type": "number", "description": "The measured concentration (in unit)." },
+    "unit": { "type": "string", "minLength": 1, "description": "Unit of value, e.g. g/t, ppm, %." },
+    "method": { "type": ["string", "null"], "description": "Analytical method, e.g. fire_assay_aas." },
+    "batch_ref": { "type": ["string", "null"], "description": "Lab batch/run identifier." },
+    "original_hash": { "type": "string", "minLength": 1, "description": "Hex SHA-256 of the canonicalised original record — tamper-evidence for the immutable original." },
+    "original_file_ref": { "type": ["string", "null"], "description": "Object-store URI of the original export file (MinIO), when offloaded. Null until then." },
+    "source": { "type": "string", "minLength": 1, "default": "spectraa", "description": "Ingest source, e.g. spectraa_csv, manual, import." },
+    "provenance": { "const": "measured", "description": "This record carries a measured instrument value, never an estimate or inference." }
+  }
+}

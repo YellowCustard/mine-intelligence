@@ -143,6 +143,23 @@ poll the Alhua gate API each tick and ingest new access events automatically; bl
 link outage (the cursor is the last stored event; ingest is idempotent). **Verify the vendor
 response mapping against the real backdoor-API spec before relying on it in production.**
 
+**Laboratory data (FP-08).** Assay results are ingested directly from the lab instrument
+(the client's Agilent 2000-series AA spectrometer via SpectrAA) so a result is never retyped:
+either one at a time (`POST /api/v1/sites/{id}/laboratory/results`) or a whole SpectrAA CSV
+export (`POST .../laboratory/results/csv`). Each result is stored **write-once** as a
+`laboratory.result.v1` with the raw original preserved and **hashed** (SHA-256) — so tampering
+with, or a divergent re-export of, a stored result is detectable and raises a
+`lab_result_conflict` flag rather than overwriting the original. Corrections **never mutate**
+a result: `POST .../laboratory/results/{result_id}/corrections` appends a
+`laboratory.correction.v1` carrying the corrected value, the **actor** and a reason (audited);
+the current value is the latest correction, exposed alongside the immutable measured value and
+full history on `GET .../laboratory/results/{result_id}`. Set `MM_LAB_ANOMALY_BOUNDS` (JSON,
+element → `[min, max]` in the result's unit) to have a value outside its element's range raise
+an advisory `lab_anomaly` alarm for review — deterministic bounds first, and it **flags, never
+alters** a measured record. Blank = anomaly detection off. `sample_ref` is an opaque lab label,
+never personal data. **The real SpectrAA export layout is confirmed on site; the CSV column
+mapping lives in one function (`ingest/adapters/spectraa.py::_row_to_raw`) to adjust then.**
+
 **Notifications (alert egress).** Because nobody watches the dashboard around the
 clock at a remote site, qualifying events are pushed out. It is **off by default**;
 turn it on in `.env`:

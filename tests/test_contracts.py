@@ -247,3 +247,75 @@ def test_access_event_valid_instance_passes_both() -> None:
     model = AccessEventV1.model_validate(instance)
     dumped = json.loads(model.model_dump_json(by_alias=True))
     Draft202012Validator(_load_schema("access.event.v1.json")).validate(dumped)
+
+
+def test_laboratory_result_valid_instance_passes_both() -> None:
+    from minemonitor.contracts.laboratory import LaboratoryResultV1
+
+    Draft202012Validator.check_schema(_load_schema("laboratory.result.v1.json"))
+    instance = {
+        "schema": "laboratory.result.v1",
+        "result_id": "lab-kn-zw-01-agilent-aa-2000-S-1001-Au",
+        "site_id": "kn-zw-01",
+        "instrument": "agilent-aa-2000",
+        "sample_ref": "S-1001",
+        "ts": "2026-09-12T09:15:00Z",
+        "element": "Au",
+        "value": 3.42,
+        "unit": "g/t",
+        "method": "fire_assay_aas",
+        "batch_ref": "RUN-88",
+        "original_hash": "a" * 64,
+        "original_file_ref": None,
+        "source": "spectraa_csv",
+        "provenance": "measured",
+    }
+    Draft202012Validator(_load_schema("laboratory.result.v1.json")).validate(instance)
+    model = LaboratoryResultV1.model_validate(instance)
+    dumped = json.loads(model.model_dump_json(by_alias=True))
+    Draft202012Validator(_load_schema("laboratory.result.v1.json")).validate(dumped)
+
+
+def test_laboratory_result_provenance_must_be_measured() -> None:
+    """A lab result is a measured instrument value — provenance cannot be anything else."""
+    from minemonitor.contracts.laboratory import LaboratoryResultV1
+
+    instance = {
+        "schema": "laboratory.result.v1",
+        "result_id": "lab-1",
+        "site_id": "kn-zw-01",
+        "instrument": "agilent-aa-2000",
+        "sample_ref": "S-1",
+        "ts": "2026-09-12T09:15:00Z",
+        "element": "Au",
+        "value": 1.0,
+        "unit": "g/t",
+        "original_hash": "b" * 64,
+        "provenance": "estimated",
+    }
+    with pytest.raises(Exception):
+        LaboratoryResultV1.model_validate(instance)
+    with pytest.raises(Exception):
+        Draft202012Validator(_load_schema("laboratory.result.v1.json")).validate(instance)
+
+
+def test_laboratory_correction_valid_instance_passes_both() -> None:
+    from minemonitor.contracts.laboratory import LaboratoryCorrectionV1
+
+    Draft202012Validator.check_schema(_load_schema("laboratory.correction.v1.json"))
+    instance = {
+        "schema": "laboratory.correction.v1",
+        "correction_id": "01J9Z8CORR",
+        "site_id": "kn-zw-01",
+        "result_id": "lab-kn-zw-01-agilent-aa-2000-S-1001-Au",
+        "corrected_value": 3.51,
+        "unit": None,
+        "actor": "chemist-jane",
+        "reason": "transcription of dilution factor corrected",
+        "ts": "2026-09-12T14:00:00Z",
+        "provenance": "corrected",
+    }
+    Draft202012Validator(_load_schema("laboratory.correction.v1.json")).validate(instance)
+    model = LaboratoryCorrectionV1.model_validate(instance)
+    dumped = json.loads(model.model_dump_json(by_alias=True))
+    Draft202012Validator(_load_schema("laboratory.correction.v1.json")).validate(dumped)
