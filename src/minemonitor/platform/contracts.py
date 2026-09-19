@@ -19,6 +19,7 @@ from minemonitor.contracts import AssetMetricsV1, AssetPositionV1, EventV1
 from minemonitor.contracts.access import AccessEventV1
 from minemonitor.contracts.dispatch import DispatchRecommendationV1
 from minemonitor.contracts.fuel import FuelTransactionV1
+from minemonitor.contracts.generator import GeneratorReadingV1
 from minemonitor.contracts.laboratory import LaboratoryCorrectionV1, LaboratoryResultV1
 from minemonitor.contracts.maintenance import MaintenanceHealthV1
 from minemonitor.contracts.vision import VisionVendorEventV1
@@ -38,6 +39,7 @@ _REGISTRY: dict[str, type[BaseModel]] = {
     "laboratory.result.v1": LaboratoryResultV1,
     "laboratory.correction.v1": LaboratoryCorrectionV1,
     "vision.vendor_event.v1": VisionVendorEventV1,
+    "generator.reading.v1": GeneratorReadingV1,
 }
 
 

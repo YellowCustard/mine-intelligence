@@ -40,7 +40,9 @@
         "search_missed",
         "metal_detected",
         "lab_anomaly",
-        "lab_result_conflict"
+        "lab_result_conflict",
+        "generator_fault",
+        "generator_unexpected_run"
       ]
     },
     "severity": {

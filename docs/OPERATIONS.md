@@ -134,6 +134,18 @@ id, so replay/backfill never double-alarms. The path is developed simulator-firs
 (`ingest/adapters/dahua_nvr_sim.py`); the live poller and the exact vendor field mapping
 (`nvr.py`) are confirmed against the real Dahua backdoor-API on the site visit before go-live.
 
+**Generator monitoring (FP-11).** DSE genset controller readings (engine hours, running state,
+fuel level, fault) are ingested per generator (`POST /api/v1/sites/{id}/generators/{asset_id}/
+readings`, supervisor, audited) — generators are `assets` with `asset_class="generator"`. The
+data is **measured** controller output, not a fabricated sensor; a value the controller does not
+report is null, never invented. A reading with a `fault` raises a critical `generator_fault`
+alarm; one that is `running` while `expected_running` is false raises a `generator_unexpected_run`
+warning (both deduped per reading, both advisory — the platform never controls a genset).
+Run-hours **health** reuses the deterministic maintenance indicator over the latest reported
+engine hours (`GET .../generators/{asset_id}/health`; `Unknown` until a plan + baseline exist).
+Simulator-first (`ingest/adapters/dse_sim.py`); the live DSE **Modbus** poller and register map
+(`MM_GENERATOR_MODBUS_*`) are confirmed per DSE model on site before go-live.
+
 **Access control.** Gate/turnstile access decisions are ingested as `access.event.v1`
 (`/api/v1/sites/{id}/access/events`) — a record only; the gate hardware enforces. **No
 biometric template or image ever enters the platform**: `credential_ref` is opaque and

@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     # missed; idempotent ingest drops the overlap.
     access_gate_overlap_s: int = 30
 
+    # Live DSE generator poller (FP-11). Blank host = off (the simulator and the HTTP-ingest
+    # endpoint still work). When set, the ingestor polls the DSE controller(s) over Modbus TCP
+    # each tick and ingests readings. The register map is confirmed per DSE model on site before
+    # go-live; until then this stays off and the path is exercised simulator-first.
+    generator_modbus_host: str = ""
+    generator_modbus_port: int = 502
+
     # Laboratory anomaly bounds (FP-08). A JSON object mapping element → [min, max] in the
     # result's unit; a measured value outside its element's range raises an advisory
     # `lab_anomaly` event.v1 for review (flag, never alter). Blank = anomaly detection off.

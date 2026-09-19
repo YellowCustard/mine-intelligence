@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/generator.reading.v1.json",
+  "title": "generator.reading.v1",
+  "description": "A measured periodic reading from a DSE genset controller (engine hours, running state, fuel level, fault). Measured data from the controller, not a fabricated sensor. Advisory only — the platform monitors and alerts, it never controls a genset. See docs/feature-plans/GENERATOR_MONITORING.md (FP-11).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "reading_id", "site_id", "asset_id", "ts", "running", "measured"],
+  "properties": {
+    "schema": { "const": "generator.reading.v1" },
+    "reading_id": { "type": "string", "minLength": 1, "description": "Deterministic id so replay/backfill of the same reading is idempotent." },
+    "site_id": { "type": "string", "minLength": 1 },
+    "asset_id": { "type": "string", "minLength": 1, "description": "The generator (an asset with asset_class 'generator')." },
+    "source": { "type": "string", "minLength": 1, "default": "dse_sim", "description": "e.g. dse_sim, dse_modbus." },
+    "ts": { "type": "string", "format": "date-time", "description": "When the controller reported (UTC)." },
+    "engine_hours": { "type": ["number", "null"], "minimum": 0, "description": "Measured cumulative engine hours; null if the controller does not report it." },
+    "running": { "type": "boolean", "description": "Observed running state." },
+    "fuel_level_pct": { "type": ["number", "null"], "minimum": 0, "maximum": 100, "description": "Measured fuel level (%); null if not reported." },
+    "expected_running": { "type": ["boolean", "null"], "default": null, "description": "The schedule/controller intent; when false and running is true, an unexpected-run alarm is raised." },
+    "fault": { "type": "boolean", "default": false, "description": "Observed fault flag." },
+    "fault_code": { "type": ["string", "null"], "description": "Vendor fault code, when present." },
+    "measured": { "const": true, "description": "This reading carries measured controller values, not estimates." }
+  }
+}

@@ -348,6 +348,31 @@ def test_vision_vendor_event_valid_instance_passes_both() -> None:
     Draft202012Validator(_load_schema("vision.vendor_event.v1.json")).validate(dumped)
 
 
+def test_generator_reading_valid_instance_passes_both() -> None:
+    from minemonitor.contracts.generator import GeneratorReadingV1
+
+    Draft202012Validator.check_schema(_load_schema("generator.reading.v1.json"))
+    instance = {
+        "schema": "generator.reading.v1",
+        "reading_id": "gen-kn-zw-01-GEN-01-20260912T040000Z",
+        "site_id": "kn-zw-01",
+        "asset_id": "GEN-01",
+        "source": "dse_sim",
+        "ts": "2026-09-12T06:00:00+02:00",
+        "engine_hours": 1240.5,
+        "running": True,
+        "fuel_level_pct": 82.0,
+        "expected_running": True,
+        "fault": False,
+        "fault_code": None,
+        "measured": True,
+    }
+    Draft202012Validator(_load_schema("generator.reading.v1.json")).validate(instance)
+    model = GeneratorReadingV1.model_validate(instance)
+    dumped = json.loads(model.model_dump_json(by_alias=True))
+    Draft202012Validator(_load_schema("generator.reading.v1.json")).validate(dumped)
+
+
 def test_vision_vendor_event_provenance_must_be_vendor_inferred() -> None:
     """An NVR event is a distinct provenance class — never first-party 'observed'."""
     from minemonitor.contracts.vision import VisionVendorEventV1
