@@ -19,15 +19,17 @@ so replaying a batch — or backfilling after a link outage — never double-ala
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from minemonitor.contracts import EventV1
+from minemonitor.contracts.vision import VisionVendorEventV1
 from minemonitor.events.repository import persist_event
-from minemonitor.ingest.adapters.nvr import normalise_nvr_event
-from minemonitor.storage.models import Camera, Event
+from minemonitor.ingest.adapters.nvr import build_vendor_event, normalise_nvr_event
+from minemonitor.storage.models import Camera, Event, VisionVendorEvent
 
 log = logging.getLogger("minemonitor.ingest.nvr")
 
@@ -35,6 +37,29 @@ log = logging.getLogger("minemonitor.ingest.nvr")
 def _find_camera_by_name(session: Session, site_id: str, name: str) -> Camera | None:
     stmt = select(Camera).where(Camera.site_id == site_id, Camera.name == name).limit(1)
     return session.execute(stmt).scalars().first()
+
+
+def _persist_vendor_event(session: Session, vev: VisionVendorEventV1, now: datetime) -> None:
+    """Store the normalised vendor record write-once (idempotent on its deterministic id)."""
+    if session.get(VisionVendorEvent, vev.vendor_event_id) is not None:
+        return
+    session.add(
+        VisionVendorEvent(
+            id=vev.vendor_event_id,
+            site_id=vev.site_id,
+            source_system=vev.source_system,
+            source_event_id=vev.source_event_id,
+            camera_id=vev.camera_id,
+            channel=vev.channel,
+            vendor_type=vev.vendor_type,
+            normalized_type=vev.normalized_type,
+            vendor_confidence=vev.vendor_confidence,
+            vendor_rule_name=vev.vendor_rule_name,
+            ts=vev.ts,
+            clip_ref=vev.clip_ref,
+            created_at=now,
+        )
+    )
 
 
 def ingest_nvr_events(
@@ -52,20 +77,28 @@ def ingest_nvr_events(
     malformed event raises ``ValueError`` from the normaliser and aborts the batch before any
     commit — bad device data never lands half-ingested.
     """
+    now = datetime.now(UTC)
     new_events: list[EventV1] = []
     seen: set[str] = set()
     for raw in raw_events:
         camera_name = raw.get("camera")
         zone_id: str | None = None
+        camera_id: str | None = None
         if camera_name:
             cam = _find_camera_by_name(session, site_id, str(camera_name))
             if cam is not None:
                 zone_id = cam.zone_id
+                camera_id = cam.id
         ev = normalise_nvr_event(raw, site_id=site_id, zone_id=zone_id, camera_name=camera_name)
         if ev.event_id in seen:
             continue  # duplicate within this batch
         if session.get(Event, ev.event_id) is not None:
             continue  # already ingested (idempotent replay/backfill)
+        # Store the vendor-inferred record (VISION_BUILD_GATE §4.5), then promote to the
+        # unified alarm queue. Both share the deterministic id, so replay/backfill is a no-op.
+        _persist_vendor_event(
+            session, build_vendor_event(raw, site_id=site_id, camera_id=camera_id), now
+        )
         persist_event(session, ev)
         seen.add(ev.event_id)
         new_events.append(ev)

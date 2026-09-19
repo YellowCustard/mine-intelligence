@@ -21,6 +21,7 @@ from minemonitor.contracts.dispatch import DispatchRecommendationV1
 from minemonitor.contracts.fuel import FuelTransactionV1
 from minemonitor.contracts.laboratory import LaboratoryCorrectionV1, LaboratoryResultV1
 from minemonitor.contracts.maintenance import MaintenanceHealthV1
+from minemonitor.contracts.vision import VisionVendorEventV1
 from minemonitor.contracts.weighbridge import WeighbridgeTransactionV1
 
 # The registered contracts, keyed by their schema string. Extend this as new domains
@@ -36,6 +37,7 @@ _REGISTRY: dict[str, type[BaseModel]] = {
     "access.event.v1": AccessEventV1,
     "laboratory.result.v1": LaboratoryResultV1,
     "laboratory.correction.v1": LaboratoryCorrectionV1,
+    "vision.vendor_event.v1": VisionVendorEventV1,
 }
 
 

@@ -837,3 +837,40 @@ class AccessEvent(Base):
     search_completed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     metal_detected: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class VisionVendorEvent(Base):
+    """A normalised NVR AI event (vision domain, Stage A — ``docs/VISION_BUILD_GATE.md`` §4.5).
+
+    The near-term, no-new-hardware vision path: the Dahua NVR already runs AI and emits smart
+    events (line-crossing, intrusion, loitering) that currently go unused. We ingest each as a
+    **vendor-inferred** record — a distinct provenance class from first-party perception (the
+    vendor's model/thresholds are opaque; its ``vendor_confidence`` is carried verbatim and
+    never upgraded). It is a record + the basis for an ``event.v1`` promotion; the gate
+    hardware and the NVR remain the sensing authority.
+
+    **No identity/biometric field, ever** (brief §4): identity-bearing NVR types are refused at
+    the ingest boundary and never reach this table. ``vendor_event_id`` is deterministic so a
+    replay/backfill of the same NVR event is idempotent. ``camera_id`` is a soft reference to a
+    registered ``cameras`` row (a ``dahua_nvr:<channel>`` placeholder when unmapped).
+    """
+
+    __tablename__ = "vision_vendor_events"
+    __table_args__ = (
+        Index("ix_vision_vendor_events_site", "site_id"),
+        Index("ix_vision_vendor_events_site_ts", "site_id", "ts"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    source_system: Mapped[str] = mapped_column(String, nullable=False)
+    source_event_id: Mapped[str] = mapped_column(String, nullable=False)
+    camera_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    channel: Mapped[str | None] = mapped_column(String, nullable=True)
+    vendor_type: Mapped[str] = mapped_column(String, nullable=False)
+    normalized_type: Mapped[str] = mapped_column(String, nullable=False)
+    vendor_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    vendor_rule_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    clip_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

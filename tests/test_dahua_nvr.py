@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session
 from minemonitor.cameras.service import create_camera
 from minemonitor.events.repository import list_events
 from minemonitor.ingest.adapters.dahua_nvr_sim import SAMPLE_EVENTS, ingest_nvr_events
-from minemonitor.ingest.adapters.nvr import normalise_nvr_event
+from minemonitor.ingest.adapters.nvr import build_vendor_event, normalise_nvr_event
+from minemonitor.storage.models import VisionVendorEvent
 
 SITE = "kn-zw-01"
 _NOW = datetime(2026, 9, 12, 20, 0, tzinfo=UTC)
@@ -132,3 +133,48 @@ def test_replay_is_idempotent(db_session: Session) -> None:
 def test_unregistered_camera_still_ingests_without_zone(db_session: Session) -> None:
     added = ingest_nvr_events(db_session, SITE, [_raw(camera="CAM-99 Unknown")])
     assert len(added) == 1 and added[0].zone_id is None
+
+
+# -- vendor-event layer (VISION_BUILD_GATE §4.5) ---------------------------------------
+
+
+def test_event_carries_vendor_inferred_provenance() -> None:
+    ev = normalise_nvr_event(_raw(), site_id=SITE)
+    assert ev.detail is not None
+    assert ev.detail["provenance"] == "vendor_inferred"
+    assert ev.detail["vendor_confidence"] == 0.9  # the vendor's score, carried verbatim
+    assert ev.evidence is not None and ev.evidence["vendor_event_id"] == ev.event_id
+
+
+def test_build_vendor_event_maps_and_labels() -> None:
+    vev = build_vendor_event(_raw(), site_id=SITE, camera_id="CAM-03")
+    assert vev.source_system == "dahua_nvr" and vev.provenance == "vendor_inferred"
+    assert vev.vendor_type == "CrossRegionDetection"
+    assert vev.normalized_type == "nvr_intrusion"
+    assert vev.vendor_confidence == 0.9 and vev.camera_id == "CAM-03"
+    assert vev.vendor_event_id == f"nvr-{SITE}-3-evt-1"
+
+
+def test_build_vendor_event_placeholder_camera_when_unmapped() -> None:
+    vev = build_vendor_event(_raw(), site_id=SITE, camera_id=None)
+    assert vev.camera_id == "dahua_nvr:3"  # never dropped
+
+
+def test_build_vendor_event_refuses_identity_types() -> None:
+    with pytest.raises(ValueError, match="identity"):
+        build_vendor_event(_raw(type="FaceRecognition"), site_id=SITE)
+
+
+def test_ingest_persists_vendor_event_alongside_alarm(db_session: Session) -> None:
+    create_camera(db_session, site_id=SITE, name="CAM-03 Gold Room", now=_NOW, zone_id="gold-room")
+    db_session.commit()
+    ingest_nvr_events(db_session, SITE, [_raw()])
+    rows = db_session.query(VisionVendorEvent).all()
+    assert len(rows) == 1
+    r = rows[0]
+    assert r.normalized_type == "nvr_intrusion" and r.source_system == "dahua_nvr"
+    assert r.vendor_confidence == 0.9
+    assert r.camera_id is not None  # resolved to the registered camera id
+    # Replay adds no vendor rows either (idempotent on the deterministic id).
+    ingest_nvr_events(db_session, SITE, [_raw()])
+    assert db_session.query(VisionVendorEvent).count() == 1

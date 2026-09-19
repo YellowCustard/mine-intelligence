@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/vision.vendor_event.v1.json",
+  "title": "vision.vendor_event.v1",
+  "description": "A normalised AI event ingested from a vendor NVR (e.g. the Dahua estate's smart events). This is VENDOR EVENT INGESTION, not first-party perception: provenance is 'vendor_inferred', the vendor's confidence is carried verbatim and never upgraded to a first-party confidence, and no identity/biometric field is ever admitted. See docs/VISION_BUILD_GATE.md §4.5/§8.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "vendor_event_id", "site_id", "source_system", "source_event_id", "vendor_type", "normalized_type", "ts", "provenance", "advisory"],
+  "properties": {
+    "schema": { "const": "vision.vendor_event.v1" },
+    "vendor_event_id": { "type": "string", "minLength": 1, "description": "Deterministic platform id — replay/backfill of the same NVR event is idempotent." },
+    "site_id": { "type": "string", "minLength": 1 },
+    "source_system": { "type": "string", "minLength": 1, "description": "e.g. dahua_nvr." },
+    "source_event_id": { "type": "string", "minLength": 1, "description": "The NVR's own event id." },
+    "camera_id": { "type": ["string", "null"], "description": "Registered camera id, or a dahua_nvr:<channel> placeholder when unmapped." },
+    "channel": { "type": ["string", "null"], "description": "NVR channel the event came from." },
+    "vendor_type": { "type": "string", "minLength": 1, "description": "The vendor's raw event code, e.g. CrossLineDetection." },
+    "normalized_type": { "type": "string", "minLength": 1, "description": "Platform-normalised type, e.g. nvr_line_crossing." },
+    "vendor_confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "The vendor's own confidence — carried, never upgraded to first-party." },
+    "vendor_rule_name": { "type": ["string", "null"] },
+    "ts": { "type": "string", "format": "date-time", "description": "Vendor capture time (timezone-aware)." },
+    "clip_ref": { "type": ["string", "null"], "description": "Reference to a clip retained on the edge/NVR — never inline video." },
+    "provenance": { "const": "vendor_inferred", "description": "A vendor NVR inference, a distinct provenance class from first-party 'observed'." },
+    "advisory": { "const": true }
+  }
+}
