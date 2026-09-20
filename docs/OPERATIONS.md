@@ -116,6 +116,13 @@ signal), the ingestor raises one `zone_occupancy` `event.v1` into the same queue
 holds it open (deduped) until acknowledged. It is a cross-asset aggregate checked on the
 maintenance tick, source-agnostic (GNSS today, vision tracks later), and advisory.
 
+Set or clear a sector's capacity without resending the whole zone via
+`PUT /api/v1/sites/{id}/zones/{zone_id}/occupancy` (admin, audited) with
+`{"max_occupancy": N, "severity": "warning|critical"}` — a null `max_occupancy` clears the
+cap and opts the zone out. Live occupancy vs capacity per capped sector is at
+`GET /api/v1/sites/{id}/zones/occupancy` (viewer), and the dashboard's **Zone occupancy**
+panel renders it (over-capacity sectors flagged), alongside the alarm in the queue.
+
 **Cameras.** The camera registry (`/api/v1/sites/{id}/cameras`, admin-managed, audited)
 inventories the site's fixed cameras and their AI-readiness metadata. It is the intake
 tool for the RAN Mines estate; no video passes through the platform — only structured

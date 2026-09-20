@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 
 from minemonitor.rules.occupancy import detect_zone_occupancy
 from minemonitor.storage.models import AssetZoneState, Zone
+from minemonitor.zones.occupancy import occupancy_status
+from tests.conftest import ADMIN, VIEWER, make_client
 
 _NOW = datetime(2026, 9, 12, 8, 0, tzinfo=UTC)
 SITE = "kn-zw-01"
@@ -75,3 +77,76 @@ def test_default_severity_is_warning(db_session: Session) -> None:
     _occupy(db_session, "sector-a", 2)
     evs = detect_zone_occupancy(db_session, SITE, now=_NOW)
     assert evs and evs[0].severity == "warning"
+
+
+# -- occupancy status helper -----------------------------------------------------------
+
+
+def test_occupancy_status_reports_count_and_over(db_session: Session) -> None:
+    _zone(db_session, rules={"max_occupancy": 1, "severity": "critical"})
+    _occupy(db_session, "sector-a", 2)
+    status = occupancy_status(db_session, SITE)
+    assert len(status) == 1
+    z = status[0]
+    assert z["zone_id"] == "sector-a" and z["occupancy"] == 2 and z["max_occupancy"] == 1
+    assert z["over"] is True and z["severity"] == "critical"
+
+
+def test_occupancy_status_omits_uncapped_zones(db_session: Session) -> None:
+    _zone(db_session, zone_id="z1", name="Capped", rules={"max_occupancy": 3})
+    _zone(db_session, zone_id="z2", name="Uncapped", rules={})
+    assert [z["zone_id"] for z in occupancy_status(db_session, SITE)] == ["z1"]
+
+
+# -- config + read API (RBAC, validation, site-scoping) --------------------------------
+
+
+def test_api_set_and_read_occupancy(db_session: Session) -> None:
+    _zone(db_session, rules={})  # no cap yet
+    admin = make_client(db_session, ADMIN)
+    r = admin.put(f"/api/v1/sites/{SITE}/zones/sector-a/occupancy", json={"max_occupancy": 5})
+    assert r.status_code == 200, r.text
+    assert r.json()["rules"]["max_occupancy"] == 5
+    _occupy(db_session, "sector-a", 6)
+    viewer = make_client(db_session, VIEWER)
+    g = viewer.get(f"/api/v1/sites/{SITE}/zones/occupancy")
+    assert g.status_code == 200
+    assert g.json() == [
+        {
+            "zone_id": "sector-a",
+            "name": "Sector A",
+            "max_occupancy": 5,
+            "occupancy": 6,
+            "over": True,
+            "severity": "warning",
+        }
+    ]
+
+
+def test_api_clear_cap_removes_optin(db_session: Session) -> None:
+    _zone(db_session, rules={"max_occupancy": 5, "severity": "critical"})
+    admin = make_client(db_session, ADMIN)
+    r = admin.put(f"/api/v1/sites/{SITE}/zones/sector-a/occupancy", json={"max_occupancy": None})
+    assert r.status_code == 200
+    assert "max_occupancy" not in r.json()["rules"] and "severity" not in r.json()["rules"]
+    assert occupancy_status(db_session, SITE) == []  # opted out
+
+
+def test_api_rejects_negative_cap(db_session: Session) -> None:
+    _zone(db_session, rules={})
+    admin = make_client(db_session, ADMIN)
+    r = admin.put(f"/api/v1/sites/{SITE}/zones/sector-a/occupancy", json={"max_occupancy": -1})
+    assert r.status_code == 422  # request-model ge=0 guard
+
+
+def test_api_unknown_zone_is_404(db_session: Session) -> None:
+    admin = make_client(db_session, ADMIN)
+    r = admin.put(f"/api/v1/sites/{SITE}/zones/nope/occupancy", json={"max_occupancy": 1})
+    assert r.status_code == 404
+
+
+def test_api_viewer_cannot_set_capacity(db_session: Session) -> None:
+    _zone(db_session, rules={})
+    viewer = make_client(db_session, VIEWER)
+    r = viewer.put(f"/api/v1/sites/{SITE}/zones/sector-a/occupancy", json={"max_occupancy": 1})
+    assert r.status_code in (401, 403)
