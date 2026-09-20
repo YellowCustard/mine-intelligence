@@ -839,6 +839,68 @@ class AccessEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class GeneratorReading(Base):
+    """A **measured** DSE genset controller reading (generator domain, FP-11).
+
+    A DSE controller already measures engine hours, running state, fuel level and faults, so
+    this is real measured data. Readings are write-once and idempotent on ``reading_id`` (a
+    replay/backfill never double-counts or double-alarms). The latest ``engine_hours`` feeds the
+    existing deterministic maintenance health (`maintenance.service.assess_health`); a ``fault``
+    or an unexpected run raises an advisory ``event.v1``. Generators are ``assets`` with
+    ``asset_class="generator"``. **Advisory only** — never controls a genset (brief §15).
+    """
+
+    __tablename__ = "generator_readings"
+    __table_args__ = (
+        Index("ix_generator_readings_site", "site_id"),
+        Index("ix_generator_readings_asset_ts", "site_id", "asset_id", "ts"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="dse_sim")
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    engine_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    running: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    fuel_level_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expected_running: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    fault: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    fault_code: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class MaterialMeasurement(Base):
+    """A **measured** quantity of material at a circuit stage (reconciliation domain, FP-09).
+
+    The ingestion groundwork for gold reconciliation: measured quantities through
+    ore→crusher→mill→tanks→carbon→furnace→output→gate, recorded with source provenance and an
+    optional assay reference (→ FP-08 lab), so the later expected-vs-observed slices are
+    reproducible from stored measurements. Write-once and idempotent on ``measurement_id`` (a
+    re-import never double-counts production). This table holds only **measured** inputs — never
+    an expectation, a variance, or a theft conclusion (that boundary lives in the deferred
+    reconciliation engine; the platform flags, a human concludes).
+    """
+
+    __tablename__ = "material_measurements"
+    __table_args__ = (
+        Index("ix_material_measurements_site", "site_id"),
+        Index("ix_material_measurements_site_stage_ts", "site_id", "stage", "ts"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    stage: Mapped[str] = mapped_column(String, nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False)
+    unit: Mapped[str] = mapped_column(String, nullable=False)
+    assay_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    quality: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+
+
 class VisionVendorEvent(Base):
     """A normalised NVR AI event (vision domain, Stage A — ``docs/VISION_BUILD_GATE.md`` §4.5).
 

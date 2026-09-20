@@ -1,8 +1,16 @@
 # Feature Plan 09 — Gold Reconciliation
 
-**Status: plan for review.** Part of the RAN Mines alignment. Proposal Phase 3, a
-first-class product capability. Depends on FP-08 (lab) + weightometer/production feeds
-(Phase 0), and reuses the weighbridge domain's discipline.
+**Status: groundwork (slice 1) built — measurement ingestion.** Part of the RAN Mines
+alignment. Proposal Phase 3, a first-class product capability. Depends on FP-08 (lab) +
+weightometer/production feeds (Phase 0), and reuses the weighbridge domain's discipline.
+
+> **Built:** `material.measurement.v1` contract (published, registered), `material_measurements`
+> table (migration 0025), the `reconciliation/` service (idempotent measured-record ingest +
+> stage/window list) and a dual-mounted `/api/v1/.../reconciliation/measurements` router (RBAC +
+> audited). **Ingestion only** — expected-vs-observed, tolerance bands, and
+> `reconciliation.exception.v1` are slices 2–3, deferred (gated on weightometer feeds + 3–6
+> months of baseline spreadsheets). The conclusion boundary holds: nothing computes or asserts a
+> variance or a theft verdict yet.
 
 ## Purpose
 

@@ -1,6 +1,6 @@
 # Feature Plan 11 — Generator Monitoring (DSE)
 
-**Status: plan for review.** Part of the RAN Mines alignment
+**Status: slice 1 built (simulator-first).** Part of the RAN Mines alignment
 (`docs/RAN_MINES_PROPOSAL_ALIGNMENT.md`). Added after the requirements meeting surfaced
 **5× Deep Sea Electronics (DSE) generators** needing fuel + run-hours monitoring (the client's
 Phase 4, alongside the lab).

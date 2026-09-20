@@ -23,6 +23,8 @@ EventType = Literal[
     "metal_detected",
     "lab_anomaly",
     "lab_result_conflict",
+    "generator_fault",
+    "generator_unexpected_run",
 ]
 Severity = Literal["info", "warning", "critical"]
 EventState = Literal["open", "acknowledged", "resolved"]

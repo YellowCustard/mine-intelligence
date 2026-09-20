@@ -167,13 +167,14 @@ validation.
 | Cross-source loss-pathway correlation | **N** | FP-10; correlates events from all sources |
 | Drones / conveyor / stockpile / stock-take (Phase 4) | **later** | keep architecturally possible; do not build now |
 
-**Contracts:** `access.event.v1` (FP-07), `laboratory.result.v1` and
-`laboratory.correction.v1` (FP-08) are **published and registered** — their slices have landed.
-Still to add **only when their slice lands** (not speculatively): `vision.observation.v1`,
-`vision.operational_event.v1` (specified), `material.measurement.v1`,
-`reconciliation.exception.v1`. Security/safety vision events that need a human still ride the
-**existing** `event.v1` (add `type` values additively — FP-08 added `lab_anomaly` and
-`lab_result_conflict`).
+**Contracts:** `access.event.v1` (FP-07), `laboratory.result.v1` / `laboratory.correction.v1`
+(FP-08), `vision.vendor_event.v1` (NVR Stage A), `generator.reading.v1` (FP-11) and
+`material.measurement.v1` (FP-09 groundwork) are **published and registered** — their slices have
+landed. Still to add **only when their slice lands** (not speculatively): `vision.observation.v1`,
+`vision.operational_event.v1` (specified), `reconciliation.exception.v1` (FP-09 slices 2–3).
+Security/safety vision events that need a human still ride the **existing** `event.v1` (add `type`
+values additively — FP-08 added `lab_anomaly`/`lab_result_conflict`; FP-11 added `generator_fault`
+/`generator_unexpected_run`).
 
 ---
 
