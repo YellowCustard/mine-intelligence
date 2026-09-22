@@ -8,7 +8,9 @@ following the 11 Sep 2026 site visit), and sets the implementation sequence.**
 Companion feature plans live in [`docs/feature-plans/`](feature-plans/) (index in §7).
 The vision architecture docs (`VISION_ARCHITECTURE.md` and siblings) remain valid as the
 *edge-perception* reference; this document re-prioritises them and adds the
-integration/reconciliation layers the proposal makes central.
+integration/reconciliation layers the proposal makes central. The end-to-end target — the
+client's "data lake → intelligence layer → priority dashboards" — is drawn as the reference
+architecture in [`DATA_LAKE_ARCHITECTURE.md`](DATA_LAKE_ARCHITECTURE.md).
 
 > **Flockvision is unrelated** — a previous, separate AI vision project, not part of
 > Mine Monitor and not referenced, imported, or depended on anywhere here. Mine Monitor's
