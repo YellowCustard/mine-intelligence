@@ -31,6 +31,32 @@ for a product we sell.
 > library (the driver), which LGPL permits in a proprietary product; we do not
 > modify or statically embed it. If that ever changes, revisit.
 
+## Vision edge dependencies (optional `vision` extra — edge node only)
+
+Installed only on a vision edge node (`uv sync --extra vision`); the core and its image never
+need them. Selection and the full per-model audit: `docs/VISION_MODEL_LICENSES.md`.
+
+| Package | Licence | Source |
+|---|---|---|
+| numpy | BSD-3-Clause | https://github.com/numpy/numpy |
+| onnxruntime | MIT | https://github.com/microsoft/onnxruntime |
+| opencv-python-headless | MIT (packaging) / Apache-2.0 (OpenCV); bundles FFmpeg under LGPL-2.1 | https://github.com/opencv/opencv-python |
+| flatbuffers (via onnxruntime) | Apache-2.0 | https://github.com/google/flatbuffers |
+| protobuf (via onnxruntime) | BSD-3-Clause | https://github.com/protocolbuffers/protobuf |
+
+> **FFmpeg inside opencv-python-headless** is the LGPL-2.1 build shipped as shared libraries in
+> the wheel, used unmodified for decoding. A GPL FFmpeg build must never enter the edge image.
+
+### Vision model weights (fetched with a pinned SHA-256 — never committed)
+
+| Model | Code + weights licence | Source | SHA-256 |
+|---|---|---|---|
+| YOLOX-Nano (ONNX, release 0.1.1rc0) | Apache-2.0 | https://github.com/Megvii-BaseDetection/YOLOX | `c789161e…d18a0b7d` |
+| YOLOX-S (ONNX, release 0.1.1rc0) | Apache-2.0 | https://github.com/Megvii-BaseDetection/YOLOX | `c5c2d13e…fe998063` |
+
+> **No Ultralytics.** YOLOX is Megvii's own Apache-2.0 detector, not an Ultralytics package. The
+> model registry refuses any AGPL/GPL/non-commercial model at any status.
+
 ## Development-only dependencies (not shipped to the mine)
 
 | Package | Licence | Source |
