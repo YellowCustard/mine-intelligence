@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     offline_threshold_s: int = 600  # silent this long (while active) = offline
     offline_check_interval_s: int = 60  # how often the ingestor scans for offline
     default_site_id: str = "kn-zw-01"
+    # First-party vision (Stage B). A commissioned camera whose health heartbeat is silent this
+    # long raises ``camera_offline`` (the "missed" lane).
+    vision_camera_stale_s: int = 300
     # Access-control random search (FP-07). 0 = off; otherwise the % of gate passages
     # Mine Monitor deterministically selects for a physical search when the source did not.
     access_search_rate_percent: int = 0
@@ -86,6 +89,11 @@ class Settings(BaseSettings):
     # Audit trail is retained longer than the data it describes — accountability
     # outlives the records (brief §4). 0 = keep forever.
     retain_audit_days: int = 730
+    # Vision data classes (build-gate §5). Observations are the high-volume recompute basis —
+    # keep at least the longest rule look-back you must support. Health is short-lived telemetry.
+    # Operational events and zone rollups follow ``retain_events_days`` / ``retain_metrics_days``.
+    retain_vision_observations_days: int = 30
+    retain_vision_health_days: int = 30
     retention_interval_s: int = 86_400  # the ingestor runs retention ~daily
 
     # Bootstrap admin — created on start ONLY if the users table is empty, so a

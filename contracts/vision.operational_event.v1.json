@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/vision.operational_event.v1.json",
+  "title": "vision.operational_event.v1",
+  "description": "A mining-operational conclusion derived by a named, versioned rule over observations + tracking + zones + time, with mandatory evidence (docs/VISION_BUILD_GATE.md §4.2). Never 'observed', never from a single frame, never machine control.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "event_id",
+    "site_id",
+    "node_id",
+    "camera_id",
+    "ts",
+    "type",
+    "provenance",
+    "confidence",
+    "rule_id",
+    "rule_version",
+    "evidence",
+    "advisory"
+  ],
+  "properties": {
+    "schema": {
+      "const": "vision.operational_event.v1"
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Deterministic — replay/backfill of the same conclusion is idempotent."
+    },
+    "site_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The edge node that produced this record."
+    },
+    "camera_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Edge/source capture time (timezone-aware)."
+    },
+    "received_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "Core arrival time, stamped at ingest; the gap to ts detects buffered backfill."
+    },
+    "type": {
+      "enum": [
+        "zone_entry",
+        "zone_exit",
+        "person_in_restricted_zone",
+        "vehicle_in_restricted_zone",
+        "person_dwell",
+        "zone_occupancy_exceeded",
+        "camera_obstructed",
+        "unsafe_proximity_person_machine",
+        "machine_stationary_in_queue_zone"
+      ]
+    },
+    "provenance": {
+      "enum": [
+        "inferred",
+        "correlated",
+        "estimated"
+      ]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "rule_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "rule_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "subject": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/subject"
+        }
+      ]
+    },
+    "zone_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "zone_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "evidence": {
+      "$ref": "#/$defs/evidence"
+    },
+    "advisory": {
+      "const": true
+    }
+  },
+  "$defs": {
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "asset_id only with an association label (checked at the runtime boundary).",
+      "properties": {
+        "track_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "asset_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "association": {
+          "enum": [
+            "confirmed",
+            "probable",
+            "possible",
+            "unknown",
+            null
+          ]
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation_window"
+      ],
+      "properties": {
+        "observation_window": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "string",
+              "format": "date-time"
+            }
+          ],
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "[start, end] of the observations that produced the conclusion."
+        },
+        "track_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "frame_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "signals": {
+          "type": "object",
+          "description": "Per-signal contributions (dwell_ms, observations, min_conf, count …)."
+        },
+        "clip_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Reference to a clip retained on the edge — never inline video."
+        }
+      }
+    }
+  }
+}

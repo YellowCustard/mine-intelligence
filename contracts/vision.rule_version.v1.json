@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/vision.rule_version.v1.json",
+  "title": "vision.rule_version.v1",
+  "description": "The immutable temporal-rule configuration an operational event cites — the reproducibility anchor (docs/VISION_BUILD_GATE.md §4.8). A change is a new version, never an in-place edit. Severity is rule/zone policy, never the model's.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "site_id",
+    "rule_id",
+    "rule_version",
+    "event_type",
+    "parameters",
+    "active_from",
+    "advisory"
+  ],
+  "properties": {
+    "schema": {
+      "const": "vision.rule_version.v1"
+    },
+    "site_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rule_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "rule_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "event_type": {
+      "enum": [
+        "zone_entry",
+        "zone_exit",
+        "person_in_restricted_zone",
+        "vehicle_in_restricted_zone",
+        "person_dwell",
+        "zone_occupancy_exceeded",
+        "camera_obstructed",
+        "unsafe_proximity_person_machine",
+        "machine_stationary_in_queue_zone"
+      ]
+    },
+    "parameters": {
+      "$ref": "#/$defs/parameters"
+    },
+    "zone_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "active_from": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "active_to": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "author": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "advisory": {
+      "const": true
+    }
+  },
+  "$defs": {
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classes",
+        "min_observations",
+        "min_dwell_ms",
+        "hysteresis_observations",
+        "cooldown_ms",
+        "window_ms",
+        "confidence_threshold",
+        "severity"
+      ],
+      "properties": {
+        "classes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "person",
+              "haul_truck",
+              "light_vehicle",
+              "loader",
+              "excavator",
+              "dozer",
+              "grader",
+              "drill",
+              "water_truck",
+              "service_truck",
+              "bus"
+            ]
+          }
+        },
+        "min_observations": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "min_dwell_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hysteresis_observations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cooldown_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "window_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "confidence_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "critical"
+          ]
+        },
+        "zone_kinds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "requires": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "ground_calibration"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

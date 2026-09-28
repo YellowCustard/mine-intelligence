@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/vision.health.v1.json",
+  "title": "vision.health.v1",
+  "description": "Edge-node liveness and throughput (docs/VISION_BUILD_GATE.md §4.3). A missing heartbeat beyond the configured threshold is itself a signal (camera_offline).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "health_id",
+    "site_id",
+    "node_id",
+    "ts",
+    "status",
+    "cameras_active",
+    "fps_mean",
+    "queue_depth",
+    "dropped_frames",
+    "advisory"
+  ],
+  "properties": {
+    "schema": {
+      "const": "vision.health.v1"
+    },
+    "health_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Deterministic per (node, heartbeat ts)."
+    },
+    "site_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The edge node that produced this record."
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Heartbeat time."
+    },
+    "received_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "Core arrival time, stamped at ingest; the gap to ts detects buffered backfill."
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "degraded",
+        "down"
+      ]
+    },
+    "cameras_active": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "fps_mean": {
+      "type": "number",
+      "minimum": 0
+    },
+    "queue_depth": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "dropped_frames": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cpu_pct": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 100
+    },
+    "mem_pct": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 100
+    },
+    "gpu_pct": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 100
+    },
+    "model_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "last_error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "advisory": {
+      "const": true
+    }
+  }
+}

@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/vision.zone_rollup.v1.json",
+  "title": "vision.zone_rollup.v1",
+  "description": "Per camera × zone × time-bucket counts — the periodic rollups of docs/VISION_BUILD_GATE.md §5 and what vision reporting reads. zone_id null = the whole camera view. observed_s is coverage: how much of the bucket the camera actually produced frames, so a quiet zone is distinguishable from a blind one. Counts only — no identity.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "rollup_id",
+    "site_id",
+    "node_id",
+    "camera_id",
+    "ts",
+    "bucket_s",
+    "object_class",
+    "count_max",
+    "count_mean",
+    "entries",
+    "exits",
+    "dwell_s_max",
+    "observed_s",
+    "advisory"
+  ],
+  "properties": {
+    "schema": {
+      "const": "vision.zone_rollup.v1"
+    },
+    "rollup_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Deterministic per (camera, zone, bucket start, class)."
+    },
+    "site_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The edge node that produced this record."
+    },
+    "camera_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "zone_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Bucket start."
+    },
+    "received_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "Core arrival time, stamped at ingest; the gap to ts detects buffered backfill."
+    },
+    "bucket_s": {
+      "type": "integer",
+      "exclusiveMinimum": 0
+    },
+    "object_class": {
+      "enum": [
+        "person",
+        "haul_truck",
+        "light_vehicle",
+        "loader",
+        "excavator",
+        "dozer",
+        "grader",
+        "drill",
+        "water_truck",
+        "service_truck",
+        "bus"
+      ]
+    },
+    "count_max": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "count_mean": {
+      "type": "number",
+      "minimum": 0
+    },
+    "entries": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "exits": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "dwell_s_max": {
+      "type": "number",
+      "minimum": 0
+    },
+    "dwell_s_p50": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "observed_s": {
+      "type": "number",
+      "minimum": 0
+    },
+    "advisory": {
+      "const": true
+    }
+  }
+}

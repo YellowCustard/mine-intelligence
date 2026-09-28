@@ -23,7 +23,15 @@ from minemonitor.contracts.generator import GeneratorReadingV1
 from minemonitor.contracts.laboratory import LaboratoryCorrectionV1, LaboratoryResultV1
 from minemonitor.contracts.maintenance import MaintenanceHealthV1
 from minemonitor.contracts.reconciliation import MaterialMeasurementV1
-from minemonitor.contracts.vision import VisionVendorEventV1
+from minemonitor.contracts.vision import (
+    VisionCameraHealthV1,
+    VisionHealthV1,
+    VisionObservationV1,
+    VisionOperationalEventV1,
+    VisionRuleVersionV1,
+    VisionVendorEventV1,
+    VisionZoneRollupV1,
+)
 from minemonitor.contracts.weighbridge import WeighbridgeTransactionV1
 
 # The registered contracts, keyed by their schema string. Extend this as new domains
@@ -42,6 +50,12 @@ _REGISTRY: dict[str, type[BaseModel]] = {
     "vision.vendor_event.v1": VisionVendorEventV1,
     "generator.reading.v1": GeneratorReadingV1,
     "material.measurement.v1": MaterialMeasurementV1,
+    "vision.observation.v1": VisionObservationV1,
+    "vision.operational_event.v1": VisionOperationalEventV1,
+    "vision.health.v1": VisionHealthV1,
+    "vision.camera_health.v1": VisionCameraHealthV1,
+    "vision.rule_version.v1": VisionRuleVersionV1,
+    "vision.zone_rollup.v1": VisionZoneRollupV1,
 }
 
 

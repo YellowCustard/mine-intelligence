@@ -15,6 +15,7 @@ Design against the two failures the mine will actually see (brief §3):
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -22,7 +23,11 @@ import time
 import paho.mqtt.client as mqtt
 
 from minemonitor.config import get_settings
-from minemonitor.ingest.authz import topic_matches_payload
+from minemonitor.ingest.authz import (
+    parse_vision_topic,
+    topic_matches_payload,
+    vision_topic_matches_payload,
+)
 from minemonitor.ingest.service import PositionIngest, store_and_process
 from minemonitor.ingest.spool import Spool
 from minemonitor.storage.db import get_session_factory
@@ -162,9 +167,14 @@ class MqttIngestor:
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
         topic = f"{self.prefix}/+/+/position"
         client.subscribe(topic, qos=1)
-        log.info("ingestor subscribed", extra={"topic": topic})
+        vision_topic = f"{self.prefix}/+/vision/+/+"
+        client.subscribe(vision_topic, qos=1)
+        log.info("ingestor subscribed", extra={"topic": topic, "vision_topic": vision_topic})
 
     def _on_message(self, client, userdata, msg: mqtt.MQTTMessage) -> None:
+        if parse_vision_topic(self.prefix, msg.topic) is not None:
+            self._on_vision_message(msg)
+            return
         try:
             payload = PositionIngest.model_validate_json(msg.payload)
         except ValueError:
@@ -197,6 +207,57 @@ class MqttIngestor:
         # broker redelivers rather than the consumer dropping on a DB outage.
         self._store_with_retry(payload)
         self.stored_count += 1
+
+    def _on_vision_message(self, msg: mqtt.MQTTMessage) -> None:
+        """Validate and store one edge vision record (``vision.*.v1``).
+
+        Same discipline as positions: malformed or topic-spoofed payloads are rejected loudly
+        and acked (they will never become good); a refused record (unknown camera or rule) is
+        logged and dropped; a DB outage withholds the ack so the broker redelivers.
+        """
+        from minemonitor.vision import service as vision
+
+        try:
+            record = vision.parse(json.loads(msg.payload))
+        except (ValueError, vision.VisionIngestError) as exc:
+            log.error(
+                "rejected malformed vision record", extra={"topic": msg.topic, "error": str(exc)}
+            )
+            self.rejected_count += 1
+            return
+        if not vision_topic_matches_payload(self.prefix, msg.topic, record):
+            log.error("rejected vision topic/payload mismatch", extra={"topic": msg.topic})
+            self.rejected_count += 1
+            return
+        while not self._stop.is_set():
+            session = self._session_factory()
+            try:
+                result = vision.ingest(session, record)
+                session.commit()
+                log.info(
+                    "vision ingested",
+                    extra={
+                        "site_id": record.site_id,
+                        "source": "mqtt",
+                        "schema": result["schema"],
+                        "record_id": result["id"],
+                        "record_created": result["created"],
+                        "alarm_event_id": result["alarm_event_id"],
+                    },
+                )
+                self.stored_count += 1
+                return
+            except vision.VisionIngestError as exc:
+                session.rollback()
+                log.error("refused vision record", extra={"topic": msg.topic, "error": str(exc)})
+                self.rejected_count += 1
+                return
+            except Exception as exc:  # noqa: BLE001 - DB may be down; retry
+                session.rollback()
+                log.warning("vision store failed, will retry", extra={"error": str(exc)})
+                time.sleep(self.write_retry_s)
+            finally:
+                session.close()
 
     def _is_registered(self, payload: PositionIngest) -> bool:
         """Strict mode: accept only assets with an enabled provisioned device."""
@@ -250,6 +311,7 @@ class MqttIngestor:
         from minemonitor.retention import run_from_config
         from minemonitor.rules.occupancy import detect_zone_occupancy
         from minemonitor.rules.offline import detect_offline
+        from minemonitor.vision.service import detect_camera_offline
 
         settings = get_settings()
         notify_sender = UrllibSmtpSender(settings)
@@ -284,6 +346,14 @@ class MqttIngestor:
                     log.info(
                         "zone occupancy breach",
                         extra={"site_id": ev.site_id, "zone_id": ev.zone_id},
+                    )
+                cam_off = detect_camera_offline(
+                    session, self._site_id, stale_s=settings.vision_camera_stale_s
+                )
+                for ev in cam_off:
+                    log.info(
+                        "camera offline",
+                        extra={"site_id": ev.site_id, "detail": ev.detail},
                     )
                 missed = detect_missed_searches(session, self._site_id)
                 for ev in missed:

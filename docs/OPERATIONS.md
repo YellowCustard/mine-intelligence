@@ -324,6 +324,30 @@ above the broker ACL. It is **off by default** so a fresh or demo install ingest
 without provisioning. Independently of this flag, the ingestor always rejects any
 message whose topic and payload disagree (anti-spoof).
 
+### 7.1 First-party vision edge nodes (Stage B)
+
+A vision edge node is a **`device`** principal, exactly like a tracker — no new auth surface.
+It publishes thin `vision.*.v1` records (operational events, 5-min zone rollups, node/camera health)
+either to `POST /api/v1/ingest/vision` (one record or a batch of up to 500) or over MQTT on
+`<prefix>/<site>/vision/<camera_or_node>/<kind>`. Raw frames never leave the node.
+
+- **Before a node can raise alarms**, an admin installs the rule set once per site:
+  `POST /api/v1/sites/<site>/vision/rules/defaults` (audited). Rules are immutable versions —
+  change one by publishing a new version (`POST .../vision/rules`) and retire the old
+  (`POST .../vision/rules/<rule_id>/<version>/retire`). An operational event citing an unknown rule
+  version is refused.
+- **The node pulls its config** from `GET /api/v1/sites/<site>/vision/config` (scene zones, zone
+  capacity, active rules) and caches it, so it keeps working through a link outage. Stream URLs are
+  never served — the node holds its own camera credentials.
+- **Batches are all-or-nothing.** A malformed record, an unregistered camera, or an uncited rule
+  rejects the whole batch with `422` and the failing `index`; nothing is partially stored. Replays
+  are idempotent (`duplicates` in the response).
+- **Reading it:** vision alarms land in the normal queue with `source = vision:<camera_id>` and a
+  provenance label in `detail`. `GET .../vision/events` (the evidenced conclusions),
+  `.../vision/rollups` (people counts per zone) and `.../vision/health` (latest per node/camera).
+- **Missed lane:** a commissioned camera whose health goes silent for `MM_VISION_CAMERA_STALE_S`
+  (default 300 s) raises one `camera_offline` alarm per camera.
+
 ---
 
 ## 8. Troubleshooting

@@ -30,6 +30,11 @@ from minemonitor.storage.models import (
     IncidentNote,
     Position,
     ShiftHandover,
+    VisionCameraHealth,
+    VisionNodeHealth,
+    VisionObservation,
+    VisionOperationalEvent,
+    VisionZoneRollup,
 )
 
 log = logging.getLogger("minemonitor.retention")
@@ -44,6 +49,8 @@ def run_retention(
     events_days: int,
     annotations_days: int = 0,
     audit_days: int = 0,
+    vision_observations_days: int = 0,
+    vision_health_days: int = 0,
     actor: str = "system",
 ) -> dict[str, int]:
     """Delete data older than each class's retention window. Commits.
@@ -102,6 +109,21 @@ def run_retention(
     )
     deleted["shift_handovers"] = _purge(ShiftHandover, ShiftHandover.created_at, annotations_days)
     deleted["incidents"], deleted["incident_notes"] = _purge_closed_incidents(annotations_days)
+    # Vision classes: raw observations + health are their own classes; derived operational
+    # events follow the events class and zone rollups the derived-analytics class.
+    deleted["vision_observations"] = _purge(
+        VisionObservation, VisionObservation.ts, vision_observations_days
+    )
+    deleted["vision_node_health"] = _purge(
+        VisionNodeHealth, VisionNodeHealth.ts, vision_health_days
+    )
+    deleted["vision_camera_health"] = _purge(
+        VisionCameraHealth, VisionCameraHealth.ts, vision_health_days
+    )
+    deleted["vision_operational_events"] = _purge(
+        VisionOperationalEvent, VisionOperationalEvent.ts, events_days
+    )
+    deleted["vision_zone_rollups"] = _purge(VisionZoneRollup, VisionZoneRollup.ts, metrics_days)
     deleted["audit_log"] = _purge(AuditLog, AuditLog.ts, audit_days)
 
     audit.record(
@@ -119,6 +141,8 @@ def run_retention(
                 "events": events_days,
                 "annotations": annotations_days,
                 "audit": audit_days,
+                "vision_observations": vision_observations_days,
+                "vision_health": vision_health_days,
             },
         },
     )
@@ -138,4 +162,6 @@ def run_from_config(session: Session, *, now: datetime | None = None) -> dict[st
         events_days=s.retain_events_days,
         annotations_days=s.retain_annotations_days,
         audit_days=s.retain_audit_days,
+        vision_observations_days=s.retain_vision_observations_days,
+        vision_health_days=s.retain_vision_health_days,
     )
