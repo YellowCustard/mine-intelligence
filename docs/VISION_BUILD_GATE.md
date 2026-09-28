@@ -826,6 +826,12 @@ recorded clip → stub detector (emits fixture detections) → tracker (stable t
 7. **No identity, no biometric field, no raw frame** ever crosses to the core; only the structured
    contracts (+ optional clip *reference*).
 
+**Build status (vision V2, 2026-09-28): built and passing.** Each criterion is a named test in
+`tests/test_vision_pipeline.py` (`test_c1_*` … `test_c7_*`), driving the real edge runtime
+(`minemonitor.vision.edge`) on synthetic scenes (`minemonitor.vision.sim`) through the crash-safe
+outbox and `POST /ingest/vision` into the alarm queue. The person-first slice also covers dwell
+(loitering), zone over-capacity and camera obstruction; recompute is `POST .../vision/recompute`.
+
 Explicitly **not** in the MVP: multi-class detection, segmentation, GPS fusion, PPE, proximity,
 loading/offloading, real cameras, GPU, training, model selection. Each is a later, separately-gated
 increment.

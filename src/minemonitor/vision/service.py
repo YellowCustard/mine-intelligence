@@ -549,7 +549,11 @@ def record_observation(
 
 
 def record_operational_event(
-    session: Session, record: VisionOperationalEventV1, *, received_at: datetime
+    session: Session,
+    record: VisionOperationalEventV1,
+    *,
+    received_at: datetime,
+    promote: bool = True,
 ) -> tuple[VisionOperationalEvent, bool, str | None]:
     """Store an operational event and promote it to ``event.v1`` if its type warrants a human.
 
@@ -587,7 +591,8 @@ def record_operational_event(
         evidence=record.evidence.model_dump(mode="json"),
     )
     session.add(row)
-    row.promoted_event_id = _promote(session, record, rule, cam)
+    if promote:
+        row.promoted_event_id = _promote(session, record, rule, cam)
     session.flush()
     return row, True, row.promoted_event_id
 
@@ -671,6 +676,95 @@ def _summary(record: VisionOperationalEventV1, cam: Camera, zone: Zone | None) -
     if record.type == "camera_obstructed":
         return f"Camera {cam.name} view obstructed — coverage lost"
     return f"{record.type.replace('_', ' ')} at {where} ({cam.name})"
+
+
+# ---------------------------------------------------------------------------------------------
+# Recompute (build-gate §5: stored observations + a versioned rule reproduce every conclusion)
+# ---------------------------------------------------------------------------------------------
+
+
+def recompute(
+    session: Session,
+    site_id: str,
+    *,
+    camera_id: str,
+    since: datetime,
+    until: datetime,
+    rule_id: str,
+    rule_version: str,
+) -> dict[str, Any]:
+    """Replay stored observations for one camera through one rule version. Does not commit.
+
+    Produces operational events under that rule version beside any earlier ones (ids embed the
+    version, so nothing is overwritten) and **does not raise alarms** — recomputing history is
+    analysis, not a live condition. Only observations actually stored in the core (lab mode or a
+    pulled slice) can be replayed.
+    """
+    from minemonitor.vision.temporal import replay
+
+    cam = _require_camera(session, site_id, camera_id)
+    rule = get_rule_version(session, site_id, rule_id, rule_version)
+    if rule is None:
+        raise LookupError(f"rule {rule_id} {rule_version} not found")
+    rows = (
+        session.execute(
+            select(VisionObservation)
+            .where(
+                VisionObservation.site_id == site_id,
+                VisionObservation.camera_id == camera_id,
+                VisionObservation.ts >= since,
+                VisionObservation.ts <= until,
+            )
+            .order_by(VisionObservation.ts)
+        )
+        .scalars()
+        .all()
+    )
+    observations = [
+        VisionObservationV1.model_validate(
+            {
+                "schema": "vision.observation.v1",
+                "observation_id": r.observation_id,
+                "site_id": r.site_id,
+                "node_id": r.node_id,
+                "camera_id": r.camera_id,
+                "ts": _aware(r.ts),
+                "frame_id": r.frame_id,
+                "model": {"id": r.model_id, "version": r.model_version},
+                "image": r.image,
+                "calibration_version": r.calibration_version,
+                "objects": r.objects,
+                "advisory": True,
+            }
+        )
+        for r in rows
+    ]
+    zone_ids = [z["zone_id"] for z in (cam.image_zones or [])]
+    zones = {
+        z.zone_id: {"name": z.name, "kind": z.kind, "max_occupancy": parse_cap(z.rules)}
+        for z in session.execute(
+            select(Zone).where(Zone.site_id == site_id, Zone.zone_id.in_(zone_ids))
+        ).scalars()
+    }
+    events = replay(
+        observations,
+        rules=[VisionRuleVersionV1.model_validate(rule_to_contract(rule))],
+        zones=zones,
+        zone_versions={z["zone_id"]: z.get("zone_version", "") for z in (cam.image_zones or [])},
+    )
+    received_at = _now()
+    created = []
+    for ev in events:
+        _row, was_new, _ = record_operational_event(
+            session, ev, received_at=received_at, promote=False
+        )
+        if was_new:
+            created.append(ev.event_id)
+    return {
+        "observations": len(observations),
+        "events": [e.event_id for e in events],
+        "created": created,
+    }
 
 
 # ---------------------------------------------------------------------------------------------
