@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from minemonitor import audit
@@ -199,6 +200,65 @@ def retire_rule(
     )
     db.commit()
     return service.rule_to_contract(row)
+
+
+class RecomputeIn(BaseModel):
+    """Replay one camera's stored observations through one rule version."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    camera_id: str = Field(min_length=1)
+    since: datetime
+    until: datetime
+    rule_id: str = Field(min_length=1)
+    rule_version: str = Field(min_length=1)
+
+
+@router.post("/sites/{site_id}/vision/recompute")
+def recompute(
+    site_id: str,
+    body: RecomputeIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+) -> dict[str, Any]:
+    """Recompute operational events from stored observations (admin; audited; no live alarms).
+
+    Events under the given rule version are stored beside earlier ones — history is never
+    rewritten, so a rule improvement can be compared against what the old rule concluded.
+    """
+    if body.until < body.since:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "until precedes since")
+    try:
+        result = service.recompute(
+            db,
+            site_id,
+            camera_id=body.camera_id,
+            since=body.since,
+            until=body.until,
+            rule_id=body.rule_id,
+            rule_version=body.rule_version,
+        )
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except VisionIngestError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    audit.record(
+        db,
+        actor=user.username,
+        action="vision.recompute",
+        entity_type="vision_rule_version",
+        entity_id=service.rule_row_id(site_id, body.rule_id, body.rule_version),
+        site_id=site_id,
+        detail={
+            "camera_id": body.camera_id,
+            "since": body.since.isoformat(),
+            "until": body.until.isoformat(),
+            "observations": result["observations"],
+            "created": len(result["created"]),
+        },
+    )
+    db.commit()
+    return result
 
 
 # -- reads ---------------------------------------------------------------------------------------
