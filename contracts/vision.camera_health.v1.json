@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eigenstatesystems.com/contracts/vision.camera_health.v1.json",
+  "title": "vision.camera_health.v1",
+  "description": "Per-camera usability from cheap frame-quality checks — obstruction, defocus, darkness, signal loss (docs/VISION_BUILD_GATE.md §4.4). Distinct from node health.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "health_id",
+    "site_id",
+    "node_id",
+    "camera_id",
+    "ts",
+    "state",
+    "advisory"
+  ],
+  "properties": {
+    "schema": {
+      "const": "vision.camera_health.v1"
+    },
+    "health_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Deterministic per (camera, assessment ts)."
+    },
+    "site_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The edge node that produced this record."
+    },
+    "camera_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Assessment time."
+    },
+    "received_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "Core arrival time, stamped at ingest; the gap to ts detects buffered backfill."
+    },
+    "state": {
+      "enum": [
+        "ok",
+        "obstructed",
+        "defocused",
+        "dark",
+        "no_signal",
+        "unknown"
+      ]
+    },
+    "blur_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "luma_mean": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 255
+    },
+    "frozen_frames": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "last_frame_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "advisory": {
+      "const": true
+    }
+  }
+}

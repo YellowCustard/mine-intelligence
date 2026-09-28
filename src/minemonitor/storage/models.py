@@ -740,6 +740,9 @@ class Camera(Base):
     last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Scene config (vision V1): image-zones in normalised image coords, each mapped to an
+    # operational ``zones`` row — ``[{"zone_id", "zone_version", "polygon": [[x, y], ...]}]``.
+    image_zones: Mapped[list[dict[str, Any]] | None] = mapped_column(JsonType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -936,3 +939,165 @@ class VisionVendorEvent(Base):
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     clip_ref: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+# ---------------------------------------------------------------------------------------------
+# First-party vision (Stage B — docs/VISION_BUILD_GATE.md §4). No table here can hold identity,
+# a face, or frame bytes: objects are class + box + confidence + per-camera track id only.
+# ---------------------------------------------------------------------------------------------
+
+
+class VisionRuleVersion(Base):
+    """An immutable temporal-rule configuration (``vision.rule_version.v1``).
+
+    ``(site_id, rule_id, rule_version)`` is unique and never edited in place — a change is a new
+    version. Only ``active_to`` may be set later (retiring a version). Every operational event
+    cites one, so any alarm is reproducible from stored observations plus the rule that made it.
+    """
+
+    __tablename__ = "vision_rule_versions"
+    __table_args__ = (
+        UniqueConstraint("site_id", "rule_id", "rule_version", name="uq_vision_rule_version"),
+        Index("ix_vision_rule_versions_site", "site_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    rule_id: Mapped[str] = mapped_column(String, nullable=False)
+    rule_version: Mapped[str] = mapped_column(String, nullable=False)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    parameters: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False)
+    zone_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    active_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    active_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    author: Mapped[str | None] = mapped_column(String, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class VisionOperationalEvent(Base):
+    """A rule's evidenced conclusion (``vision.operational_event.v1``). Derived, recomputable.
+
+    ``promoted_event_id`` links to the ``event.v1`` alarm it raised, if the type warrants a human.
+    """
+
+    __tablename__ = "vision_operational_events"
+    __table_args__ = (
+        Index("ix_vision_operational_events_site_ts", "site_id", "ts"),
+        Index("ix_vision_operational_events_site_camera", "site_id", "camera_id"),
+    )
+
+    event_id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    node_id: Mapped[str] = mapped_column(String, nullable=False)
+    camera_id: Mapped[str] = mapped_column(String, nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    type: Mapped[str] = mapped_column(String, nullable=False)
+    provenance: Mapped[str] = mapped_column(String, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    rule_id: Mapped[str] = mapped_column(String, nullable=False)
+    rule_version: Mapped[str] = mapped_column(String, nullable=False)
+    zone_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    zone_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    subject: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False)
+    promoted_event_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class VisionObservation(Base):
+    """One frame's perception (``vision.observation.v1``) — lab mode / pulled slices only.
+
+    Backed by a TimescaleDB hypertable on ``ts`` (PK includes the partition column). ``objects``
+    holds class/box/confidence/track only — the recompute basis for operational events.
+    """
+
+    __tablename__ = "vision_observations"
+    __table_args__ = (
+        PrimaryKeyConstraint("observation_id", "ts", name="pk_vision_observations"),
+        Index("ix_vision_observations_site_camera_ts", "site_id", "camera_id", "ts"),
+    )
+
+    observation_id: Mapped[str] = mapped_column(String, nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    site_id: Mapped[str] = mapped_column(String, nullable=False)
+    node_id: Mapped[str] = mapped_column(String, nullable=False)
+    camera_id: Mapped[str] = mapped_column(String, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    frame_id: Mapped[str] = mapped_column(String, nullable=False)
+    model_id: Mapped[str] = mapped_column(String, nullable=False)
+    model_version: Mapped[str] = mapped_column(String, nullable=False)
+    image: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    calibration_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    objects: Mapped[list[dict[str, Any]]] = mapped_column(JsonType, nullable=False)
+
+
+class VisionNodeHealth(Base):
+    """An edge-node heartbeat (``vision.health.v1``)."""
+
+    __tablename__ = "vision_node_health"
+    __table_args__ = (Index("ix_vision_node_health_site_node_ts", "site_id", "node_id", "ts"),)
+
+    health_id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    node_id: Mapped[str] = mapped_column(String, nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    cameras_active: Mapped[int] = mapped_column(Integer, nullable=False)
+    fps_mean: Mapped[float] = mapped_column(Float, nullable=False)
+    queue_depth: Mapped[int] = mapped_column(Integer, nullable=False)
+    dropped_frames: Mapped[int] = mapped_column(Integer, nullable=False)
+    cpu_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mem_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gpu_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    model_ids: Mapped[list[str] | None] = mapped_column(JsonType, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class VisionCameraHealth(Base):
+    """A per-camera quality assessment (``vision.camera_health.v1``)."""
+
+    __tablename__ = "vision_camera_health"
+    __table_args__ = (
+        Index("ix_vision_camera_health_site_camera_ts", "site_id", "camera_id", "ts"),
+    )
+
+    health_id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    node_id: Mapped[str] = mapped_column(String, nullable=False)
+    camera_id: Mapped[str] = mapped_column(String, nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    state: Mapped[str] = mapped_column(String, nullable=False)
+    blur_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    luma_mean: Mapped[float | None] = mapped_column(Float, nullable=True)
+    frozen_frames: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_frame_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class VisionZoneRollup(Base):
+    """Per camera × zone × bucket people counts (``vision.zone_rollup.v1``) — reporting source."""
+
+    __tablename__ = "vision_zone_rollups"
+    __table_args__ = (
+        Index("ix_vision_zone_rollups_site_ts", "site_id", "ts"),
+        Index("ix_vision_zone_rollups_site_zone_ts", "site_id", "zone_id", "ts"),
+    )
+
+    rollup_id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False)
+    node_id: Mapped[str] = mapped_column(String, nullable=False)
+    camera_id: Mapped[str] = mapped_column(String, nullable=False)
+    zone_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    bucket_s: Mapped[int] = mapped_column(Integer, nullable=False)
+    object_class: Mapped[str] = mapped_column(String, nullable=False)
+    count_max: Mapped[int] = mapped_column(Integer, nullable=False)
+    count_mean: Mapped[float] = mapped_column(Float, nullable=False)
+    entries: Mapped[int] = mapped_column(Integer, nullable=False)
+    exits: Mapped[int] = mapped_column(Integer, nullable=False)
+    dwell_s_max: Mapped[float] = mapped_column(Float, nullable=False)
+    dwell_s_p50: Mapped[float | None] = mapped_column(Float, nullable=True)
+    observed_s: Mapped[float] = mapped_column(Float, nullable=False)

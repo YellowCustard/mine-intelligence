@@ -42,7 +42,9 @@
         "lab_anomaly",
         "lab_result_conflict",
         "generator_fault",
-        "generator_unexpected_run"
+        "generator_unexpected_run",
+        "camera_obstructed",
+        "camera_offline"
       ]
     },
     "severity": {

@@ -21,3 +21,31 @@ def parse_position_topic(prefix: str, topic: str) -> tuple[str, str] | None:
 def topic_matches_payload(prefix: str, topic: str, site_id: str, asset_id: str) -> bool:
     """True if the topic's site/asset match the payload's — the anti-spoof check."""
     return parse_position_topic(prefix, topic) == (site_id, asset_id)
+
+
+def parse_vision_topic(prefix: str, topic: str) -> tuple[str, str, str] | None:
+    """Return ``(site_id, source_id, kind)`` from ``<prefix>/<site>/vision/<source>/<kind>``.
+
+    ``source`` is the camera id (camera-scoped records) or the node id (node health).
+    """
+    parts = topic.split("/")
+    if len(parts) == 5 and parts[0] == prefix and parts[2] == "vision" and all(parts):
+        return parts[1], parts[3], parts[4]
+    return None
+
+
+def vision_topic_matches_payload(prefix: str, topic: str, payload: object) -> bool:
+    """Anti-spoof for vision: the topic's site and source must match the payload's.
+
+    Camera-scoped records must name the topic's camera; node health must name the topic's node.
+    """
+    parsed = parse_vision_topic(prefix, topic)
+    if parsed is None:
+        return False
+    site_id, source_id, _kind = parsed
+    if getattr(payload, "site_id", None) != site_id:
+        return False
+    camera_id = getattr(payload, "camera_id", None)
+    if camera_id is not None:
+        return bool(camera_id == source_id)
+    return bool(getattr(payload, "node_id", None) == source_id)
