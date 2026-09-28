@@ -210,3 +210,19 @@ The one **custom-but-accepted** entry is **DINOv3** (§1a) — a dev/offline fea
 cleared by explicit decision, with its weights redistribution conditional on the DINOv3
 License and its satellite weights to be verified per checkpoint. **DINOv2** (Apache-2.0)
 is the pre-cleared permissive fallback.
+
+**First build selection (2026-09-28, Stage B + CPU detector — `VISION_BUILD_GATE.md` gate record).**
+Chosen from the pre-cleared stack; each gets its row in `LICENCES.md` in the slice that actually adds
+it (policy item 4), not before:
+
+| Component | Role | Code | Weights | Training data | Ship? |
+|---|---|---|---|---|:--:|
+| **YOLOX-Nano / YOLOX-S** (Megvii, official ONNX release) | person detector, CPU | Apache-2.0 | Apache-2.0 | COCO-pretrained (annotations CC-BY-4.0; we ship weights, never COCO images) | ✅ |
+| **ONNX Runtime** (CPU) | inference backend | MIT | n/a | n/a | ✅ |
+| **opencv-python-headless** | decode, resize | Apache-2.0 (wheel bundles an **LGPL-2.1** FFmpeg build — acceptable, dynamic, unmodified) | n/a | n/a | ✅ |
+| **NumPy** | tensors | BSD-3-Clause | n/a | n/a | ✅ |
+| **Tracker** | ByteTrack-*style*, implemented in-house from the published algorithm | ours (Apache-2.0 repo) | n/a | n/a | ✅ |
+
+No Ultralytics package, no ByteTrack/`yolox` pip bundle (avoids their transitive `cython_bbox`/`lap`
+tree), no GPL codec. Weights are fetched by a pinned-SHA-256 script and **never committed**. The public
+evaluation clip is recorded in §7 when chosen (CC0 / CC-BY only; used for dev evaluation, not training).

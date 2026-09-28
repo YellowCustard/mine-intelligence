@@ -491,3 +491,10 @@ engine provides meaning, and Mine Monitor remains the authoritative operational 
 Future models improve perception without a platform rewrite. Build begins only on
 review of these documents and after the fuel/weighbridge quick wins, per the ranked
 sequence in `PLATFORM_EVOLUTION_ARCHITECTURE.md` §7.
+
+**Gate status (2026-09-28).** The fuel/weighbridge quick wins shipped, and the build-gate design
+(`VISION_BUILD_GATE.md`) was checked and authorised for **Stage B plus a permissive CPU detector on
+recorded video** (see its gate decision record; John/Theo countersignature pending). The first
+build targets **people** (detection, tracking, restricted-zone / dwell / occupancy rules, reporting,
+spatial scene context) rather than the haul-truck slice sketched in §10, per the RAN Mines
+re-prioritisation. Live cameras, hardware, training and GPU profiles remain gated.

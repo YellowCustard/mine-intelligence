@@ -12,6 +12,25 @@ framework, NVR-adapter contract and a hardware-free MVP that a build gate needs.
 Vendor note: the site cameras are **Dahua** (previously mis-recorded as "Alhua" in some
 notes; corrected throughout the repo).
 
+> ### Gate decision record — 2026-09-28
+>
+> **Build authorised (Stage B + a permissive CPU detector on recorded video)** by Adeel Khan
+> (AI vision lead, eigenstate), with vision named the delivery team's main focus.
+>
+> - **In scope now:** the first-party perception pipeline of §9 end-to-end (contracts, storage,
+>   ingest, temporal rules, alarm promotion), a synthetic person-trajectory simulator as the CI
+>   fixture set, **and** a real permissively-licensed detector (YOLOX via ONNX Runtime, CPU) run
+>   on **recorded video** only, plus scene context (image-zones, counts, dwell, conditions),
+>   reporting and the dashboard surface. Build sequence: `V0–V5` in the approved build plan.
+> - **Still gated (unchanged):** live cameras on site, edge hardware purchase (Stage C), multi-camera
+>   production (Stage D), any training/fine-tuning run, GPU profiles, person↔machine proximity,
+>   PPE, GNSS fusion, VLM scene description.
+> - **Countersignature:** John / Theo review of this design is **pending** — recorded here so the
+>   authorisation is explicit and reviewable, not implied. A stricter answer from that review costs
+>   configuration or a revert of the V-slices, not a redesign.
+> - **Implementation conventions fixed at the gate:** see the §4 envelope note (platform field
+>   names) and §6.4 (build-gate operational type names).
+
 Companion references (unchanged): `VISION_ARCHITECTURE.md` (master), `VISION_EVENT_CONTRACTS.md`,
 `VISION_DEPLOYMENT.md`, `VISION_GPS_FUSION.md`, `VISION_MODEL_CATALOG.md`,
 `VISION_MODEL_LICENSES.md`, `MINING_VISION_DATASET_STRATEGY.md`, `VISION_TRAINING.md`,
@@ -233,6 +252,17 @@ deltas follow.
 `ingested_at` (core arrival — the gap detects buffered backfill), `advisory: true` where the contract
 can drive an alarm. Provenance/confidence/evidence/model/rule/zone fields appear where the layer
 requires them (§3).
+
+**Implementation note (fixed at the 2026-09-28 gate).** The shipped contracts spell the envelope
+in the **existing platform style**, identical to `asset.position.v1` and the already-implemented
+`vision.vendor_event.v1`: `schema` (the const contract name) · `site_id` · `node_id` ·
+`camera_id` · **`ts`** (source/edge capture time — the `captured_at` above) · **`received_at`**
+(core arrival — the `ingested_at` above) · `advisory: true`. Semantics are unchanged; only the
+spelling follows the platform so one validator and one set of habits cover every source. The
+examples below keep the design spelling for readability; the JSON Schema files in `contracts/` are
+authoritative. The "periodic rollups" of §5 are carried by a named contract,
+`vision.zone_rollup.v1` (per camera × zone × 5-min bucket: people counts, entries/exits, dwell,
+coverage) — it is what reporting reads.
 
 **Global failure behaviour (all contracts):** a payload that fails registry validation is **rejected
 and logged loudly with `site_id`/`camera_id`**, never partially stored or coerced. Unknown extra
@@ -494,7 +524,9 @@ zones**, not per-frame detections, unless they genuinely move/change.
 `zone_entry` · `zone_exit` · `person_in_restricted_zone` · `vehicle_in_restricted_zone` ·
 `unsafe_proximity_person_machine` · `machine_stationary_in_queue_zone` · `machine_loading_started`* ·
 `machine_loading_complete`* · `machine_offloading_detected`* · `nvr_line_crossing_normalized` ·
-`nvr_intrusion_normalized` · `camera_obstructed` · `zone_occupancy_exceeded`. *(\* = deferred/estimated
+`nvr_intrusion_normalized` · `camera_obstructed` · `zone_occupancy_exceeded` · `person_dwell`
+(loitering: a person stationary-in-zone beyond a per-zone dwell; added at the 2026-09-28 gate) ·
+`camera_offline` (no health heartbeat — the "missed" lane). *(\* = deferred/estimated
 — see §6.7.)*
 
 ### 6.5 Zones
@@ -803,18 +835,22 @@ increment.
 ## 10. Build-gate checklist
 
 The design is gate-ready when a reviewer can answer **yes** to all of:
-- [ ] The two paths (NVR ingestion vs. first-party perception) and the four maturity stages (§2) are
+- [x] The two paths (NVR ingestion vs. first-party perception) and the four maturity stages (§2) are
   agreed, with NVR-first as the sequence.
-- [ ] The perception↔operational boundary (§3) and the four distinctions are accepted as binding.
-- [ ] The eight contracts (§4) are accepted as the build spec (schema-level), including
+- [x] The perception↔operational boundary (§3) and the four distinctions are accepted as binding.
+- [x] The eight contracts (§4) are accepted as the build spec (schema-level), including
   `vendor_inferred` as a distinct provenance class.
-- [ ] The transport policy (§5) — store-on-edge, transmit events+rollups+health, pull observations
+- [x] The transport policy (§5) — store-on-edge, transmit events+rollups+health, pull observations
   on demand — is accepted as the production default.
-- [ ] The ontology (§6) and the loading/offloading overpromise guard (§6.7) are accepted.
-- [ ] The per-event temporal framework (§7) is accepted, with per-event profiles (no global dwell).
-- [ ] The NVR adapter contract (§8) is accepted, pending the vendor API spec.
-- [ ] The hardware-free MVP (§9) is authorised as the first increment.
-- [ ] The open questions (§11) are acknowledged as gating C/D, not this design.
+- [x] The ontology (§6) and the loading/offloading overpromise guard (§6.7) are accepted.
+- [x] The per-event temporal framework (§7) is accepted, with per-event profiles (no global dwell).
+- [x] The NVR adapter contract (§8) is accepted, pending the vendor API spec.
+- [x] The hardware-free MVP (§9) is authorised as the first increment.
+- [x] The open questions (§11) are acknowledged as gating C/D, not this design.
+
+**Checked 2026-09-28** (Adeel Khan, vision lead — see the gate decision record at the top). The
+hardware-free MVP authorisation is extended to a permissive **CPU** detector on **recorded video**;
+John/Theo countersignature pending.
 
 ---
 
@@ -850,6 +886,7 @@ stricter answer costs config, not a redesign.
 - **Raw video stays on the edge.** Only structured events and referenced clips cross the link.
 - **No AGPL model** (incl. Ultralytics YOLO) may sit behind the adapter without explicit legal
   approval; the adapter interface is permissive-only.
-- **STOP.** No model, weights, or edge-service code is produced or assumed by this document. Build
-  begins only on review and approval of this design.
+- **STOP — lifted for Stage B only (2026-09-28).** This document itself produces no code. The build
+  it authorises is Stage B plus a permissive CPU detector on recorded video (gate decision record,
+  top). Live cameras, hardware, training, GPU profiles and Stage C/D stay behind their own gates.
 ```

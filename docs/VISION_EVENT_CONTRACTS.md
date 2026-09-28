@@ -1,9 +1,11 @@
 # Mine Monitor — Vision Event Contracts
 
-**Status: contract design for review. These schemas are specified, not yet implemented
-as JSON Schema files or Pydantic models, and nothing is registered on the running
-platform.** On approval they land in `contracts/` + `src/minemonitor/contracts/` and
-register in `platform/contracts.py`, exactly like the existing `*.v1` contracts.
+**Status: approved for build (2026-09-28, Stage B — see `VISION_BUILD_GATE.md` gate
+decision record).** These contracts land in `contracts/` + `src/minemonitor/contracts/` and
+register in `platform/contracts.py` as part of the vision V1 slice, exactly like the existing
+`*.v1` contracts. The envelope spelling used here (`schema`, `ts`, `received_at`) is the
+implemented one; the build-gate doc's `schema_version/captured_at/ingested_at` are the same
+fields under design names.
 
 Covers Phase 11 (standard vision output). Two new contracts, plus reuse of the existing
 `event.v1`. The design rule: **fit the existing event architecture, don't invent a
@@ -258,5 +260,5 @@ Every derived field carries one of these, plus confidence and evidence where not
 `observed`. The dashboard **must render the label** — a camera guess is never shown as a
 measurement.
 
-**STOP:** contracts are designed and specified. They are added to `contracts/` and the
-registry only on approval, as an additive step alongside the vision build.
+**Build status:** approved 2026-09-28; added to `contracts/` and the registry with the
+vision V1 slice. The JSON Schema files are authoritative where this prose and they differ.
