@@ -27,7 +27,7 @@ from minemonitor.auth.deps import require_admin, require_device, require_viewer
 from minemonitor.contracts.vision import VisionRuleVersionV1
 from minemonitor.storage.db import get_db
 from minemonitor.storage.models import User, VisionOperationalEvent, VisionZoneRollup
-from minemonitor.vision import service
+from minemonitor.vision import registry, service
 from minemonitor.vision.service import VisionIngestError
 
 router = APIRouter(tags=["vision"])
@@ -339,3 +339,109 @@ def list_vision_rollups(
 @router.get("/sites/{site_id}/vision/health", dependencies=[Depends(require_viewer)])
 def vision_health(site_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     return service.latest_health(db, site_id)
+
+
+# -- model registry (global; docs/VISION_ARCHITECTURE.md §6) ------------------------------------
+
+
+class ModelIn(BaseModel):
+    """Register a model version (starts at ``experimental``)."""
+
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
+
+    model_id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    version: str = Field(min_length=1)
+    task: str = Field(default="detect", min_length=1)
+    licence: str = Field(min_length=1)
+    weights_sha256: str = Field(min_length=64, max_length=64)
+    classes: list[str] = Field(min_length=1)
+    architecture: str | None = None
+    weights_ref: str | None = None
+    source_url: str | None = None
+    training_dataset: str | None = None
+    input_size: list[int] | None = None
+    notes: str | None = None
+
+
+class StatusIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str
+
+
+@router.get("/vision/models", dependencies=[Depends(require_viewer)])
+def list_models(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    return [registry.model_dict(r) for r in registry.list_models(db)]
+
+
+@router.post("/vision/models", status_code=201)
+def register_model(
+    body: ModelIn, db: Session = Depends(get_db), user: User = Depends(require_admin)
+) -> dict[str, Any]:
+    """Register a model version (admin; audited). Forbidden licences are refused outright."""
+    try:
+        row = registry.register_model(db, **body.model_dump())
+    except registry.RegistryError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    audit.record(
+        db,
+        actor=user.username,
+        action="vision.model.register",
+        entity_type="vision_model",
+        entity_id=row.id,
+        detail={"licence": row.licence, "sha256": row.weights_sha256},
+    )
+    db.commit()
+    return registry.model_dict(row)
+
+
+@router.post("/vision/models/{model_id}/{version}/status")
+def set_model_status(
+    model_id: str,
+    version: str,
+    body: StatusIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+) -> dict[str, Any]:
+    """Move a model through its lifecycle (admin; audited). Production needs a cleared licence."""
+    try:
+        row = registry.set_status(db, model_id, version, body.status)
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except registry.RegistryError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    audit.record(
+        db,
+        actor=user.username,
+        action="vision.model.status",
+        entity_type="vision_model",
+        entity_id=row.id,
+        detail={"status": row.status},
+    )
+    db.commit()
+    return registry.model_dict(row)
+
+
+@router.post("/vision/models/{model_id}/{version}/metrics")
+def record_model_metrics(
+    model_id: str,
+    version: str,
+    metrics: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+) -> dict[str, Any]:
+    """Record measured metrics (e.g. a bench run per hardware profile). Admin; audited."""
+    try:
+        row = registry.record_metrics(db, model_id, version, metrics)
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    audit.record(
+        db,
+        actor=user.username,
+        action="vision.model.metrics",
+        entity_type="vision_model",
+        entity_id=row.id,
+        detail={"keys": sorted(metrics)},
+    )
+    db.commit()
+    return registry.model_dict(row)

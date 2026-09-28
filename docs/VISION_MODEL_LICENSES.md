@@ -182,6 +182,8 @@ Audited in `MINING_VISION_DATASET_STRATEGY.md`; summary:
 | **Roboflow Universe** (mining sets) | **per-dataset — varies wildly (CC-BY, CC0, non-commercial, unknown)** | ⚠️ per set | **each set audited individually before use**; many are non-commercial — reject those |
 | **Synthetic** (our engine) | our own | ✅ | we own it |
 | **eigenstate/RAN Mines site data** | our own, with mine as data controller | ✅ | the authoritative set; consent/retention per `CLAUDE.md` §4 |
+| **Dev-evaluation still** — NASA portrait of astronaut Eileen Collins, as distributed with scikit-image (`skimage/data/astronaut.png`, v0.24.0) | public domain (NASA) | n/a — **evaluation only, never training** | fetched by pinned URL into `var/clips/` (gitignored); `make-still-clip` pans it into a synthetic clip to exercise real YOLOX → tracker → rules → alarm (2026-09-28 gate decision). Says nothing about accuracy on mine footage. |
+| **Dev-evaluation clips** — `intel-iot-devkit/sample-videos` (e.g. `worker-zone-detection.mp4`) | CC-BY-4.0 (attribution: Intel IoT DevKit) | n/a — evaluation only | preferred real-motion clips; stored in Git LFS, which the build environment could not fetch — used when attached as a release asset. Never committed, never used for training. |
 
 **Rule:** we do not redistribute third-party dataset *images*; we ship *weights* whose
 code+weights licence is permissive, and we own the mining/site data we fine-tune on.
