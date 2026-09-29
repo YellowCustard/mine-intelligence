@@ -74,6 +74,28 @@ jobs:
       - name: Tests (SQLite + Postgres + MQTT integration) with coverage
         run: uv run pytest -q --cov=minemonitor --cov-report=term-missing
 
+  # Vision edge node: the NumPy/OpenCV/ONNX Runtime modules behind the optional `vision` extra.
+  # Weights-free and GPU-free — YOLOX decode/NMS, frame quality and the video source are tested
+  # on synthetic data; real-weights smoke tests skip unless var/models is populated.
+  vision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.8.17"
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Install dependencies (with vision extra)
+        run: uv sync --frozen --extra dev --extra vision
+      - name: Type check (with CV libraries present)
+        run: uv run mypy src
+      - name: Vision tests
+        run: >-
+          uv run pytest -q tests/test_vision_yolox.py tests/test_vision_pipeline.py
+          tests/test_vision_units.py tests/test_vision_registry.py
+
   # Build the deployment image so a Dockerfile regression fails CI, not the mine.
   docker-build:
     runs-on: ubuntu-latest

@@ -28,3 +28,8 @@ docker/mosquitto/acl
 .coverage.*
 htmlcov/
 coverage.xml
+
+# Vision edge working data: model weights, evaluation clips, outbox files. Never committed —
+# weights are fetched by `python -m minemonitor.vision.edge.cli fetch-models` (pinned SHA-256).
+var/
+*.onnx

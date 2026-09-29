@@ -1101,3 +1101,35 @@ class VisionZoneRollup(Base):
     dwell_s_max: Mapped[float] = mapped_column(Float, nullable=False)
     dwell_s_p50: Mapped[float | None] = mapped_column(Float, nullable=True)
     observed_s: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class VisionModelRecord(Base):
+    """The vision model registry (``docs/VISION_ARCHITECTURE.md`` §6). Global, not per site.
+
+    Every observation cites ``model.id``/``model.version``; this is where that id resolves to exact
+    weights (``sha256``), licence, training data and measured performance. Rows are never edited in
+    place for a new model — a new model is a new ``(model_id, version)``; promotion moves
+    ``status``. A model whose licence is not on the permissive/accepted list can never reach
+    ``production`` (enforced in ``vision.registry``).
+    """
+
+    __tablename__ = "vision_models"
+    __table_args__ = (UniqueConstraint("model_id", "version", name="uq_vision_model_version"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    model_id: Mapped[str] = mapped_column(String, nullable=False)
+    version: Mapped[str] = mapped_column(String, nullable=False)
+    task: Mapped[str] = mapped_column(String, nullable=False)
+    architecture: Mapped[str | None] = mapped_column(String, nullable=True)
+    licence: Mapped[str] = mapped_column(String, nullable=False)
+    weights_sha256: Mapped[str] = mapped_column(String, nullable=False)
+    weights_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    training_dataset: Mapped[str | None] = mapped_column(String, nullable=True)
+    classes: Mapped[list[str]] = mapped_column(JsonType, nullable=False)
+    input_size: Mapped[list[int] | None] = mapped_column(JsonType, nullable=True)
+    metrics: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="experimental")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
