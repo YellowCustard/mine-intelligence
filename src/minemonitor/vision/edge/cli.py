@@ -49,7 +49,7 @@ MODELS: dict[str, dict[str, Any]] = {
 STILL = {
     "file": "astronaut.png",
     "url": "https://raw.githubusercontent.com/scikit-image/scikit-image/v0.24.0/skimage/data/astronaut.png",
-    "sha256": "",  # pinned on first verified fetch — see fetch()
+    "sha256": "88431cd9653ccd539741b555fb0a46b61558b301d4110412b5bc28b5e3ea6cb5",
     "licence": "Public domain (NASA)",
 }
 # Restricted image-zone used with the still clip (right third of the frame, lower 70%).
@@ -93,10 +93,10 @@ def make_still_clip(src: Path, out: Path, *, seconds: float = 20.0, fps: float =
     w, h = 1280, 720
     person = cv2.resize(img, (340, 340), interpolation=cv2.INTER_AREA)
     rng = np.random.default_rng(3)
-    base = np.clip(rng.normal(96, 14, (h, w, 3)), 0, 255).astype(np.uint8)
-    base = cv2.GaussianBlur(base, (0, 0), 3)
+    noise = np.clip(rng.normal(96, 14, (h, w, 3)), 0, 255).astype(np.uint8)
+    base = cv2.GaussianBlur(noise, (0, 0), 3)
     out.parent.mkdir(parents=True, exist_ok=True)
-    writer = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    writer = cv2.VideoWriter(str(out), cv2.VideoWriter.fourcc(*"mp4v"), fps, (w, h))
     if not writer.isOpened():
         raise SystemExit("OpenCV cannot write mp4v here")
     n = int(seconds * fps)
@@ -165,8 +165,11 @@ def bench(model: Any, clip: Path, *, sample_fps: float, max_frames: int) -> dict
 
 def cmd_bench(a: argparse.Namespace) -> None:
     model = load_model(a.model, a.models_dir)
-    print(json.dumps(bench(model, Path(a.clip), sample_fps=a.sample_fps, max_frames=a.frames),
-                     indent=2))
+    print(
+        json.dumps(
+            bench(model, Path(a.clip), sample_fps=a.sample_fps, max_frames=a.frames), indent=2
+        )
+    )
 
 
 def cmd_run_clip(a: argparse.Namespace) -> None:
@@ -182,8 +185,7 @@ def cmd_run_clip(a: argparse.Namespace) -> None:
     req = urllib.request.Request(
         f"{a.core.rstrip('/')}/api/v1/sites/{a.site}/vision/config",
         headers={
-            "Authorization": "Basic "
-            + base64.b64encode(f"{a.user}:{a.password}".encode()).decode()
+            "Authorization": "Basic " + base64.b64encode(f"{a.user}:{a.password}".encode()).decode()
         },
     )
     with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
@@ -191,13 +193,19 @@ def cmd_run_clip(a: argparse.Namespace) -> None:
     model = load_model(a.model, a.models_dir)
     outbox = Outbox(a.outbox)
     rt = EdgeRuntime(
-        site_id=a.site, node_id=a.node, camera_id=a.camera_id, config=config, model=model,
-        outbox=outbox, lab_mode=a.lab,
+        site_id=a.site,
+        node_id=a.node,
+        camera_id=a.camera_id,
+        config=config,
+        model=model,
+        outbox=outbox,
+        lab_mode=a.lab,
     )
     publisher = HttpPublisher(a.core, a.user, a.password)
     last = None
-    for f in VideoFileSource(a.clip, start=datetime.now(UTC), sample_fps=a.sample_fps,
-                             quality=QualityMonitor()):
+    for f in VideoFileSource(
+        a.clip, start=datetime.now(UTC), sample_fps=a.sample_fps, quality=QualityMonitor()
+    ):
         for ev in rt.process(f):
             print(f"{ev.ts.isoformat()} {ev.type} zone={ev.zone_id} conf={ev.confidence}")
         last = f.ts
@@ -205,9 +213,16 @@ def cmd_run_clip(a: argparse.Namespace) -> None:
             drain(outbox, publisher)
     if last is not None:
         rt.close(last)
-    print(json.dumps({"frames": rt.stats.frames, "events": rt.stats.events,
-                      "infer_ms_mean": round(rt.stats.infer_ms_mean, 1),
-                      **drain(outbox, publisher)}))
+    print(
+        json.dumps(
+            {
+                "frames": rt.stats.frames,
+                "events": rt.stats.events,
+                "infer_ms_mean": round(rt.stats.infer_ms_mean, 1),
+                **drain(outbox, publisher),
+            }
+        )
+    )
 
 
 def main(argv: list[str] | None = None) -> None:

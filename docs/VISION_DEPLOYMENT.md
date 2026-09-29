@@ -62,6 +62,20 @@ The profile is a config choice; the interface and events are identical across th
 | **GPU-balanced** | Jetson Orin / T4-class | RT-DETRv2-R50 | TensorRT | 15–30 | several | active pit zones |
 | **GPU-accuracy** | RTX A4000+ / L4-class | RT-DETRv2 (larger) + optional seg | TensorRT | 30+ | several+ | proximity safety, busy scenes |
 
+**Measured (vision V3, 2026-09-29) — CPU-small, 4 cores, ONNX Runtime CPU, official YOLOX
+ONNX weights.** `python -m minemonitor.vision.edge.cli bench` over 100 decoded 1280×720 frames:
+
+| Model | Input | Inference fps | Latency p50 / p95 | Note |
+|---|---|---|---|---|
+| YOLOX-Nano | 416×416 | 96.8 | 10.0 / 11.8 ms | default edge detector — ample headroom for several cameras at 5 fps |
+| YOLOX-S | 640×640 | 10.6 | 85.8 / 137.5 ms | higher-accuracy option on the same box, fewer cameras |
+
+Latency and throughput are content-independent and carry over to site footage. **Detection
+accuracy does not**: these runs used a synthetic evaluation clip (a public-domain portrait panned
+across a plain background), so they say nothing about recall at distance, at night or in dust — that
+is measured on consented site footage (`VISION_TRAINING.md` §4) before any C/D decision. Real edge
+hardware is re-benchmarked on commissioning and recorded in the model registry.
+
 Rules:
 - **Default is CPU-small.** A GPU is an upgrade, never a requirement to run.
 - Multiple cameras on one node share the GPU/CPU budget — frame rate is allocated per

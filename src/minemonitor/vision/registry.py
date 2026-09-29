@@ -1,4 +1,6 @@
-"""Vision model registry — predictions stay traceable, weights never silently change. Callers commit.
+"""Vision model registry: predictions stay traceable, weights never silently change.
+
+Callers commit.
 
 ``docs/VISION_ARCHITECTURE.md`` §6 and ``docs/VISION_MODEL_LICENSES.md``:
 
@@ -55,7 +57,9 @@ def get_model(session: Session, model_id: str, version: str) -> VisionModelRecor
 def list_models(session: Session) -> list[VisionModelRecord]:
     return list(
         session.execute(
-            select(VisionModelRecord).order_by(VisionModelRecord.model_id, VisionModelRecord.version)
+            select(VisionModelRecord).order_by(
+                VisionModelRecord.model_id, VisionModelRecord.version
+            )
         )
         .scalars()
         .all()
@@ -90,7 +94,9 @@ def register_model(
     if not classes:
         raise RegistryError("a model must declare the classes it detects")
     if get_model(session, model_id, version) is not None:
-        raise RegistryError(f"{row_id(model_id, version)} already registered — publish a new version")
+        raise RegistryError(
+            f"{row_id(model_id, version)} already registered — publish a new version"
+        )
     now = now or datetime.now(UTC)
     row = VisionModelRecord(
         id=row_id(model_id, version),

@@ -71,7 +71,8 @@ class VideoFileSource:
                 if t + 1e-9 < next_t:
                     continue
                 next_t += step
-                state, metrics = (None, {})
+                state: str | None = None
+                metrics: dict[str, float | int] = {}
                 if self.quality is not None:
                     state, metrics = self.quality.assess(frame)
                 yield FrameIn(

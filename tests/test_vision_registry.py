@@ -16,8 +16,13 @@ SHA = "c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6007bd18a0b7d"
 
 def _reg(db: Session, licence: str = "Apache-2.0", version: str = "0.1.1rc0") -> object:
     return registry.register_model(
-        db, model_id="yolox-nano", version=version, task="detect", licence=licence,
-        weights_sha256=SHA, classes=["person"],
+        db,
+        model_id="yolox-nano",
+        version=version,
+        task="detect",
+        licence=licence,
+        weights_sha256=SHA,
+        classes=["person"],
     )
 
 
@@ -40,8 +45,13 @@ def test_unknown_or_weak_copyleft_licence_never_reaches_production(db_session: S
     with pytest.raises(RegistryError, match="not cleared for production"):
         registry.set_status(db_session, "yolox-nano", "0.1.1rc0", "production")
     registry.register_model(
-        db_session, model_id="custom", version="1", task="detect", licence="Vendor EULA",
-        weights_sha256=SHA, classes=["person"],
+        db_session,
+        model_id="custom",
+        version="1",
+        task="detect",
+        licence="Vendor EULA",
+        weights_sha256=SHA,
+        classes=["person"],
     )
     with pytest.raises(RegistryError):
         registry.set_status(db_session, "custom", "1", "production")
@@ -53,23 +63,32 @@ def test_versions_immutable_and_hash_required(db_session: Session) -> None:
         _reg(db_session)
     with pytest.raises(RegistryError, match="SHA-256"):
         registry.register_model(
-            db_session, model_id="m", version="1", task="detect", licence="MIT",
-            weights_sha256="abc", classes=["person"],
+            db_session,
+            model_id="m",
+            version="1",
+            task="detect",
+            licence="MIT",
+            weights_sha256="abc",
+            classes=["person"],
         )
 
 
 def test_metrics_merge(db_session: Session) -> None:
     _reg(db_session)
     registry.record_metrics(db_session, "yolox-nano", "0.1.1rc0", {"cpu_4c": {"fps": 11.2}})
-    row = registry.record_metrics(
-        db_session, "yolox-nano", "0.1.1rc0", {"jetson": {"fps": 40.0}}
-    )
+    row = registry.record_metrics(db_session, "yolox-nano", "0.1.1rc0", {"jetson": {"fps": 40.0}})
     assert set(row.metrics or {}) == {"cpu_4c", "jetson"}
 
 
 def test_api_admin_only_and_audited(db_session: Session) -> None:
-    body = {"model_id": "yolox-nano", "version": "0.1.1rc0", "licence": "Apache-2.0",
-            "weights_sha256": SHA, "classes": ["person"], "input_size": [416, 416]}
+    body = {
+        "model_id": "yolox-nano",
+        "version": "0.1.1rc0",
+        "licence": "Apache-2.0",
+        "weights_sha256": SHA,
+        "classes": ["person"],
+        "input_size": [416, 416],
+    }
     viewer = make_client(db_session, VIEWER)
     assert viewer.post("/api/v1/vision/models", json=body).status_code == 403
     admin = make_client(db_session, ADMIN)

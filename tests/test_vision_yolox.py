@@ -74,8 +74,9 @@ def test_postprocess_person_only_normalised_and_nmsed() -> None:
     d[1, 5] = 0.80
     d[2, :5] = [300, 300, 60, 40, 0.9]
     d[2, 5 + 2] = 0.99  # COCO class 2 = car: not mapped
-    dets = postprocess(d, ratio=0.5, image_wh=(832, 832), conf_thr=0.3, nms_thr=0.45,
-                       class_map={0: "person"})
+    dets = postprocess(
+        d, ratio=0.5, image_wh=(832, 832), conf_thr=0.3, nms_thr=0.45, class_map={0: "person"}
+    )
     assert len(dets) == 1 and isinstance(dets[0], Detection)
     (p,) = dets
     assert p.cls == "person" and p.confidence == pytest.approx(0.855, abs=1e-3)
@@ -101,7 +102,7 @@ def test_quality_states() -> None:
 
 def test_video_source_samples_by_time(tmp_path: Path) -> None:
     path = tmp_path / "c.avi"
-    w = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), 25.0, (160, 90))
+    w = cv2.VideoWriter(str(path), cv2.VideoWriter.fourcc(*"MJPG"), 25.0, (160, 90))
     for i in range(100):  # 4 s at 25 fps
         w.write(np.full((90, 160, 3), i % 255, np.uint8))
     w.release()
@@ -155,8 +156,16 @@ def test_real_model_end_to_end_one_alarm(db_session: Session, tmp_path: Path) ->
     from tests.test_vision_pipeline import _FAR_POLYGON, Published
 
     site = "kn-zw-01"
-    db_session.add(Zone(zone_id="gr", site_id=site, name="Gold Room", kind="restricted",
-                        geometry=_FAR_POLYGON, rules={}))
+    db_session.add(
+        Zone(
+            zone_id="gr",
+            site_id=site,
+            name="Gold Room",
+            kind="restricted",
+            geometry=_FAR_POLYGON,
+            rules={},
+        )
+    )
     cam = create_camera(db_session, site_id=site, name="CAM-STILL", now=T0)
     cam.image_zones = [{"zone_id": "gr", "zone_version": "v1", "polygon": STILL_ZONE}]
     service.install_default_rules(db_session, site, author="t", at=T0 - timedelta(days=1))
@@ -165,8 +174,14 @@ def test_real_model_end_to_end_one_alarm(db_session: Session, tmp_path: Path) ->
     clip = make_still_clip(STILL, tmp_path / "walk.mp4", seconds=20, fps=5)
     model = YoloxOnnxModel(NANO, expected_sha256=MODELS["yolox-nano"]["sha256"])
     ob = Outbox(tmp_path / "o.sqlite")
-    rt = EdgeRuntime(site_id=site, node_id="edge-1", camera_id=cam.id,
-                     config=service.edge_config(db_session, site, at=T0), model=model, outbox=ob)
+    rt = EdgeRuntime(
+        site_id=site,
+        node_id="edge-1",
+        camera_id=cam.id,
+        config=service.edge_config(db_session, site, at=T0),
+        model=model,
+        outbox=ob,
+    )
     last = T0
     for f in VideoFileSource(clip, start=T0, sample_fps=5, quality=QualityMonitor()):
         rt.process(f)
