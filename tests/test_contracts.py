@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 
+import jsonschema
 import pytest
 from jsonschema import Draft202012Validator
 
@@ -435,3 +436,163 @@ def test_vision_vendor_event_provenance_must_be_vendor_inferred() -> None:
         VisionVendorEventV1.model_validate(instance)
     with pytest.raises(Exception):
         Draft202012Validator(_load_schema("vision.vendor_event.v1.json")).validate(instance)
+
+
+# -- first-party vision contracts (Stage B) ------------------------------------------------------
+
+_VISION_INSTANCES: dict[str, dict] = {
+    "vision.observation.v1": {
+        "schema": "vision.observation.v1",
+        "observation_id": "vobs-cam-1-f1",
+        "site_id": "kn-zw-01",
+        "node_id": "edge-01",
+        "camera_id": "cam-1",
+        "ts": "2026-09-28T08:00:00Z",
+        "received_at": None,
+        "frame_id": "f1",
+        "model": {"id": "yolox-nano", "version": "0.1.0"},
+        "image": {"width": 1920, "height": 1080},
+        "calibration_version": None,
+        "objects": [
+            {
+                "track_id": "cam-1:7",
+                "class": "person",
+                "confidence": 0.8,
+                "bbox": {"x1": 0.2, "y1": 0.2, "x2": 0.3, "y2": 0.6},
+                "ground_point": {"lat": None, "lon": None, "basis": "unknown"},
+                "zone_ids": ["gold-room"],
+                "provenance": "observed",
+            }
+        ],
+        "advisory": True,
+    },
+    "vision.operational_event.v1": {
+        "schema": "vision.operational_event.v1",
+        "event_id": "vop-1",
+        "site_id": "kn-zw-01",
+        "node_id": "edge-01",
+        "camera_id": "cam-1",
+        "ts": "2026-09-28T08:00:02Z",
+        "type": "person_in_restricted_zone",
+        "provenance": "inferred",
+        "confidence": 0.81,
+        "rule_id": "person_in_restricted_zone",
+        "rule_version": "1.0.0",
+        "subject": {"track_id": "cam-1:7", "asset_id": None, "association": None},
+        "zone_id": "gold-room",
+        "zone_version": "v1",
+        "evidence": {
+            "observation_window": ["2026-09-28T08:00:00Z", "2026-09-28T08:00:02Z"],
+            "track_ids": ["cam-1:7"],
+            "frame_ids": ["f1"],
+            "signals": {"dwell_ms": 2000},
+            "clip_ref": None,
+        },
+        "advisory": True,
+    },
+    "vision.health.v1": {
+        "schema": "vision.health.v1",
+        "health_id": "vh-1",
+        "site_id": "kn-zw-01",
+        "node_id": "edge-01",
+        "ts": "2026-09-28T08:00:00Z",
+        "status": "ok",
+        "cameras_active": 1,
+        "fps_mean": 4.2,
+        "queue_depth": 0,
+        "dropped_frames": 0,
+        "cpu_pct": 41.0,
+        "mem_pct": None,
+        "gpu_pct": None,
+        "model_ids": ["yolox-nano@0.1.0"],
+        "last_error": None,
+        "advisory": True,
+    },
+    "vision.camera_health.v1": {
+        "schema": "vision.camera_health.v1",
+        "health_id": "vch-1",
+        "site_id": "kn-zw-01",
+        "node_id": "edge-01",
+        "camera_id": "cam-1",
+        "ts": "2026-09-28T08:00:00Z",
+        "state": "dark",
+        "blur_score": 12.5,
+        "luma_mean": 8.0,
+        "frozen_frames": 0,
+        "last_frame_at": "2026-09-28T07:59:59Z",
+        "advisory": True,
+    },
+    "vision.rule_version.v1": {
+        "schema": "vision.rule_version.v1",
+        "site_id": "kn-zw-01",
+        "rule_id": "person_in_restricted_zone",
+        "rule_version": "1.2.0",
+        "event_type": "person_in_restricted_zone",
+        "parameters": {
+            "classes": ["person"],
+            "min_observations": 3,
+            "min_dwell_ms": 1500,
+            "hysteresis_observations": 3,
+            "cooldown_ms": 60000,
+            "window_ms": 5000,
+            "confidence_threshold": 0.5,
+            "severity": "critical",
+            "zone_kinds": ["restricted"],
+            "requires": [],
+        },
+        "zone_version": None,
+        "active_from": "2026-10-01T00:00:00Z",
+        "active_to": None,
+        "author": "adeel",
+        "notes": None,
+        "advisory": True,
+    },
+    "vision.zone_rollup.v1": {
+        "schema": "vision.zone_rollup.v1",
+        "rollup_id": "vr-1",
+        "site_id": "kn-zw-01",
+        "node_id": "edge-01",
+        "camera_id": "cam-1",
+        "zone_id": None,
+        "ts": "2026-09-28T08:00:00Z",
+        "bucket_s": 300,
+        "object_class": "person",
+        "count_max": 3,
+        "count_mean": 1.5,
+        "entries": 4,
+        "exits": 4,
+        "dwell_s_max": 90.0,
+        "dwell_s_p50": None,
+        "observed_s": 288.0,
+        "advisory": True,
+    },
+}
+
+
+@pytest.mark.parametrize("schema", sorted(_VISION_INSTANCES))
+def test_vision_contract_valid_instance_passes_both(schema: str) -> None:
+    from minemonitor.platform.contracts import model_for
+
+    js = _load_schema(f"{schema}.json")
+    Draft202012Validator.check_schema(js)
+    instance = _VISION_INSTANCES[schema]
+    Draft202012Validator(js).validate(instance)
+    model = model_for(schema)
+    assert model is not None
+    dumped = json.loads(model.model_validate(instance).model_dump_json(by_alias=True))
+    Draft202012Validator(js).validate(dumped)
+
+
+@pytest.mark.parametrize("schema", sorted(_VISION_INSTANCES))
+def test_vision_contract_rejects_identity_fields_in_both(schema: str) -> None:
+    """No vision contract admits identity or frame bytes (CLAUDE.md §4) — schema or model."""
+    from minemonitor.platform.contracts import model_for
+
+    model = model_for(schema)
+    assert model is not None
+    for extra in ({"person_name": "x"}, {"face_embedding": [0.1]}, {"frame_jpeg": "AAAA"}):
+        bad = {**_VISION_INSTANCES[schema], **extra}
+        with pytest.raises(jsonschema.ValidationError):
+            Draft202012Validator(_load_schema(f"{schema}.json")).validate(bad)
+        with pytest.raises(Exception):
+            model.model_validate(bad)

@@ -35,6 +35,7 @@ from minemonitor.api.routers import (
     reconciliation,
     reports,
     stream,
+    vision,
     weighbridge,
     zones,
 )
@@ -188,6 +189,7 @@ def create_app() -> FastAPI:
         laboratory.router,
         generators.router,
         reconciliation.router,
+        vision.router,
     ]
     for r in _domain_routers:
         app.include_router(r)  # legacy unprefixed

@@ -25,6 +25,8 @@ EventType = Literal[
     "lab_result_conflict",
     "generator_fault",
     "generator_unexpected_run",
+    "camera_obstructed",
+    "camera_offline",
 ]
 Severity = Literal["info", "warning", "critical"]
 EventState = Literal["open", "acknowledged", "resolved"]

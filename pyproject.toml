@@ -33,6 +33,14 @@ dev = [
 browser = [
     "playwright>=1.40",
 ]
+# First-party vision edge node (docs/VISION_BUILD_GATE.md): decode + CPU inference. Edge-only —
+# the core and its image never need it; CI installs it in a separate job. Permissive licences only
+# (LICENCES.md); no Ultralytics/AGPL, ever.
+vision = [
+    "numpy>=1.26",
+    "onnxruntime>=1.18",
+    "opencv-python-headless>=4.10",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -62,7 +70,15 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 source = ["minemonitor"]
-omit = ["*/__init__.py"]
+omit = [
+    "*/__init__.py",
+    # Vision edge modules that need the optional `vision` extra (NumPy/OpenCV/ONNX Runtime).
+    # The main job does not install it; the `vision` CI job exercises them instead.
+    "*/minemonitor/vision/edge/adapters/*",
+    "*/minemonitor/vision/edge/quality.py",
+    "*/minemonitor/vision/edge/source.py",
+    "*/minemonitor/vision/edge/cli.py",
+]
 
 [tool.coverage.report]
 # Floor sits below the observed level (85% SQLite-only, higher in CI where the
