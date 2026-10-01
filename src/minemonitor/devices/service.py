@@ -5,9 +5,10 @@ from __future__ import annotations
 import secrets
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from minemonitor.devices.acl import VISION_EDGE_SOURCE
 from minemonitor.devices.broker_config import mosquitto_password_hash
 from minemonitor.storage.models import Device
 
@@ -95,12 +96,16 @@ def rotate_secret(session: Session, device_id: str) -> str:
 
 
 def authorized_asset(session: Session, site_id: str, asset_id: str) -> bool:
-    """True if an *enabled* device is provisioned for this ``(site, asset)``."""
+    """True if an *enabled* tracker is provisioned for this ``(site, asset)``.
+
+    A vision edge node is a device but not a tracker: it can never authorise positions.
+    """
     row = session.execute(
         select(Device.device_id).where(
             Device.site_id == site_id,
             Device.asset_id == asset_id,
             Device.enabled.is_(True),
+            or_(Device.source.is_(None), Device.source != VISION_EDGE_SOURCE),
         )
     ).first()
     return row is not None

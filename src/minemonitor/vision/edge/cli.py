@@ -7,6 +7,8 @@ Needs the ``vision`` extra. Usage::
     python -m minemonitor.vision.edge.cli bench --model yolox-nano --clip var/clips/still_walk.mp4
     python -m minemonitor.vision.edge.cli run-clip --clip … --core http://localhost:8000 \\
         --site kn-zw-01 --camera-id <id> --user edge-01 --password …
+    python -m minemonitor.vision.edge.cli run-node      # live cameras; config from MM_EDGE_*
+    python -m minemonitor.vision.edge.cli healthcheck   # container healthcheck (heartbeat age)
 
 Weights and clips live under ``var/`` (gitignored) and are **fetched with a pinned SHA-256** —
 never committed. A file whose hash does not match is deleted, not used.
@@ -174,22 +176,14 @@ def cmd_bench(a: argparse.Namespace) -> None:
 
 def cmd_run_clip(a: argparse.Namespace) -> None:
     """Clip → EdgeRuntime(YOLOX) → outbox → a running core, as a device principal."""
-    import base64
-
+    from minemonitor.vision.edge.node import fetch_edge_config
     from minemonitor.vision.edge.outbox import Outbox
     from minemonitor.vision.edge.publish import HttpPublisher, drain
     from minemonitor.vision.edge.quality import QualityMonitor
     from minemonitor.vision.edge.runtime import EdgeRuntime
     from minemonitor.vision.edge.source import VideoFileSource
 
-    req = urllib.request.Request(
-        f"{a.core.rstrip('/')}/api/v1/sites/{a.site}/vision/config",
-        headers={
-            "Authorization": "Basic " + base64.b64encode(f"{a.user}:{a.password}".encode()).decode()
-        },
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
-        config = json.loads(resp.read())
+    config = fetch_edge_config(a.core, a.site, a.user, a.password)
     model = load_model(a.model, a.models_dir)
     outbox = Outbox(a.outbox)
     rt = EdgeRuntime(
@@ -225,6 +219,40 @@ def cmd_run_clip(a: argparse.Namespace) -> None:
     )
 
 
+def cmd_run_node(a: argparse.Namespace) -> None:
+    """Run the live edge node from ``MM_EDGE_*`` settings until SIGTERM."""
+    from pydantic import ValidationError
+
+    from minemonitor.logging_config import configure_logging
+    from minemonitor.vision.edge.node import EdgeSettings, build_node
+
+    configure_logging()
+    try:
+        settings = EdgeSettings()  # type: ignore[call-arg]  # required fields come from env
+    except ValidationError as exc:
+        # Never echo the inputs: they include camera stream URLs with passwords.
+        problems = "; ".join(
+            f"MM_EDGE_{'_'.join(str(p) for p in e['loc']).upper()}: {e['msg']}"
+            for e in exc.errors(include_input=False, include_url=False)
+        )
+        raise SystemExit(f"edge node misconfigured — {problems}") from None
+    build_node(settings).run()
+
+
+def cmd_healthcheck(a: argparse.Namespace) -> None:
+    """Exit non-zero when the node's heartbeat file is missing or older than ``--max-age``."""
+    import os
+
+    path = Path(os.environ.get("MM_EDGE_STATE_DIR", "var/edge")) / "heartbeat"
+    try:
+        age = time.time() - path.stat().st_mtime
+    except FileNotFoundError:
+        raise SystemExit(f"unhealthy: no heartbeat at {path}") from None
+    if age > a.max_age:
+        raise SystemExit(f"unhealthy: heartbeat {age:.0f}s old")
+    print(f"ok: heartbeat {age:.0f}s old")
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="minemonitor.vision.edge.cli")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -255,6 +283,11 @@ def main(argv: list[str] | None = None) -> None:
             s.add_argument("--password", required=True)
             s.add_argument("--outbox", default="var/outbox.sqlite")
             s.add_argument("--lab", action="store_true")
+    r = sub.add_parser("run-node")
+    r.set_defaults(fn=cmd_run_node)
+    h = sub.add_parser("healthcheck")
+    h.add_argument("--max-age", type=float, default=120.0)
+    h.set_defaults(fn=cmd_healthcheck)
     a = p.parse_args(argv)
     a.fn(a)
 

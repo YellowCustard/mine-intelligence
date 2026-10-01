@@ -60,6 +60,11 @@ _FAR_POLYGON = {
 
 @pytest.fixture
 def cam(db_session: Session) -> Camera:
+    return make_sim_camera(db_session)
+
+
+def make_sim_camera(db_session: Session) -> Camera:
+    """The simulated camera: restricted + yard zones, its scene, and the default rules."""
     db_session.add_all(
         [
             Zone(

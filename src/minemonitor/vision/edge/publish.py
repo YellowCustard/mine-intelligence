@@ -1,8 +1,10 @@
-"""Deliver the edge outbox to the core (stdlib only).
+"""Deliver the edge outbox to the core (stdlib; paho-mqtt for the MQTT publisher).
 
 ``drain`` moves pending records to the core in batches through any *publisher* — a callable taking
 a list of payload dicts. The HTTP publisher posts to ``POST /api/v1/ingest/vision`` as the node's
-``device`` account (HTTP Basic, the tracker credential model — no new auth surface).
+``device`` account (HTTP Basic, the tracker credential model — no new auth surface). The MQTT
+publisher sends each record at QoS 1 to ``<prefix>/<site>/vision/<camera_or_node>/<kind>`` as the
+node's broker identity (a ``vision-edge`` device, ACL-confined to its site's vision topics).
 
 Failure semantics (store-and-forward, ``CLAUDE.md`` §3):
 - **Transient** (network down, 5xx, auth outage): stop, keep everything pending, retry next drain.
@@ -89,3 +91,88 @@ class HttpPublisher:
             raise TransientPublishError(f"HTTP {exc.code}") from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise TransientPublishError(str(exc)) from exc
+
+
+def vision_topic(prefix: str, payload: dict[str, Any]) -> str:
+    """``<prefix>/<site>/vision/<camera_or_node>/<kind>`` — the topic the core's ingestor checks.
+
+    Camera-scoped records publish under their camera, node health under the node, and the
+    ``kind`` is the schema's middle part (``vision.zone_rollup.v1`` → ``zone_rollup``).
+    """
+    schema = str(payload.get("schema", ""))
+    parts = schema.split(".")
+    if len(parts) != 3 or parts[0] != "vision":
+        raise RejectedRecordError(0, f"not a vision record: {schema!r}")
+    source = payload.get("camera_id") or payload.get("node_id")
+    return f"{prefix}/{payload['site_id']}/vision/{source}/{parts[1]}"
+
+
+class MqttPublisher:
+    """Publish records to the site broker at **QoS 1** as the node's broker identity.
+
+    For sites where the node reaches the broker but not the API. Each record is confirmed by the
+    broker (PUBACK) before the batch counts as sent; anything unconfirmed stays in the outbox and
+    is retried — the core dedupes on record id, so a resend is harmless. The broker ACL confines
+    the node to ``<prefix>/<site>/vision/#`` and the ingestor rejects a topic/payload mismatch.
+
+    Over MQTT the core cannot answer "record 3 is malformed", so a rejected record is logged by the
+    ingestor rather than dead-lettered here; the HTTP publisher remains the commissioning default.
+    """
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        *,
+        client_id: str,
+        prefix: str = "mm",
+        timeout_s: float = 10.0,
+    ) -> None:
+        import paho.mqtt.client as mqtt
+
+        self.prefix = prefix
+        self.timeout_s = timeout_s
+        self._client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2, client_id=client_id, clean_session=False
+        )
+        self._client.username_pw_set(username, password)
+        self._client.reconnect_delay_set(min_delay=1, max_delay=60)
+        self._host = host
+        self._port = port
+        self._started = False
+
+    def _ensure(self) -> None:
+        if self._started:
+            return
+        try:
+            self._client.connect(self._host, self._port, keepalive=30)
+        except OSError as exc:
+            raise TransientPublishError(f"broker unreachable: {exc}") from exc
+        self._client.loop_start()
+        self._started = True
+
+    def __call__(self, payloads: list[dict[str, Any]]) -> dict[str, Any]:
+        self._ensure()
+        infos = []
+        for i, p in enumerate(payloads):
+            try:
+                topic = vision_topic(self.prefix, p)
+            except (RejectedRecordError, KeyError) as exc:
+                raise RejectedRecordError(i, str(exc)) from exc
+            infos.append(self._client.publish(topic, json.dumps(p), qos=1))
+        for info in infos:
+            try:
+                info.wait_for_publish(timeout=self.timeout_s)
+            except (RuntimeError, ValueError) as exc:  # not queued / client disconnected
+                raise TransientPublishError(f"publish failed: {exc}") from exc
+            if not info.is_published():
+                raise TransientPublishError("broker did not confirm within the timeout")
+        return {"published": len(infos)}
+
+    def close(self) -> None:
+        if self._started:
+            self._client.loop_stop()
+            self._client.disconnect()
+            self._started = False

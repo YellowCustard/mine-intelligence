@@ -55,8 +55,12 @@ class RollupAccumulator:
         object_class: str = "person",
         max_gap_s: float = 2.0,
         confirm_frames: int = 2,
+        epoch: str | None = None,
     ) -> None:
         self.site_id = site_id
+        # Distinguishes a re-created accumulator (scene edited mid-bucket) so its partial bucket
+        # does not reuse — and get deduplicated against — the closed one's id.
+        self.epoch = epoch
         self.node_id = node_id
         self.camera_id = camera_id
         self.zone_keys: list[str | None] = [None, *zone_ids]
@@ -137,7 +141,8 @@ class RollupAccumulator:
                     {
                         "schema": "vision.zone_rollup.v1",
                         "rollup_id": f"vr-{self.camera_id}-{key or 'view'}-"
-                        f"{b.start.strftime('%Y%m%dT%H%M%SZ')}-{self.object_class}",
+                        f"{b.start.strftime('%Y%m%dT%H%M%SZ')}-{self.object_class}"
+                        + (f"-{self.epoch}" if self.epoch else ""),
                         "site_id": self.site_id,
                         "node_id": self.node_id,
                         "camera_id": self.camera_id,
