@@ -145,7 +145,7 @@ upgradeable behind a stable event boundary, without a core rewrite.
 |---|---|---|
 | Live source | `vision/edge/rtsp.py` | grabber thread per camera; FFmpeg over TCP with a socket timeout; keeps only the newest sampled frame (drop-old-not-recent, counted); fixed-cadence sampling at `MM_EDGE_SAMPLE_FPS` with jitter tolerance; capped backoff + jitter; credentials redacted |
 | Node service | `vision/edge/node.py` | all cameras, one model, one crash-safe outbox; config fetched and cached (`config.json`), boots offline from the cache; a refresh rebuilds only a camera whose scene/rules changed (tracks and the open rollup carry over when only rules change); node health every heartbeat (`degraded` while a camera is down or running from cache, `down` on clean stop); SIGTERM → flush + final drain |
-| Transport | `vision/edge/publish.py` | HTTP (default) or MQTT QoS 1 to `mm/<site>/vision/<cam|node>/<kind>` |
+| Transport | `vision/edge/publish.py` | HTTP (default) or MQTT QoS 1 to `mm/<site>/vision/<camera_or_node>/<kind>` (node waits for the broker connection rather than queueing in memory) |
 | Evidence | `vision/edge/evidence.py`, `vision/edge/s3.py` | one still per alarm; bounded edge ring; optional MinIO upload via a stdlib SigV4 client (checked against AWS's worked example) |
 | Image | `Dockerfile.vision` | `python:3.11-slim` + the `vision` extra, non-root, no weights (mounted at `/models`), heartbeat healthcheck; ≈826 MB |
 | Compose | `docker-compose.yml` service `vision-edge`, profile `vision` | opt-in like `trackers`; state on the `vision_state` volume |
@@ -203,7 +203,10 @@ the box (`ffprobe` or VLC) before involving the node.
    `{"device_id": "edge-01", "asset_id": "edge-01", "source": "vision-edge"}`, then regenerate
    the broker files (`python -m minemonitor.devices.broker_config`) and `kill -HUP 1` the broker.
 
-**Node.** In `.env`: `MM_EDGE_SITE_ID`, `MM_EDGE_NODE_ID`, `MM_EDGE_CORE_URL`,
+**Node.** `MM_EDGE_CORE_URL` must be `https://…` when the core is on another host; the node
+refuses plain `http` except for localhost or the compose service name, because its device password
+rides every request (with Caddy's internal CA, mount the root certificate and set `SSL_CERT_FILE`).
+In `.env`: `MM_EDGE_SITE_ID`, `MM_EDGE_NODE_ID`, `MM_EDGE_CORE_URL`,
 `MM_EDGE_USERNAME`/`MM_EDGE_PASSWORD`, and `MM_EDGE_STREAMS={"<camera id>": "rtsp://…"}`.
 Start: `docker compose --profile vision up -d vision-edge` (on a separate edge box add
 `--no-deps`, so only the node runs there). Expect in `docker compose logs

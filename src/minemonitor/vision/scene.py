@@ -362,10 +362,23 @@ REPORT_COLUMNS = [
 ]
 
 
+# A text cell starting with one of these is evaluated as a formula by spreadsheet software
+# (CSV injection, CWE-1236). Camera and zone names are admin-entered free text.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\n")
+
+
+def _csv_cell(v: Any) -> Any:
+    if v is None:
+        return ""
+    if isinstance(v, str) and v.startswith(_FORMULA_PREFIXES):
+        return "'" + v
+    return v
+
+
 def report_to_csv(report: dict[str, Any]) -> str:
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=REPORT_COLUMNS, extrasaction="ignore")
     w.writeheader()
     for row in report["rows"]:
-        w.writerow({k: ("" if row.get(k) is None else row.get(k)) for k in REPORT_COLUMNS})
+        w.writerow({k: _csv_cell(row.get(k)) for k in REPORT_COLUMNS})
     return buf.getvalue()

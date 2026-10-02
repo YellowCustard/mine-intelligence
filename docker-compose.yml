@@ -182,7 +182,7 @@ services:
   # Before enabling: fetch the pinned weights into ./var/models, provision the node's device
   # account, give each camera a scene (PUT .../cameras/{id}/scene) and list its stream in
   # MM_EDGE_STREAMS. Runbook: docs/VISION_DEPLOYMENT.md §8. It may run on this box or on a
-  # separate box next to the cameras: there, set MM_EDGE_CORE_URL to the core's address and
+  # separate box next to the cameras: there, set MM_EDGE_CORE_URL to the core's https:// address and
   # start only the node with  docker compose --profile vision up -d --no-deps vision-edge
   vision-edge:
     build:
@@ -203,10 +203,17 @@ services:
       MM_EDGE_STREAMS: ${MM_EDGE_STREAMS:-}
       MM_EDGE_MODEL: ${MM_EDGE_MODEL:-yolox-nano}
       MM_EDGE_SAMPLE_FPS: ${MM_EDGE_SAMPLE_FPS:-5}
+      MM_EDGE_CONFIG_REFRESH_S: ${MM_EDGE_CONFIG_REFRESH_S:-300}
+      MM_EDGE_DRAIN_INTERVAL_S: ${MM_EDGE_DRAIN_INTERVAL_S:-5}
+      MM_EDGE_HEARTBEAT_S: ${MM_EDGE_HEARTBEAT_S:-60}
+      MM_EDGE_NO_SIGNAL_AFTER_S: ${MM_EDGE_NO_SIGNAL_AFTER_S:-15}
+      MM_EDGE_OBSERVATION_KEEP_HOURS: ${MM_EDGE_OBSERVATION_KEEP_HOURS:-72}
       MM_EDGE_FROZEN_DIFF: ${MM_EDGE_FROZEN_DIFF:-0.5}
       MM_EDGE_FROZEN_FRAMES: ${MM_EDGE_FROZEN_FRAMES:-25}
       MM_EDGE_TRANSPORT: ${MM_EDGE_TRANSPORT:-http}
       MM_EDGE_MQTT_HOST: ${MM_EDGE_MQTT_HOST:-mqtt}
+      MM_EDGE_MQTT_PORT: ${MM_EDGE_MQTT_PORT:-1883}
+      MM_EDGE_MQTT_PREFIX: ${MM_EDGE_MQTT_PREFIX:-mm}
       MM_EDGE_MQTT_USERNAME: ${MM_EDGE_MQTT_USERNAME:-}
       MM_EDGE_MQTT_PASSWORD: ${MM_EDGE_MQTT_PASSWORD:-}
       MM_EDGE_EVIDENCE: ${MM_EDGE_EVIDENCE:-edge}
@@ -216,6 +223,7 @@ services:
       MM_EDGE_S3_BUCKET: ${MM_EDGE_S3_BUCKET:-mine-evidence}
       MM_EDGE_S3_ACCESS_KEY: ${MM_EDGE_S3_ACCESS_KEY:-}
       MM_EDGE_S3_SECRET_KEY: ${MM_EDGE_S3_SECRET_KEY:-}
+      MM_EDGE_S3_REGION: ${MM_EDGE_S3_REGION:-us-east-1}
     volumes:
       # Outbox, config cache and the evidence ring: survive restarts and power cuts.
       - vision_state:/var/lib/mm-edge

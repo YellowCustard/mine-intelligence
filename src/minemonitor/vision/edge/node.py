@@ -37,9 +37,11 @@ import base64
 import hashlib
 import json
 import logging
+import secrets
 import signal
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -47,7 +49,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from minemonitor.contracts.vision import VisionHealthV1
@@ -101,6 +103,28 @@ class EdgeSettings(BaseSettings):
     s3_access_key: str = ""
     s3_secret_key: SecretStr = SecretStr("")
     s3_region: str = "us-east-1"
+
+    @field_validator("core_url")
+    @classmethod
+    def _core_url_https_off_box(cls, v: str) -> str:
+        """The node sends its device password (HTTP Basic) on every request: plain ``http`` is
+        accepted only on the same box — loopback or a single-label compose service name such as
+        ``api``. A core on another host must be ``https``."""
+        parts = urllib.parse.urlsplit(v)
+        host = (parts.hostname or "").lower()
+        if parts.scheme == "https" and host:
+            return v
+        same_box = (
+            host in ("localhost", "::1")
+            or host.startswith("127.")
+            or (host != "" and "." not in host and ":" not in host)
+        )
+        if parts.scheme == "http" and same_box:
+            return v
+        raise ValueError(
+            "must be https:// for a core on another host (the device password is sent with "
+            "every request); plain http is allowed only for localhost or a compose service name"
+        )
 
 
 class FrameSource(Protocol):
@@ -217,6 +241,9 @@ class EdgeNode:
         self._frames_since_health = 0
         self._health_window_start = self._clock()
         self.last_error: str | None = None
+        # Unique per process: a restart inside a rollup bucket must not reuse the id of the bucket
+        # flushed at shutdown, or the outbox and the core would drop the second half as a replay.
+        self._boot = secrets.token_hex(3)
         info = model.info()
         self._model_id = f"{info.id}@{info.version}"
 
@@ -285,14 +312,14 @@ class EdgeNode:
         epoch: int = 0,
     ) -> EdgeRuntime:
         rollup = carry.rollup if carry is not None else None
-        if rollup is None and epoch:
+        if rollup is None:
             cam = next(c for c in config["cameras"] if c["camera_id"] == cam_id)
             rollup = RollupAccumulator(
                 site_id=self.s.site_id,
                 node_id=self.s.node_id,
                 camera_id=cam_id,
                 zone_ids=[z["zone_id"] for z in cam.get("image_zones", [])],
-                epoch=f"e{epoch}",
+                epoch=f"{self._boot}e{epoch}",
             )
         return EdgeRuntime(
             site_id=self.s.site_id,
