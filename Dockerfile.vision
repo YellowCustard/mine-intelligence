@@ -1,0 +1,39 @@
+# Mine Monitor Vision edge node (vision V5 — Stage C pilot). CPU-first: YOLOX on ONNX Runtime.
+#
+# One image for the edge box next to the cameras (docs/VISION_DEPLOYMENT.md). It holds code and
+# the `vision` extra only — **no model weights** (mounted read-only at /models after a pinned,
+# SHA-256-verified fetch) and **no camera credentials** (environment only). Raw frames never
+# leave the container; it publishes thin vision.*.v1 records to the core.
+FROM python:3.11-slim
+
+COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /uvx /bin/
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PYTHONUNBUFFERED=1 \
+    MM_EDGE_STATE_DIR=/var/lib/mm-edge \
+    MM_EDGE_MODELS_DIR=/models
+
+WORKDIR /app
+
+# Dependencies first for layer caching: the project + `vision` extra, without the dev tools.
+# The uv download cache is a BuildKit cache mount, so it never lands in the image (~350 MB).
+COPY pyproject.toml uv.lock README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-install-project --extra vision
+COPY src ./src
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --extra vision
+
+# Run unprivileged. State (outbox, config cache, evidence ring) lives on a volume so a container
+# restart or an unclean power cut loses nothing.
+RUN useradd --system --uid 10001 --home-dir /var/lib/mm-edge mm-edge \
+    && mkdir -p /var/lib/mm-edge /models \
+    && chown mm-edge /var/lib/mm-edge
+USER mm-edge
+VOLUME ["/var/lib/mm-edge"]
+
+# Healthy while the processing loop keeps touching its heartbeat file.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD ["/app/.venv/bin/python", "-m", "minemonitor.vision.edge.cli", "healthcheck"]
+
+ENTRYPOINT ["/app/.venv/bin/python", "-m", "minemonitor.vision.edge.cli"]
+CMD ["run-node"]

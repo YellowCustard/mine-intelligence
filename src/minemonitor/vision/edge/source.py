@@ -9,7 +9,8 @@ observation carries the moment it depicts, not the moment it was processed.
 Each yielded :class:`FrameIn` carries the decoded BGR frame (which never leaves this process) and,
 when a :class:`QualityMonitor` is supplied, the camera state + quality metrics for health reporting.
 
-Live RTSP (reconnect/backoff, drop-old-not-recent under load) arrives with the Stage C pilot slice.
+Live cameras use :class:`minemonitor.vision.edge.rtsp.RtspSource` (reconnect/backoff,
+drop-old-not-recent under load); this file source is for recorded clips and benchmarks.
 """
 
 from __future__ import annotations

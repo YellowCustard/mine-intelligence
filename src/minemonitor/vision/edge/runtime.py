@@ -33,6 +33,7 @@ from minemonitor.contracts.vision import (
     VisionRuleVersionV1,
 )
 from minemonitor.vision.adapters.base import VisionModel
+from minemonitor.vision.edge.evidence import EvidenceStore
 from minemonitor.vision.edge.outbox import Outbox
 from minemonitor.vision.geometry import apply_homography, foot_point, zones_containing
 from minemonitor.vision.rollup import RollupAccumulator
@@ -86,6 +87,9 @@ class EdgeRuntime:
         heartbeat_s: int = 60,
         lab_mode: bool = False,
         tracker: Tracker | None = None,
+        evidence: EvidenceStore | None = None,
+        node_health: bool = True,
+        rollup: RollupAccumulator | None = None,
     ) -> None:
         cam = next((c for c in config.get("cameras", []) if c["camera_id"] == camera_id), None)
         if cam is None:
@@ -97,6 +101,9 @@ class EdgeRuntime:
         self.info = model.info()
         self.outbox = outbox
         self.lab_mode = lab_mode
+        self.evidence = evidence
+        # A multi-camera node reports its own health once; a single-camera runtime reports it here.
+        self.node_health = node_health
         self.heartbeat = timedelta(seconds=heartbeat_s)
         self.image_zones: list[dict[str, Any]] = cam.get("image_zones", [])
         homography = cam.get("homography")
@@ -113,7 +120,7 @@ class EdgeRuntime:
             zones=zones,
             zone_versions={z["zone_id"]: z.get("zone_version", "") for z in self.image_zones},
         )
-        self.rollup = RollupAccumulator(
+        self.rollup = rollup or RollupAccumulator(
             site_id=site_id,
             node_id=node_id,
             camera_id=camera_id,
@@ -138,7 +145,10 @@ class EdgeRuntime:
         self.outbox.store_observation(obs)
         if self.lab_mode:
             self.outbox.put(obs)
-        events = self.engine.step(obs, camera_state=frame.camera_state)
+        events = [
+            self._with_evidence(ev, frame)
+            for ev in self.engine.step(obs, camera_state=frame.camera_state)
+        ]
         for ev in events:
             self.outbox.put(ev)
         self.rollup.feed(obs)
@@ -151,12 +161,44 @@ class EdgeRuntime:
         self.stats.events += len(events)
         return events
 
+    def idle(self, now: datetime, state: str = "no_signal") -> None:
+        """No frame is arriving (stream down): report the camera state and close due buckets.
+
+        Without this a dead stream would simply go quiet; the core would notice only after
+        ``MM_VISION_CAMERA_STALE_S``. Reporting ``no_signal`` from the edge is faster and says
+        *why*. Rollups keep closing on time, with coverage reflecting the blind period.
+        """
+        self._camera_health(now, state, {}, last_frame_at=None)
+        for r in self.rollup.flush(now=now):
+            self.outbox.put(r)
+            self.stats.rollups += 1
+        if self.node_health:
+            self._node_health(now)
+
+    def note_dropped(self, total: int) -> None:
+        """Frames the source discarded because the node could not keep up (shed load)."""
+        self._dropped = max(self._dropped, total)
+
     def close(self, now: datetime) -> None:
         """Flush the open rollup bucket and a final heartbeat (clean shutdown)."""
         for r in self.rollup.flush(now=now, force=True):
             self.outbox.put(r)
             self.stats.rollups += 1
-        self._node_health(now, force=True)
+        if self.node_health:
+            self._node_health(now, force=True)
+
+    def _with_evidence(
+        self, ev: VisionOperationalEventV1, frame: FrameIn
+    ) -> VisionOperationalEventV1:
+        """Keep a still of the confirming frame and point the event at it (never the bytes)."""
+        if self.evidence is None:
+            return ev
+        ref = self.evidence.save(
+            camera_id=self.camera_id, event_id=ev.event_id, ts=frame.ts, image=frame.image
+        )
+        if ref is None:
+            return ev
+        return ev.model_copy(update={"evidence": ev.evidence.model_copy(update={"clip_ref": ref})})
 
     # -- builders ----------------------------------------------------------------------------
 
@@ -196,35 +238,47 @@ class EdgeRuntime:
         )
 
     def _health(self, frame: FrameIn) -> None:
-        state = frame.camera_state
-        if state is not None and (
-            state != self._last_cam_state
-            or self._last_cam_health is None
-            or frame.ts - self._last_cam_health >= self.heartbeat
+        if frame.camera_state is not None:
+            self._camera_health(frame.ts, frame.camera_state, frame.quality, last_frame_at=frame.ts)
+        if self.node_health:
+            self._node_health(frame.ts)
+
+    def _camera_health(
+        self,
+        now: datetime,
+        state: str,
+        q: dict[str, Any],
+        *,
+        last_frame_at: datetime | None,
+    ) -> None:
+        """Emit camera health on a state change, else once per heartbeat."""
+        if (
+            state == self._last_cam_state
+            and self._last_cam_health is not None
+            and now - self._last_cam_health < self.heartbeat
         ):
-            q = frame.quality
-            stamp = frame.ts.strftime("%Y%m%dT%H%M%S%fZ")
-            self.outbox.put(
-                VisionCameraHealthV1.model_validate(
-                    {
-                        "schema": "vision.camera_health.v1",
-                        "health_id": f"vch-{self.camera_id}-{stamp}",
-                        "site_id": self.site_id,
-                        "node_id": self.node_id,
-                        "camera_id": self.camera_id,
-                        "ts": frame.ts,
-                        "state": state,
-                        "blur_score": q.get("blur_score"),
-                        "luma_mean": q.get("luma_mean"),
-                        "frozen_frames": q.get("frozen_frames"),
-                        "last_frame_at": frame.ts,
-                        "advisory": True,
-                    }
-                )
+            return
+        stamp = now.strftime("%Y%m%dT%H%M%S%fZ")
+        self.outbox.put(
+            VisionCameraHealthV1.model_validate(
+                {
+                    "schema": "vision.camera_health.v1",
+                    "health_id": f"vch-{self.camera_id}-{stamp}",
+                    "site_id": self.site_id,
+                    "node_id": self.node_id,
+                    "camera_id": self.camera_id,
+                    "ts": now,
+                    "state": state,
+                    "blur_score": q.get("blur_score"),
+                    "luma_mean": q.get("luma_mean"),
+                    "frozen_frames": q.get("frozen_frames"),
+                    "last_frame_at": last_frame_at,
+                    "advisory": True,
+                }
             )
-            self._last_cam_health = frame.ts
-            self._last_cam_state = state
-        self._node_health(frame.ts)
+        )
+        self._last_cam_health = now
+        self._last_cam_state = state
 
     def _node_health(self, now: datetime, *, force: bool = False) -> None:
         if not force and self._last_node_health and now - self._last_node_health < self.heartbeat:
