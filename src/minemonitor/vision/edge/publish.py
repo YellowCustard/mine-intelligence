@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -139,6 +140,8 @@ class MqttPublisher:
         )
         self._client.username_pw_set(username, password)
         self._client.reconnect_delay_set(min_delay=1, max_delay=60)
+        # The outbox is the durable queue. Bound paho's own queue so an outage cannot grow memory.
+        self._client.max_queued_messages_set(1000)
         self._host = host
         self._port = port
         self._started = False
@@ -152,9 +155,15 @@ class MqttPublisher:
             raise TransientPublishError(f"broker unreachable: {exc}") from exc
         self._client.loop_start()
         self._started = True
+        deadline = time.monotonic() + self.timeout_s
+        while not self._client.is_connected() and time.monotonic() < deadline:
+            time.sleep(0.05)  # first CONNACK; later reconnects happen in paho's loop thread
 
     def __call__(self, payloads: list[dict[str, Any]]) -> dict[str, Any]:
         self._ensure()
+        if not self._client.is_connected():
+            # Publishing now would only pile copies into paho's queue; the outbox keeps the batch.
+            raise TransientPublishError("broker not connected")
         infos = []
         for i, p in enumerate(payloads):
             try:
