@@ -310,3 +310,24 @@ def test_state_snapshot_carries_alarm_provenance(
     snap = make_client(db_session, VIEWER).get(f"/api/v1/sites/{SITE}/state").json()
     (ev,) = [e for e in snap["events"] if e["source"].startswith("vision:")]
     assert ev["provenance"] == "inferred"
+
+
+def test_csv_export_neutralises_formula_injection() -> None:
+    """Regression (review of #38): admin-entered names must not run as spreadsheet formulas."""
+    row = {
+        "camera_id": "c1",
+        "camera_name": '=HYPERLINK("http://x")',
+        "zone_id": "z1",
+        "zone_name": "+cmd",
+        "people_peak": 3,
+        "people_mean": -0.5,
+        "entries": 0,
+        "exits": None,
+        "longest_dwell_s": 1.5,
+        "restricted_intrusions": 0,
+        "coverage_pct": 99.0,
+    }
+    text = scene.report_to_csv({"rows": [row, {**row, "camera_name": "@x", "zone_name": "-y"}]})
+    lines = text.splitlines()
+    assert lines[1].startswith('c1,"\'=HYPERLINK(""http://x"")",z1,\'+cmd,3,-0.5,0,,')
+    assert ",'@x,z1,'-y," in lines[2]

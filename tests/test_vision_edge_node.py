@@ -33,7 +33,12 @@ from minemonitor.contracts.vision import Evidence
 from minemonitor.devices import service as devices
 from minemonitor.devices.acl import VISION_EDGE_SOURCE, render_mosquitto_acl
 from minemonitor.events.repository import list_events
-from minemonitor.storage.models import Camera, VisionCameraHealth, VisionNodeHealth
+from minemonitor.storage.models import (
+    Camera,
+    VisionCameraHealth,
+    VisionNodeHealth,
+    VisionZoneRollup,
+)
 from minemonitor.vision import service
 from minemonitor.vision.edge.cli import main as cli_main
 from minemonitor.vision.edge.evidence import EvidenceStore
@@ -326,12 +331,60 @@ def test_config_changes_rebuild_only_what_changed(
     scene_changed["cameras"][0]["image_zones"] = scene_changed["cameras"][0]["image_zones"][:1]
     assert node.apply_config(scene_changed)["rebuilt"] == [cam.id]
     rt3 = node.cameras[cam.id].runtime
-    assert rt3.tracker is not rt2.tracker and rt3.rollup.epoch == "e1"
+    assert rt3.tracker is not rt2.tracker and rt3.rollup.epoch == f"{node._boot}e1"
+    assert rt.rollup.epoch == f"{node._boot}e0"  # every accumulator carries the process token
 
     # Stream removed from the node's settings → camera stopped cleanly.
     node.s.streams = {}
     assert node.apply_config(scene_changed)["stopped"] == [cam.id]
     assert node.cameras == {}
+
+
+def test_restart_inside_a_bucket_keeps_both_halves(
+    db_session: Session, cam: Camera, tmp_path: Path
+) -> None:
+    """Regression (review of #38): a restart mid-bucket used to reuse the flushed bucket's
+    rollup id, so the outbox and the core dropped everything counted after the restart."""
+    clock = Clock()
+    fs = sim_frames("intruder")
+    half = len(fs) // 2
+    first = make_node(db_session, tmp_path, {cam.id: FakeSource(fs[:half])}, clock)
+    first.start()
+    run(first, clock, fs[half - 1].ts)
+    first.shutdown()  # flushes the open bucket
+    second = make_node(db_session, tmp_path, {cam.id: FakeSource(fs[half:])}, clock)
+    second.start()  # same state dir, same outbox: a new process
+    run(second, clock, fs[-1].ts)
+    second.shutdown()
+    assert first._boot != second._boot
+    rows = (
+        db_session.execute(
+            select(VisionZoneRollup).where(
+                VisionZoneRollup.camera_id == cam.id, VisionZoneRollup.zone_id.is_(None)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 2 and len({r.rollup_id for r in rows}) == 2
+    assert len({r.ts for r in rows}) == 1  # both halves of the same 5-min bucket
+    span = (fs[-1].ts - fs[0].ts).total_seconds()
+    assert sum(r.observed_s for r in rows) == pytest.approx(span, abs=1.0)
+
+
+def test_core_url_must_be_https_off_box() -> None:
+    base = {"site_id": SITE, "username": "edge-01", "password": "pw"}
+    for ok in (
+        "http://api:8000",
+        "http://localhost:8000",
+        "http://127.0.0.1:18000",
+        "https://core.mine.local",
+        "https://10.20.0.2:8443",
+    ):
+        assert EdgeSettings(**base, core_url=ok).core_url == ok  # type: ignore[arg-type]
+    for bad in ("http://10.20.0.2:8000", "http://core.mine.local", "ftp://api", "api:8000"):
+        with pytest.raises(ValidationError, match="https"):
+            EdgeSettings(**base, core_url=bad)  # type: ignore[arg-type]
 
 
 def test_camera_fingerprint_ignores_generated_at_and_other_cameras() -> None:
@@ -650,6 +703,36 @@ def test_vision_edge_device_acl_and_never_authorises_positions(db_session: Sessi
     assert f"mm/{SITE}/edge-01/position" not in acl
     assert devices.authorized_asset(db_session, SITE, "HT-102") is True
     assert devices.authorized_asset(db_session, SITE, "edge-01") is False
+
+
+class _OfflineClient:
+    """Stands in for a paho client whose broker is down after the first connection."""
+
+    def __init__(self) -> None:
+        self.published: list[str] = []
+
+    def is_connected(self) -> bool:
+        return False
+
+    def publish(self, topic: str, payload: str, qos: int = 0) -> Any:
+        self.published.append(topic)
+        raise AssertionError("must not queue while disconnected")
+
+
+def test_mqtt_publisher_does_not_queue_while_the_broker_is_down() -> None:
+    """Regression (review of #38): during an outage every drain used to add another batch to
+    paho's unbounded in-memory queue. Now the batch stays in the durable outbox only."""
+    from minemonitor.vision.edge.publish import MqttPublisher, TransientPublishError
+
+    pub = MqttPublisher("127.0.0.1", 1, "edge-01", "pw", client_id="t", timeout_s=0.1)
+    client = _OfflineClient()
+    pub._client = client  # type: ignore[assignment]
+    pub._started = True  # connected once; paho is now reconnecting in the background
+    record = {"schema": "vision.health.v1", "site_id": SITE, "node_id": "edge-01"}
+    for _ in range(3):
+        with pytest.raises(TransientPublishError, match="not connected"):
+            pub([record])
+    assert client.published == []
 
 
 def test_vision_topic_names_camera_or_node() -> None:

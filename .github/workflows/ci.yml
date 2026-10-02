@@ -109,8 +109,14 @@ jobs:
         run: |
           docker run --rm --entrypoint /app/.venv/bin/python minemonitor-vision-edge:ci -c \
             "import cv2, onnxruntime, numpy; import minemonitor.vision.edge.node, minemonitor.vision.edge.rtsp; print('ok', cv2.__version__, onnxruntime.__version__)"
-          # No MM_EDGE_* settings: must fail fast with a validation error, not run blind.
-          ! docker run --rm minemonitor-vision-edge:ci run-node
+          # No MM_EDGE_* settings: must fail fast with *the* validation error, not run blind and
+          # not crash for some other reason.
+          if out=$(docker run --rm minemonitor-vision-edge:ci run-node 2>&1); then
+            echo "run-node started without configuration"; exit 1
+          fi
+          echo "$out"
+          grep -q "edge node misconfigured" <<<"$out"
+          grep -q "MM_EDGE_SITE_ID: Field required" <<<"$out"
 
   # Browser end-to-end: load the real dashboard in Chromium and acknowledge an alarm.
   dashboard:
