@@ -290,6 +290,13 @@ svg{display:block;width:100%;height:auto}
       <th style="width:96px">Capacity</th><th style="width:96px">Status</th></tr></thead>
       <tbody id="occtab"></tbody></table></div>
   </section>
+
+  <section class="panel">
+    <header><h2>Vision</h2><span class="meta" id="vismeta">people per zone · observed · 5-min rollups</span></header>
+    <div class="body"><table><thead><tr><th>Camera</th><th style="width:110px">Condition</th>
+      <th style="width:88px">In view</th><th>People per zone</th><th style="width:72px">Alarms</th></tr></thead>
+      <tbody id="vistab"></tbody></table></div>
+  </section>
 </div>
 
 <!-- ══════════════════ ANALYTICS ══════════════════ -->
@@ -658,6 +665,30 @@ async function renderOccupancy(){
       <td><span class="tag ${z.over?(z.severity==='critical'?'t-crit':'t-warn'):'t-ok'}">${z.over?'Over':'OK'}</span></td></tr>`).join('')
     : `<tr><td colspan="4" class="sub2" style="text-align:center;padding:14px">No sector capacities configured.</td></tr>`;
 }
+// Vision scene: what each configured camera sees (latest 5-min rollup from the edge node), its
+// condition (a dark/obstructed camera is distinguished from an empty zone) and open vision alarms.
+// Counts only — never identities. Advisory, observed.
+const VISCOND = {ok:['OK','t-ok'], dark:['Dark','t-warn'], obstructed:['Obstructed','t-crit'],
+  defocused:['Defocused','t-warn'], no_signal:['No signal','t-crit'], unknown:['Unknown','']};
+async function renderVision(){
+  const tab=document.getElementById('vistab'); if(!tab) return;
+  let cams=[];
+  try{ const r=await fetch(`/sites/${SITE}/vision/scene`); if(r.ok) cams=(await r.json()).cameras||[]; }catch(e){}
+  const meta=document.getElementById('vismeta');
+  if(meta) meta.textContent = cams.length
+    ? `${cams.length} camera${cams.length>1?'s':''} · ${cams.filter(c=>c.condition!=='ok').length} not OK · observed · 5-min rollups`
+    : 'no cameras configured for vision';
+  tab.innerHTML = cams.length ? cams.map(c=>{
+    const [lbl,cls]=VISCOND[c.condition]||[E(c.condition),''];
+    const zones=(c.zones||[]).map(z=>`${E(z.name)} <b class="m">${z.people_peak??'—'}</b>`).join(' · ');
+    const view=c.people_in_view_peak??'—';
+    return `<tr><td><b>${E(c.name)}</b>${c.calibration_status==='calibrated'?' <span class="sub2">calibrated</span>':''}</td>
+      <td><span class="tag ${cls}">${lbl}</span></td>
+      <td class="m">${view}${c.stale?' <span class="sub2">stale</span>':''}</td>
+      <td class="sub2">${zones||'—'}</td>
+      <td class="m">${c.open_alarms||0}</td></tr>`;}).join('')
+    : `<tr><td colspan="5" class="sub2" style="text-align:center;padding:14px">No cameras configured for vision yet.</td></tr>`;
+}
 function selectAsset(id){
   if(id!==SELECTED) clearHistory();  // don't show one machine's track under another
   SELECTED=id; drawMap('map'); renderTables(); renderMachineDetail(id);
@@ -802,7 +833,7 @@ function go(v){
   if(v==='system') loadSystem();
 }
 function paint(){
-  drawMap('map'); renderTables(); cycleBar(); renderOccupancy();
+  drawMap('map'); renderTables(); cycleBar(); renderOccupancy(); renderVision();
 }
 
 /* ───────────────────────── live data (M5) ───────────────────────── */
@@ -890,7 +921,7 @@ function applyState(snap, haveZones){
 
   // alarms (dashboard shape)
   ALARMS = RAW.events.map(e=>({t:fmtTime(e.ts), a:e.asset_id, ty:humanType(e.type), d:e.summary,
-    s:SEVMAP[e.severity]||'info', src:e.source, event_id:e.event_id, state:e.state}));
+    s:SEVMAP[e.severity]||'info', src:e.provenance?`${e.source} · ${e.provenance}`:e.source, event_id:e.event_id, state:e.state}));
 
   CYCLES = RAW.cycles;
 
@@ -1476,7 +1507,7 @@ async function boot(){
   // The command centre's analytics are not part of the SSE snapshot; poll lightly.
   // Pause the analytics poll while the tab is backgrounded — no point doing
   // work nobody is watching; refresh immediately when it returns to the fore.
-  setInterval(()=>{ if(!document.hidden) loadCommandCentre(); }, 15000);
+  setInterval(()=>{ if(!document.hidden){ loadCommandCentre(); renderVision(); } }, 15000);
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) loadCommandCentre(); });
   startStream();
   go('ops');

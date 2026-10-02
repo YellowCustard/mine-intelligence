@@ -93,6 +93,75 @@ def _seed(db_url: str) -> None:
             state="open",
         )
     )
+    # First-party vision: a configured camera with a fresh rollup, a dark-camera assessment and
+    # a vision alarm whose provenance must be rendered beside its source.
+    from datetime import timedelta
+
+    from minemonitor.storage.models import Camera, VisionCameraHealth, VisionZoneRollup
+
+    s.add(
+        Camera(
+            id="cam-smoke",
+            site_id=_SITE,
+            name="CAM-SMOKE-01",
+            image_zones=[
+                {
+                    "zone_id": "face",
+                    "zone_version": "v1",
+                    "polygon": [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+                }
+            ],
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    bucket = now.replace(second=0, microsecond=0) - timedelta(minutes=now.minute % 5)
+    for zone_id, peak in ((None, 3), ("face", 2)):
+        s.add(
+            VisionZoneRollup(
+                rollup_id=f"vr-smoke-{zone_id or 'view'}",
+                site_id=_SITE,
+                node_id="edge-smoke",
+                camera_id="cam-smoke",
+                zone_id=zone_id,
+                ts=bucket,
+                received_at=now,
+                bucket_s=300,
+                object_class="person",
+                count_max=peak,
+                count_mean=1.0,
+                entries=peak,
+                exits=0,
+                dwell_s_max=30.0,
+                observed_s=120.0,
+            )
+        )
+    s.add(
+        VisionCameraHealth(
+            health_id="vch-smoke",
+            site_id=_SITE,
+            node_id="edge-smoke",
+            camera_id="cam-smoke",
+            ts=now,
+            received_at=now,
+            state="dark",
+        )
+    )
+    s.add(
+        Event(
+            event_id="evt-vision-smoke",
+            site_id=_SITE,
+            ts=now,
+            type="zone_breach",
+            severity="critical",
+            zone_id="face",
+            source="vision:cam-smoke",
+            summary="Person in restricted zone Pit Face (CAM-SMOKE-01)",
+            detail={"provenance": "inferred", "confidence": 0.8},
+            advisory=True,
+            state="open",
+        )
+    )
     create_user(s, username=_ADMIN[0], password=_ADMIN[1], role="admin")
     s.commit()
     s.close()
@@ -165,6 +234,8 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
             http_credentials={"username": _ADMIN[0], "password": _ADMIN[1]}
         )
         page = context.new_page()
+        page_errors: list[str] = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
         page.goto(live_server + "/", wait_until="networkidle")
 
         # The Operations command centre is the default view: headline KPIs render,
@@ -185,6 +256,13 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
         expect(page.locator("#ztab")).to_contain_text("Pit Face", timeout=10_000)
         expect(page.locator("#ftab")).to_contain_text("HT-102", timeout=10_000)
         expect(page.locator("#atab")).to_contain_text("magazine", timeout=10_000)
+
+        # Vision panel: the camera, its condition (dark ≠ empty), people per zone; and the vision
+        # alarm carries its provenance beside the source — a camera inference, not a measurement.
+        expect(page.locator("#vistab")).to_contain_text("CAM-SMOKE-01", timeout=10_000)
+        expect(page.locator("#vistab")).to_contain_text("Dark", timeout=10_000)
+        expect(page.locator("#vistab")).to_contain_text("Pit Face", timeout=10_000)
+        expect(page.locator("#atab")).to_contain_text("vision:cam-smoke · inferred", timeout=10_000)
 
         # Machine drill-down: selecting the asset opens its detail without leaving
         # the operational view (identity + investigation sections render).
@@ -240,9 +318,12 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
         # Acknowledge the alarm in the UI; the button then clears on the next poll.
         # Use a retrying locator assertion (not wait_for_function) so the check does
         # not rely on page-side eval, which the production CSP correctly forbids.
-        page.locator("#atab .ackbtn").first.click()
-        expect(page.locator("#atab .ackbtn")).to_have_count(0, timeout=15_000)
+        # Target the GNSS alarm's row explicitly — the seed also holds an open vision alarm.
+        gnss_row = page.locator("#atab tr", has_text="magazine")
+        gnss_row.locator(".ackbtn").click()
+        expect(gnss_row.locator(".ackbtn")).to_have_count(0, timeout=15_000)
 
+        assert page_errors == [], page_errors  # no JS errors anywhere in the walk-through
         browser.close()
 
     # The acknowledgement reached the API (authenticated user, not the payload).

@@ -3,6 +3,11 @@
 The broker is the authority that stops a device publishing another asset's telemetry:
 each device authenticates with its ``device_id`` as the MQTT username, and this ACL
 restricts that username to writing only its own ``mm/<site>/<asset>/position`` topic.
+
+A vision edge node is a device too (``source = "vision-edge"``, its ``asset_id`` is the node id).
+It writes ``mm/<site>/vision/#`` for its own site only, and never a position topic; the ingestor
+additionally rejects any record whose topic and payload disagree.
+
 Regenerate and reload the broker whenever devices change:
 
     docker compose exec api uv run python -m minemonitor.devices.acl > mosquitto/acl
@@ -19,6 +24,8 @@ from sqlalchemy.orm import Session
 from minemonitor.config import get_settings
 from minemonitor.storage.db import get_session_factory
 from minemonitor.storage.models import Device
+
+VISION_EDGE_SOURCE = "vision-edge"
 
 
 def render_mosquitto_acl(
@@ -37,11 +44,12 @@ def render_mosquitto_acl(
         select(Device).where(Device.enabled.is_(True)).order_by(Device.device_id)
     ).scalars()
     for d in devices:
-        lines += [
-            f"user {d.device_id}",
-            f"topic write {prefix}/{d.site_id}/{d.asset_id}/position",
-            "",
-        ]
+        topic = (
+            f"{prefix}/{d.site_id}/vision/#"
+            if d.source == VISION_EDGE_SOURCE
+            else f"{prefix}/{d.site_id}/{d.asset_id}/position"
+        )
+        lines += [f"user {d.device_id}", f"topic write {topic}", ""]
     return "\n".join(lines)
 
 

@@ -190,7 +190,9 @@
             "string",
             "null"
           ],
-          "description": "Reference to a clip retained on the edge — never inline video."
+          "pattern": "^(edge|s3|nvr)://[^\\s]+$",
+          "maxLength": 512,
+          "description": "Reference to a still/clip retained on the edge (edge://), in object storage (s3://) or on an NVR (nvr://) — never inline video."
         }
       }
     }

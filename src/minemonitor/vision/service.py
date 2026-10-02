@@ -25,7 +25,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from minemonitor.contracts import EventV1
@@ -786,6 +786,30 @@ def _has_open_camera_offline(session: Session, site_id: str, camera_id: str) -> 
     return session.execute(stmt).first() is not None
 
 
+def _streamless() -> Any:
+    """A health row saying *no frames are arriving*: ``no_signal`` with no ``last_frame_at``.
+
+    The edge also reports ``no_signal`` for a **frozen picture** (identical frames), but then it
+    carries the frame's timestamp. A frozen picture can be a quiet static scene under heavy
+    compression, so it stays a visible camera condition and never pages anyone as offline.
+    """
+    return (VisionCameraHealth.state == "no_signal") & VisionCameraHealth.last_frame_at.is_(None)
+
+
+def _no_signal_since(session: Session, scope: tuple[Any, ...]) -> datetime | None:
+    """Start of the current unbroken run of stream-less health in a camera's history."""
+    last_good = (
+        session.execute(select(func.max(VisionCameraHealth.ts)).where(*scope, ~_streamless()))
+        .scalars()
+        .first()
+    )
+    q = select(func.min(VisionCameraHealth.ts)).where(*scope, _streamless())
+    if last_good is not None:
+        q = q.where(VisionCameraHealth.ts > last_good)
+    first = session.execute(q).scalars().first()
+    return _aware(first) if first is not None else None
+
+
 def detect_camera_offline(
     session: Session, site_id: str, *, stale_s: int, now: datetime | None = None
 ) -> list[EventV1]:
@@ -803,24 +827,36 @@ def detect_camera_offline(
     )
     events: list[EventV1] = []
     for cam in cams:
-        last = (
-            session.execute(
-                select(VisionCameraHealth.ts)
-                .where(
-                    VisionCameraHealth.site_id == site_id,
-                    VisionCameraHealth.camera_id == cam.id,
-                )
-                .order_by(VisionCameraHealth.ts.desc())
-                .limit(1)
-            )
-            .scalars()
-            .first()
+        scope = (
+            VisionCameraHealth.site_id == site_id,
+            VisionCameraHealth.camera_id == cam.id,
         )
-        if last is None or _aware(last) >= cutoff:
+        latest = session.execute(
+            select(
+                VisionCameraHealth.ts,
+                VisionCameraHealth.state,
+                VisionCameraHealth.last_frame_at,
+            )
+            .where(*scope)
+            .order_by(VisionCameraHealth.ts.desc())
+            .limit(1)
+        ).first()
+        if latest is None:
             continue
+        last = _aware(latest.ts)
+        reason = "silent"
+        if last >= cutoff:
+            # Health is fresh — but a node reporting that no frames arrive is just as blind as a
+            # silent one. Offline once the stream has been down for the whole staleness window.
+            if latest.state != "no_signal" or latest.last_frame_at is not None:
+                continue
+            down_since = _no_signal_since(session, scope)
+            if down_since is None or down_since >= cutoff:
+                continue
+            last, reason = down_since, "no_signal"
         if _has_open_camera_offline(session, site_id, cam.id):
             continue
-        silent_s = int((now - _aware(last)).total_seconds())
+        silent_s = int((now - last).total_seconds())
         ev = EventV1(
             schema="event.v1",
             event_id=new_event_id(),
@@ -831,10 +867,15 @@ def detect_camera_offline(
             asset_id=None,
             zone_id=None,
             source=f"{SOURCE_PREFIX}:{cam.id}",
-            summary=f"Camera {cam.name} silent for {silent_s}s — no vision coverage",
+            summary=(
+                f"Camera {cam.name} silent for {silent_s}s — no vision coverage"
+                if reason == "silent"
+                else f"Camera {cam.name} has had no signal for {silent_s}s — no vision coverage"
+            ),
             detail={
                 "camera_id": cam.id,
-                "last_health_at": _aware(last).isoformat(),
+                "reason": reason,
+                "last_health_at": last.isoformat(),
                 "silent_s": silent_s,
                 "provenance": "inferred",
             },
