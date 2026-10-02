@@ -346,7 +346,27 @@ either to `POST /api/v1/ingest/vision` (one record or a batch of up to 500) or o
   provenance label in `detail`. `GET .../vision/events` (the evidenced conclusions),
   `.../vision/rollups` (people counts per zone) and `.../vision/health` (latest per node/camera).
 - **Missed lane:** a commissioned camera whose health goes silent for `MM_VISION_CAMERA_STALE_S`
-  (default 300 s) raises one `camera_offline` alarm per camera.
+  (default 300 s) — or whose node reports that no frames arrive for that long — raises one
+  `camera_offline` alarm per camera. A frozen picture is shown as a condition, not alarmed.
+- **Running the edge node:** `docker compose --profile vision up -d vision-edge` with the
+  `MM_EDGE_*` settings in `.env` (camera stream URLs live only there). It is healthy while its
+  heartbeat is fresh; `GET .../vision/health` shows node status (`degraded` while a camera is down
+  or it runs from its cached config, `down` after a clean stop). Commissioning steps and the
+  on-site acceptance walk-through: `docs/VISION_DEPLOYMENT.md` §8.
+- **Scene setup (per camera, admin, audited):** `PUT /api/v1/sites/<site>/cameras/<cam>/scene`
+  with `image_zones` (up to 16 normalised polygons in image coordinates, each mapped to an
+  existing `zone_id` + `zone_version`) and, optionally, a `homography`. Supplying a homography
+  marks the camera `calibrated`; `"homography": null` clears it. Without one, nothing about
+  distance is claimed. A bad scene is rejected whole (`422`); the node picks up the change on its
+  next config pull.
+- **Live scene:** `GET .../vision/scene` — per camera: condition (ok/dark/defocused/obstructed/
+  no_signal), people in view, people per zone, open alarms, and `stale` when the latest rollup is
+  older than two buckets. The Fleet view's **Vision** panel shows the same.
+- **Shift report:** `GET .../vision/report` (`?shift_id=`, `?at=`, or `?since=&until=`; default
+  the current shift) and `.../vision/report.csv`. Per camera × zone: peak and time-weighted mean
+  people, entries, exits, longest dwell, restricted intrusions, and `coverage_pct`. These are
+  observed numbers only, with no targets. Low coverage means the camera could not see for that
+  part of the shift, so treat zero people under low coverage as "unknown", not "empty".
 
 ---
 

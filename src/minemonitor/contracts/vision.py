@@ -190,7 +190,8 @@ class Evidence(_Strict):
     track_ids: list[str] = Field(default_factory=list)
     frame_ids: list[str] = Field(default_factory=list)
     signals: dict[str, Any] = Field(default_factory=dict)
-    clip_ref: str | None = None
+    # A pointer, never bytes: the scheme is allow-listed (edge ring buffer, object store, NVR).
+    clip_ref: str | None = Field(default=None, max_length=512, pattern=r"^(edge|s3|nvr)://\S+$")
 
     @model_validator(mode="after")
     def _window_ordered(self) -> Evidence:

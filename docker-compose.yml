@@ -177,6 +177,51 @@ services:
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.adapters.simulator"]
 
+  # First-party vision edge node (vision V5 — Stage C pilot). Opt-in, like the trackers:
+  #   docker compose --profile vision up -d
+  # Before enabling: fetch the pinned weights into ./var/models, provision the node's device
+  # account, give each camera a scene (PUT .../cameras/{id}/scene) and list its stream in
+  # MM_EDGE_STREAMS. Runbook: docs/VISION_DEPLOYMENT.md §8. It may run on this box or on a
+  # separate box next to the cameras: there, set MM_EDGE_CORE_URL to the core's address and
+  # start only the node with  docker compose --profile vision up -d --no-deps vision-edge
+  vision-edge:
+    build:
+      context: .
+      dockerfile: Dockerfile.vision
+    profiles: ["vision"]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
+      MM_EDGE_SITE_ID: ${MM_EDGE_SITE_ID:-kn-zw-01}
+      MM_EDGE_NODE_ID: ${MM_EDGE_NODE_ID:-edge-01}
+      MM_EDGE_CORE_URL: ${MM_EDGE_CORE_URL:-http://api:8000}
+      MM_EDGE_USERNAME: ${MM_EDGE_USERNAME:-}
+      MM_EDGE_PASSWORD: ${MM_EDGE_PASSWORD:-}
+      MM_EDGE_STREAMS: ${MM_EDGE_STREAMS:-}
+      MM_EDGE_MODEL: ${MM_EDGE_MODEL:-yolox-nano}
+      MM_EDGE_SAMPLE_FPS: ${MM_EDGE_SAMPLE_FPS:-5}
+      MM_EDGE_FROZEN_DIFF: ${MM_EDGE_FROZEN_DIFF:-0.5}
+      MM_EDGE_FROZEN_FRAMES: ${MM_EDGE_FROZEN_FRAMES:-25}
+      MM_EDGE_TRANSPORT: ${MM_EDGE_TRANSPORT:-http}
+      MM_EDGE_MQTT_HOST: ${MM_EDGE_MQTT_HOST:-mqtt}
+      MM_EDGE_MQTT_USERNAME: ${MM_EDGE_MQTT_USERNAME:-}
+      MM_EDGE_MQTT_PASSWORD: ${MM_EDGE_MQTT_PASSWORD:-}
+      MM_EDGE_EVIDENCE: ${MM_EDGE_EVIDENCE:-edge}
+      MM_EDGE_EVIDENCE_MAX_ITEMS: ${MM_EDGE_EVIDENCE_MAX_ITEMS:-500}
+      MM_EDGE_EVIDENCE_MAX_AGE_DAYS: ${MM_EDGE_EVIDENCE_MAX_AGE_DAYS:-7}
+      MM_EDGE_S3_ENDPOINT: ${MM_EDGE_S3_ENDPOINT:-http://minio:9000}
+      MM_EDGE_S3_BUCKET: ${MM_EDGE_S3_BUCKET:-mine-evidence}
+      MM_EDGE_S3_ACCESS_KEY: ${MM_EDGE_S3_ACCESS_KEY:-}
+      MM_EDGE_S3_SECRET_KEY: ${MM_EDGE_S3_SECRET_KEY:-}
+    volumes:
+      # Outbox, config cache and the evidence ring: survive restarts and power cuts.
+      - vision_state:/var/lib/mm-edge
+      # Weights are fetched (pinned SHA-256), never baked into the image or committed.
+      - ./var/models:/models:ro
+
   # TLS reverse proxy. Enable with:  docker compose --profile tls up -d
   # Terminates HTTPS in front of the API so Basic credentials ride TLS, giving a safe
   # public/LAN URL instead of an SSH tunnel. Defaults to Caddy's internal CA for an
@@ -238,3 +283,4 @@ volumes:
   minio_data:
   caddy_data:
   caddy_config:
+  vision_state:

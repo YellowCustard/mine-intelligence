@@ -192,3 +192,114 @@ def test_real_model_end_to_end_one_alarm(db_session: Session, tmp_path: Path) ->
     alarms = list_events(db_session, site_id=site)
     assert [a.type for a in alarms] == ["zone_breach"], [a.summary for a in alarms]
     assert alarms[0].detail["provenance"] == "inferred"
+
+
+# -- V5: live source on a real decoder, JPEG evidence, the node with the real model -----------
+
+
+def test_rtsp_source_reconnects_a_real_decoder_at_end_of_stream(tmp_path: Path) -> None:
+    """OpenCV/FFmpeg opens a file like a stream; EOF behaves like a dropped camera."""
+    from minemonitor.vision.edge.rtsp import Backoff, RtspSource, opencv_opener
+
+    path = tmp_path / "s.avi"
+    w = cv2.VideoWriter(str(path), cv2.VideoWriter.fourcc(*"MJPG"), 25.0, (160, 90))
+    for i in range(10):
+        w.write(np.full((90, 160, 3), 20 * i, np.uint8))
+    w.release()
+    t = [0.0]
+    src = RtspSource(
+        str(path),
+        camera_id="cam-file",
+        sample_fps=1000,
+        quality=QualityMonitor(),
+        opener=opencv_opener,
+        backoff=Backoff(initial_s=1, jitter=0),
+        clock=lambda: t[0],
+        sleep=lambda s: None,
+    )
+    for _ in range(13):  # 10 frames, then 3 failed reads at EOF
+        src.pump()
+        t[0] += 0.01
+    assert src.frames >= 1 and not src.connected
+    assert src.last_error == "stream stopped delivering frames"
+    f = src.latest()
+    assert f is not None and f.image.shape == (90, 160, 3) and f.camera_state is not None
+    t[0] += 1.0
+    src.pump()
+    src.pump()
+    assert src.connected and src.reconnects == 1
+    src.stop()
+
+
+def test_jpeg_encoder_downsizes_and_is_decodable() -> None:
+    from minemonitor.vision.edge.evidence import jpeg_encoder
+
+    data = jpeg_encoder(max_width=640)(np.full((720, 1280, 3), 90, np.uint8))
+    img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    assert data[:2] == b"\xff\xd8" and img.shape == (360, 640, 3)
+
+
+@pytest.mark.skipif(not (NANO.exists() and STILL.exists()), reason="weights/still not fetched")
+def test_real_model_edge_node_one_alarm_with_jpeg_evidence(
+    db_session: Session, tmp_path: Path
+) -> None:
+    """V5: the node service with real YOLOX → one alarm whose evidence is a real still."""
+    from minemonitor.cameras.service import create_camera
+    from minemonitor.events.repository import list_events
+    from minemonitor.storage.models import Zone
+    from minemonitor.vision import service
+    from minemonitor.vision.edge.adapters.yolox_onnx import YoloxOnnxModel
+    from minemonitor.vision.edge.cli import MODELS, STILL_ZONE, make_still_clip
+    from minemonitor.vision.edge.evidence import EvidenceStore, jpeg_encoder
+    from minemonitor.vision.edge.node import EdgeNode, EdgeSettings
+    from tests.conftest import DEVICE, make_client
+    from tests.test_vision_edge_node import Clock, FakeSource, run
+    from tests.test_vision_pipeline import _FAR_POLYGON, Published
+
+    site = "kn-zw-01"
+    db_session.add(
+        Zone(
+            zone_id="gr",
+            site_id=site,
+            name="Gold Room",
+            kind="restricted",
+            geometry=_FAR_POLYGON,
+            rules={},
+        )
+    )
+    cam = create_camera(db_session, site_id=site, name="CAM-STILL", now=T0)
+    cam.image_zones = [{"zone_id": "gr", "zone_version": "v1", "polygon": STILL_ZONE}]
+    service.install_default_rules(db_session, site, author="t", at=T0 - timedelta(days=1))
+    db_session.commit()
+
+    clip = make_still_clip(STILL, tmp_path / "walk.mp4", seconds=20, fps=5)
+    decoded = list(VideoFileSource(clip, start=T0, sample_fps=5, quality=QualityMonitor()))
+    clock = Clock(T0)
+    node = EdgeNode(
+        EdgeSettings(
+            site_id=site,
+            node_id="edge-01",
+            username=DEVICE[0],
+            password=DEVICE[1],  # type: ignore[arg-type]
+            streams={cam.id: "rtsp://u:p@cam/1"},
+            state_dir=str(tmp_path / "state"),
+        ),
+        model=YoloxOnnxModel(NANO, expected_sha256=MODELS["yolox-nano"]["sha256"]),
+        publisher=Published(make_client(db_session, DEVICE)),
+        source_factory=lambda cam_id, url: FakeSource(decoded),
+        fetch_config=lambda: service.edge_config(db_session, site, at=T0),
+        evidence=EvidenceStore(
+            tmp_path / "ev", site_id=site, node_id="edge-01", encoder=jpeg_encoder()
+        ),
+        now=clock.now,
+        clock=lambda: (clock.t - T0).total_seconds(),
+    )
+    node.start()
+    run(node, clock, decoded[-1].ts)
+    node.shutdown()
+    alarms = list_events(db_session, site_id=site)
+    assert [a.type for a in alarms] == ["zone_breach"], [a.summary for a in alarms]
+    assert alarms[0].evidence["clip_uri"].startswith(f"edge://edge-01/{cam.id}/")
+    (still,) = list((tmp_path / "ev" / "kept").rglob("*.jpg"))
+    img = cv2.imread(str(still))
+    assert img is not None and img.shape[1] == 960  # downsized from 1280 for the evidence ring

@@ -136,6 +136,9 @@ def _snapshot(session: Session, site_id: str, *, include_zones: bool) -> dict[st
             "source": e.source,
             "summary": e.summary,
             "state": e.state,
+            # How the alarm's conclusion was reached (measured / inferred / vendor_inferred …),
+            # rendered beside the source so a camera guess is never shown as a measurement.
+            "provenance": (e.detail or {}).get("provenance"),
         }
         for e in list_events(session, site_id, limit=100)
         if e.state != "resolved"

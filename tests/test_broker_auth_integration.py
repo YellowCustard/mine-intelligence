@@ -131,3 +131,64 @@ def test_real_broker_accepts_rendered_credentials_and_enforces_acl(
             c.disconnect()
         broker.terminate()
         broker.wait(timeout=5)
+
+
+def test_real_broker_confines_a_vision_edge_node_to_its_sites_vision_topics(
+    db_session: Session, tmp_path: Path
+) -> None:
+    """V5: a ``vision-edge`` device publishes through :class:`MqttPublisher` (QoS 1) to its own
+    site's vision topics only — never another site's, never a position topic."""
+    from minemonitor.devices.acl import VISION_EDGE_SOURCE
+    from minemonitor.vision.edge.publish import MqttPublisher
+
+    service.register_device(
+        db_session,
+        device_id="edge-01",
+        site_id="kn-zw-01",
+        asset_id="edge-01",
+        source=VISION_EDGE_SOURCE,
+    )
+    node_secret = service.rotate_secret(db_session, "edge-01")
+    db_session.commit()
+    passwd = render_password_file(
+        db_session, service_user=_SVC_USER, service_hash=mosquitto_password_hash(_SVC_PASS)
+    )
+    acl = render_mosquitto_acl(db_session, ingest_user=_SVC_USER)
+    port = _free_port()
+    broker = _start_broker(tmp_path, port, passwd, acl)
+    clients: list[mqtt.Client] = []
+    pub = MqttPublisher(
+        "127.0.0.1", port, "edge-01", node_secret, client_id="mm-edge-edge-01", timeout_s=5
+    )
+    try:
+        svc, rc = _connect(port, _SVC_USER, _SVC_PASS, "svc")
+        clients.append(svc)
+        assert rc == 0
+        received: list[str] = []
+        svc.on_message = lambda c, u, msg: received.append(msg.topic)
+        svc.subscribe("mm/#", qos=1)
+        time.sleep(0.5)
+
+        record = {
+            "schema": "vision.health.v1",
+            "site_id": "kn-zw-01",
+            "node_id": "edge-01",
+            "health_id": "vh-edge-01-1",
+        }
+        assert pub([record]) == {"published": 1}  # PUBACK received
+        raw, rc_raw = _connect(port, "edge-01", node_secret, "edge-01-raw")
+        clients.append(raw)
+        assert rc_raw == 0
+        raw.publish("mm/other-site/vision/edge-01/health", b"{}", qos=1)  # ACL-denied
+        raw.publish("mm/kn-zw-01/edge-01/position", b"{}", qos=1)  # ACL-denied
+        time.sleep(1.0)
+        assert "mm/kn-zw-01/vision/edge-01/health" in received
+        assert "mm/other-site/vision/edge-01/health" not in received
+        assert "mm/kn-zw-01/edge-01/position" not in received
+    finally:
+        pub.close()
+        for c in clients:
+            c.loop_stop()
+            c.disconnect()
+        broker.terminate()
+        broker.wait(timeout=5)

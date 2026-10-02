@@ -94,7 +94,7 @@ jobs:
       - name: Vision tests
         run: >-
           uv run pytest -q tests/test_vision_yolox.py tests/test_vision_pipeline.py
-          tests/test_vision_units.py tests/test_vision_registry.py
+          tests/test_vision_units.py tests/test_vision_registry.py tests/test_vision_edge_node.py
 
   # Build the deployment image so a Dockerfile regression fails CI, not the mine.
   docker-build:
@@ -103,6 +103,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build image
         run: docker build -t minemonitor:ci .
+      - name: Build vision edge image
+        run: docker build -f Dockerfile.vision -t minemonitor-vision-edge:ci .
+      - name: Vision edge image imports its stack and refuses to start unconfigured
+        run: |
+          docker run --rm --entrypoint /app/.venv/bin/python minemonitor-vision-edge:ci -c \
+            "import cv2, onnxruntime, numpy; import minemonitor.vision.edge.node, minemonitor.vision.edge.rtsp; print('ok', cv2.__version__, onnxruntime.__version__)"
+          # No MM_EDGE_* settings: must fail fast with a validation error, not run blind.
+          ! docker run --rm minemonitor-vision-edge:ci run-node
 
   # Browser end-to-end: load the real dashboard in Chromium and acknowledge an alarm.
   dashboard:

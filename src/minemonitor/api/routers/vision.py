@@ -19,15 +19,17 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from minemonitor import audit
 from minemonitor.auth.deps import require_admin, require_device, require_viewer
 from minemonitor.contracts.vision import VisionRuleVersionV1
+from minemonitor.operations.shifts import resolve_shift, resolve_shift_by_id
 from minemonitor.storage.db import get_db
 from minemonitor.storage.models import User, VisionOperationalEvent, VisionZoneRollup
-from minemonitor.vision import registry, service
+from minemonitor.vision import registry, scene, service
 from minemonitor.vision.service import VisionIngestError
 
 router = APIRouter(tags=["vision"])
@@ -445,3 +447,138 @@ def record_model_metrics(
     )
     db.commit()
     return registry.model_dict(row)
+
+
+# -- scene context + reporting (V4) ----------------------------------------------------------
+
+
+class SceneIn(BaseModel):
+    """A camera's scene: image-zones (normalised polygons → zones) and optional homography.
+
+    Omit ``homography`` to leave calibration unchanged; send ``null`` to clear it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    image_zones: list[dict[str, Any]]
+    homography: dict[str, Any] | None = None
+
+
+@router.get("/sites/{site_id}/cameras/{camera_id}/scene", dependencies=[Depends(require_viewer)])
+def get_scene(site_id: str, camera_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from minemonitor.storage.models import Camera
+
+    cam = db.get(Camera, camera_id)
+    if cam is None or cam.site_id != site_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "camera not found")
+    return scene.scene_config(cam)
+
+
+@router.put("/sites/{site_id}/cameras/{camera_id}/scene")
+def put_scene(
+    site_id: str,
+    camera_id: str,
+    body: SceneIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+) -> dict[str, Any]:
+    """Configure a camera's image-zones and calibration (admin; audited).
+
+    Every zone must exist for the site; polygons are normalised ``[0, 1]`` image coordinates. A
+    homography marks the camera calibrated (ground points become available to the edge); without
+    one the edge reports ``basis: unknown`` and no distance is ever claimed.
+    """
+    try:
+        cam = scene.set_scene(
+            db,
+            site_id,
+            camera_id,
+            image_zones=body.image_zones,
+            homography=body.homography,
+            update_homography="homography" in body.model_fields_set,
+        )
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except scene.SceneError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    audit.record(
+        db,
+        actor=user.username,
+        action="vision.scene.update",
+        entity_type="camera",
+        entity_id=camera_id,
+        site_id=site_id,
+        detail={
+            "zones": [z["zone_id"] for z in cam.image_zones or []],
+            "calibration_status": cam.calibration_status,
+        },
+    )
+    db.commit()
+    return scene.scene_config(cam)
+
+
+@router.get("/sites/{site_id}/vision/scene", dependencies=[Depends(require_viewer)])
+def vision_scene(site_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """What each configured camera sees now: per-zone people counts, condition, open alarms."""
+    return scene.scene_state(db, site_id)
+
+
+def _report_window(
+    db: Session,
+    site_id: str,
+    shift_id: str | None,
+    at: datetime | None,
+    since: datetime | None,
+    until: datetime | None,
+) -> tuple[datetime, datetime, str | None]:
+    if since is not None or until is not None:
+        if since is None or until is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "give both since and until")
+        if until <= since:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "until must be after since")
+        return since, until, None
+    window = (
+        resolve_shift_by_id(db, site_id, shift_id)
+        if shift_id
+        else resolve_shift(db, site_id, at or datetime.now(UTC))
+    )
+    if window is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no shift matches")
+    return window.start, window.end, window.shift_id
+
+
+@router.get("/sites/{site_id}/vision/report", dependencies=[Depends(require_viewer)])
+def vision_report(
+    site_id: str,
+    shift_id: str | None = Query(default=None),
+    at: datetime | None = Query(default=None),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """People per camera × zone for a shift (default: the current shift) or explicit window."""
+    start, end, sid = _report_window(db, site_id, shift_id, at, since, until)
+    return {**scene.vision_report(db, site_id, start, end), "shift_id": sid}
+
+
+@router.get(
+    "/sites/{site_id}/vision/report.csv",
+    dependencies=[Depends(require_viewer)],
+    response_class=PlainTextResponse,
+)
+def vision_report_csv(
+    site_id: str,
+    shift_id: str | None = Query(default=None),
+    at: datetime | None = Query(default=None),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> PlainTextResponse:
+    start, end, sid = _report_window(db, site_id, shift_id, at, since, until)
+    report = scene.vision_report(db, site_id, start, end)
+    name = (sid or f"{start:%Y%m%dT%H%M}-{end:%Y%m%dT%H%M}").replace(":", "_")
+    return PlainTextResponse(
+        scene.report_to_csv(report),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="vision-report-{name}.csv"'},
+    )
