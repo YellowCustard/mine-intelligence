@@ -74,17 +74,41 @@ def my_capabilities(user: User = Depends(require_viewer)) -> dict[str, Any]:
 def add_user(
     body: UserIn, db: Session = Depends(get_db), admin: User = Depends(require_admin)
 ) -> dict[str, Any]:
-    """Create or replace a user (admin only)."""
+    """Create or replace a user (admin only).
+
+    A site-scoped admin manages accounts of their own site only: the new account must
+    carry that site, and an existing account may be replaced only if it already belongs
+    to that site. Otherwise a site admin could mint a global account, or reset a global
+    admin's password, and escape their scope. Global (site-less) admins are unrestricted.
+    """
     if body.role not in ROLES:
         # Defensive; the pattern already constrains this.
         raise ValueError(f"bad role {body.role!r}")
+    existing = db.get(User, body.username)
+    out_of_scope = body.site_id != admin.site_id or (
+        existing is not None and existing.site_id != admin.site_id
+    )
+    if admin.site_id is not None and out_of_scope:
+        audit.record(
+            db,
+            actor=admin.username,
+            action="user.create_denied",
+            entity_type="user",
+            entity_id=body.username,
+            site_id=admin.site_id,
+            detail={"requested_site_id": body.site_id, "role": body.role},
+        )
+        db.commit()
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "site admins may only manage accounts of their own site"
+        )
     create_user(
         db, username=body.username, password=body.password, role=body.role, site_id=body.site_id
     )
     audit.record(
         db,
         actor=admin.username,
-        action="user.create",
+        action="user.replace" if existing is not None else "user.create",
         entity_type="user",
         entity_id=body.username,
         site_id=body.site_id,
