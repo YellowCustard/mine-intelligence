@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from minemonitor.config import get_settings
 from minemonitor.contracts import AssetPositionV1
 from minemonitor.storage.repositories import insert_position
 
@@ -39,6 +40,29 @@ class PositionIngest(BaseModel):
     satellites: int | None = Field(default=None, ge=0)
     ignition: bool | None = None
     source: str | None = None
+
+
+class FutureTimestampError(ValueError):
+    """The device clock is ahead of the server by more than the allowed skew."""
+
+
+def reject_if_future(payload: PositionIngest, *, now: datetime | None = None) -> None:
+    """Refuse a fix dated beyond ``now + max_future_skew_s`` (a bad device clock).
+
+    Called by every transport *before* storing. A future-dated fix, once stored, moves the
+    asset's live-rule watermark (``asset_zone_state.last_ts``) past real time, after which
+    every genuine fix is skipped as out-of-order and no zone alarm fires for that asset.
+    Rejected loudly rather than clamped: the true time is unknown (brief §12).
+    """
+    now = now or datetime.now(UTC)
+    # Naive timestamps are a separate contract question; compare them as UTC here so this
+    # check can never itself raise on a naive/aware comparison.
+    ts = payload.ts if payload.ts.tzinfo is not None else payload.ts.replace(tzinfo=UTC)
+    skew_s = (ts - now).total_seconds()
+    if skew_s > get_settings().max_future_skew_s:
+        raise FutureTimestampError(
+            f"device ts {payload.ts.isoformat()} is {skew_s:.0f}s ahead of server time"
+        )
 
 
 def to_canonical(payload: PositionIngest) -> AssetPositionV1:
