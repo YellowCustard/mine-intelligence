@@ -23,6 +23,7 @@ from minemonitor.ingest.mqtt import MqttIngestor
 from tests.conftest import CONTRACTS_DIR, DEVICE, make_client
 
 _HOSTILE = [
+    "HT-102\n",  # Python re: `$` also matches before a trailing newline
     "<img src=x onerror=alert(1)>",
     "x');alert(1);('",
     'a"b',

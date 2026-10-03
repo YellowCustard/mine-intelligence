@@ -430,6 +430,8 @@ def test_dashboard_renders_hostile_strings_inert(hostile_server: str) -> None:
             http_credentials={"username": _ADMIN[0], "password": _ADMIN[1]}
         )
         page = context.new_page()
+        page_errors: list[str] = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
         page.goto(hostile_server + "/", wait_until="networkidle")
         page.locator("#n-site").click()
         # The markup renders as literal text in the fleet and alarm tables.
@@ -446,4 +448,7 @@ def test_dashboard_renders_hostile_strings_inert(hostile_server: str) -> None:
         page.locator("#atab .ackbtn").first.click()
         page.wait_for_timeout(1500)
         assert page.evaluate("window.__xss") is None
+        # A handler that throws on an escaped argument would also leave __xss unset;
+        # require that the handlers actually ran cleanly.
+        assert page_errors == []
         browser.close()

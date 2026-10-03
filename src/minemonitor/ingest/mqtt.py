@@ -21,6 +21,7 @@ import threading
 import time
 
 import paho.mqtt.client as mqtt
+from pydantic import ValidationError
 
 from minemonitor.config import get_settings
 from minemonitor.ingest.authz import (
@@ -92,7 +93,13 @@ class MqttPublisher:
             if not self._connected.is_set():
                 time.sleep(self.drain_interval_s)
                 continue
-            delivered = self._drain_once()
+            try:
+                delivered = self._drain_once()
+            except Exception:
+                # The drain thread is the only path out of the spool; if it dies, every
+                # later position is stranded. Log and retry rather than exit.
+                log.exception("publisher drain failed; retrying")
+                delivered = 0
             if not delivered:
                 time.sleep(self.drain_interval_s)
 
@@ -101,7 +108,20 @@ class MqttPublisher:
         entries = self.spool.peek(batch)
         done: list[int] = []
         for spool_id, raw in entries:
-            payload = PositionIngest.model_validate_json(raw)
+            try:
+                payload = PositionIngest.model_validate_json(raw)
+            except ValidationError as exc:
+                # Undeliverable forever (e.g. spooled under an older, looser contract):
+                # quarantine it so it neither blocks the FIFO nor is silently lost.
+                reason = "; ".join(
+                    f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors()
+                )
+                self.spool.quarantine(spool_id, reason)
+                log.error(
+                    "quarantined invalid spool entry",
+                    extra={"spool_id": spool_id, "reason": reason},
+                )
+                continue
             topic = position_topic(self.prefix, payload.site_id, payload.asset_id)
             info = self._client.publish(topic, raw, qos=1)
             try:
