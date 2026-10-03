@@ -24,6 +24,7 @@ from typing import Any, Protocol
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from minemonitor import net
 from minemonitor.config import Settings, get_settings
 from minemonitor.storage.models import Event, Notification
 
@@ -71,7 +72,7 @@ class UrllibSmtpSender:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # noqa: S310 - operator-configured URL
+        with net.urlopen(req, timeout=self._timeout) as resp:
             if resp.status >= 300:
                 raise RuntimeError(f"webhook returned {resp.status}")
 
@@ -106,7 +107,7 @@ class UrllibSmtpSender:
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # noqa: S310 - operator-configured URL
+        with net.urlopen(req, timeout=self._timeout) as resp:
             if resp.status >= 300:
                 raise RuntimeError(f"whatsapp returned {resp.status}")
 

@@ -53,6 +53,7 @@ from typing import Any, Literal, Protocol
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from minemonitor import net
 from minemonitor.contracts.vision import VisionHealthV1
 from minemonitor.vision.adapters.base import VisionModel
 from minemonitor.vision.edge.evidence import EvidenceStore, write_atomic
@@ -161,7 +162,7 @@ def fetch_edge_config(core_url: str, site_id: str, username: str, password: str)
             "Authorization": "Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()
         },
     )
-    with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
+    with net.urlopen(req, timeout=15) as resp:
         doc = json.loads(resp.read())
     if not isinstance(doc, dict) or doc.get("site_id") != site_id or "cameras" not in doc:
         raise ValueError("edge config response is not a vision config for this site")
