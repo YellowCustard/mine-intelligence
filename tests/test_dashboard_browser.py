@@ -172,6 +172,10 @@ def _seed(db_url: str) -> None:
 def live_server(tmp_path: Path) -> Iterator[str]:
     db_url = f"sqlite:///{tmp_path / 'dash.db'}"
     _seed(db_url)
+    yield from _serve(db_url)
+
+
+def _serve(db_url: str) -> Iterator[str]:
     port = _free_port()
     env = {
         **os.environ,
@@ -338,3 +342,113 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
     evt = next(e for e in events if e["event_id"] == "evt-smoke")
     assert evt["state"] == "acknowledged"
     assert evt["acknowledged_by"] == _ADMIN[0]
+
+
+# Strings that would execute if any sink interpolated them raw: an HTML payload, and a
+# JS-string breakout aimed at the inline onclick handlers.
+_XSS_ASSET = "<img src=x onerror=window.__xss=1>"
+_XSS_BREAKOUT = "x');window.__xss=2;('"
+
+
+def _seed_hostile(db_url: str) -> None:
+    """Rows that bypass the ingest contract (legacy data, a direct DB write, a future
+    source with weaker validation). The dashboard must render them as inert text."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from minemonitor.auth.service import create_user
+    from minemonitor.storage.models import Base, Event, Position, Site
+    from minemonitor.zones.geometry import box_polygon
+    from minemonitor.zones.repository import upsert_zone
+
+    engine = create_engine(db_url, future=True)
+    Base.metadata.create_all(engine)
+    s = sessionmaker(bind=engine, expire_on_commit=False, future=True)()
+    now = datetime.now(UTC)
+    lat, lon = -17.8252, 31.0335
+    s.add(Site(site_id=_SITE, name="Hostile Site", timezone="Africa/Harare"))
+    s.commit()
+    upsert_zone(
+        s,
+        site_id=_SITE,
+        zone_id="<b>z",
+        name="<img src=x onerror=window.__xss=3>",
+        kind="restricted",
+        geometry=box_polygon(lat, lon, 120),
+        rules={"authorized_classes": ["<img src=x onerror=window.__xss=4>"]},
+    )
+    for i, asset_id in enumerate((_XSS_ASSET, _XSS_BREAKOUT)):
+        s.add(
+            Position(
+                site_id=_SITE,
+                asset_id=asset_id,
+                ts=now,
+                received_at=now,
+                lat=lat + i * 0.0005,
+                lon=lon,
+                speed_kph=8.0,
+                ignition=True,
+                source="seed",
+            )
+        )
+        s.add(
+            Event(
+                event_id=f"evt-{i}');window.__xss=5;('",
+                site_id=_SITE,
+                ts=now,
+                type="zone_breach",
+                severity="critical",
+                asset_id=asset_id,
+                zone_id="<b>z",
+                source="<img src=x onerror=window.__xss=6>",
+                summary="<img src=x onerror=window.__xss=7>",
+                advisory=True,
+                state="open",
+            )
+        )
+    create_user(s, username=_ADMIN[0], password=_ADMIN[1], role="admin")
+    s.commit()
+    s.close()
+    engine.dispose()
+
+
+@pytest.fixture
+def hostile_server(tmp_path: Path) -> Iterator[str]:
+    db_url = f"sqlite:///{tmp_path / 'hostile.db'}"
+    _seed_hostile(db_url)
+    yield from _serve(db_url)
+
+
+def test_dashboard_renders_hostile_strings_inert(hostile_server: str) -> None:
+    from playwright.sync_api import expect, sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=_chromium_executable())
+        context = browser.new_context(
+            http_credentials={"username": _ADMIN[0], "password": _ADMIN[1]}
+        )
+        page = context.new_page()
+        page_errors: list[str] = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        page.goto(hostile_server + "/", wait_until="networkidle")
+        page.locator("#n-site").click()
+        # The markup renders as literal text in the fleet and alarm tables.
+        expect(page.locator("#ftab")).to_contain_text(_XSS_ASSET, timeout=10_000)
+        expect(page.locator("#ftab")).to_contain_text(_XSS_BREAKOUT, timeout=10_000)
+        expect(page.locator("#atab")).to_contain_text("onerror=window.__xss=7", timeout=10_000)
+        expect(page.locator("#ztab")).to_contain_text("onerror=window.__xss=3", timeout=10_000)
+        # Exercise the inline handlers that carry ids: select each machine (fleet row
+        # onclick), open its history buttons, and acknowledge an alarm.
+        for asset_id in (_XSS_ASSET, _XSS_BREAKOUT):
+            page.locator("#ftab tr", has_text=asset_id).click()
+            expect(page.locator("#machine-detail")).to_contain_text(asset_id, timeout=10_000)
+            page.locator("#machine-detail button", has_text="Last 1h").click()
+        page.locator("#atab .ackbtn").first.click()
+        page.wait_for_timeout(1500)
+        assert page.evaluate("window.__xss") is None
+        # A handler that throws on an escaped argument would also leave __xss unset;
+        # require that the handlers actually ran cleanly.
+        assert page_errors == []
+        browser.close()

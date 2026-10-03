@@ -27,6 +27,13 @@ class Spool:
             "CREATE TABLE IF NOT EXISTS spool ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT NOT NULL)"
         )
+        # Entries that can never be delivered (e.g. spooled by an older release under a
+        # looser contract) are moved here rather than blocking the FIFO or being dropped.
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS spool_quarantine ("
+            "id INTEGER PRIMARY KEY, payload TEXT NOT NULL, reason TEXT NOT NULL, "
+            "quarantined_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')))"
+        )
 
     def append(self, payload: str) -> int:
         """Durably append a payload. Returns its spool id."""
@@ -45,6 +52,29 @@ class Spool:
         if not ids:
             return
         self._conn.executemany("DELETE FROM spool WHERE id = ?", [(i,) for i in ids])
+
+    def quarantine(self, spool_id: int, reason: str) -> None:
+        """Move one entry out of the delivery queue into quarantine.
+
+        Two autocommit statements rather than a transaction: the connection is shared
+        with the producer thread, and an explicit BEGIN would sweep its concurrent
+        appends into this transaction. Copy-then-delete is crash-safe on its own: a
+        crash between them leaves the row in both tables, and the next drain repeats
+        the (idempotent, keyed by id) copy before deleting.
+        """
+        self._conn.execute(
+            "INSERT OR REPLACE INTO spool_quarantine (id, payload, reason) "
+            "SELECT id, payload, ? FROM spool WHERE id = ?",
+            (reason, spool_id),
+        )
+        self._conn.execute("DELETE FROM spool WHERE id = ?", (spool_id,))
+
+    def quarantined(self) -> list[tuple[int, str, str]]:
+        """Quarantined entries as (id, payload, reason), oldest first."""
+        rows = self._conn.execute(
+            "SELECT id, payload, reason FROM spool_quarantine ORDER BY id"
+        ).fetchall()
+        return [(int(r[0]), str(r[1]), str(r[2])) for r in rows]
 
     def __len__(self) -> int:
         row = self._conn.execute("SELECT count(*) FROM spool").fetchone()

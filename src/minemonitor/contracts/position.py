@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from minemonitor.contracts.ids import Identifier
+
 
 class AssetPositionV1(BaseModel):
     """A single position fix from a machine.
@@ -18,8 +20,8 @@ class AssetPositionV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_: Literal["asset.position.v1"] = Field(default="asset.position.v1", alias="schema")
-    site_id: str = Field(min_length=1)
-    asset_id: str = Field(min_length=1)
+    site_id: Identifier
+    asset_id: Identifier
     ts: datetime
     received_at: datetime
     lat: float = Field(ge=-90, le=90)

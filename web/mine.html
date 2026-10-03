@@ -390,7 +390,12 @@ svg{display:block;width:100%;height:auto}
 
 <script>
 const T = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-const E = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+// Every server-supplied string is escaped before it reaches innerHTML. E is for HTML text
+// and quoted attribute values; J is for a string argument inside an inline handler
+// (onclick="f(${J(x)})"): JSON-encode for the JS literal, then HTML-escape for the attribute.
+const E = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const J = s => E(JSON.stringify(String(s)));
 const P = (pts) => pts.map(p=>p.join(',')).join(' ');
 
 /* ───────────────────────── site geometry ───────────────────────── */
@@ -532,7 +537,7 @@ function zoneLayer(){
             fill="${T('--panel')}" stroke="${st}" stroke-width="1.1" opacity="0.96"/>`;
       s+=`<text x="${cx}" y="${cy}" fill="${st}" font-size="11.5" font-weight="700"
             font-family="Barlow Condensed,sans-serif" letter-spacing="1" text-anchor="middle"
-            >${txt}</text>`;
+            >${E(txt)}</text>`;
     } else {
       s+=`<path d="${z.path}" fill="none" stroke="${st}" stroke-width="26" opacity="0.24" stroke-linecap="round"/>`;
       s+=`<path d="${z.path}" fill="none" stroke="${st}" stroke-width="1.4" stroke-dasharray="6 5" opacity="0.9"/>`;
@@ -551,13 +556,13 @@ function assetLayer(){
     const sel = a.id===SELECTED;
     if(a.sev!=='ok') s+=`<circle class="pulse" cx="${a.x}" cy="${a.y}" r="21" fill="${col}" opacity="0.22"/>`;
     if(sel) s+=`<circle cx="${a.x}" cy="${a.y}" r="17" fill="none" stroke="${T('--acc')}" stroke-width="2"/>`;
-    s+=`<g transform="translate(${a.x},${a.y})" style="cursor:pointer" onclick="selectAsset('${a.id}')">
+    s+=`<g transform="translate(${a.x},${a.y})" style="cursor:pointer" onclick="selectAsset(${J(a.id)})">
         <circle r="12.5" fill="${T('--panel')}" stroke="${col}" stroke-width="2.2"/>
         <path d="${ICONS[a.t]}" fill="${col}" transform="scale(0.86)"/></g>`;
     s+=`<g transform="translate(${a.x+(a.lx??16)},${a.y+(a.ly??-14)})" style="pointer-events:none">
         <rect x="0" y="0" width="${a.id.length*7.6+30}" height="17" rx="2.5"
           fill="${T('--panel')}" stroke="${T('--line')}" stroke-width="1" opacity="0.97"/>
-        <text x="5" y="12.5" fill="${T('--ink')}" font-size="10.5" font-family="JetBrains Mono,monospace" font-weight="500">${a.id}</text>
+        <text x="5" y="12.5" fill="${T('--ink')}" font-size="10.5" font-family="JetBrains Mono,monospace" font-weight="500">${E(a.id)}</text>
         <text x="${a.id.length*7.6+25}" y="12.5" fill="${col}" font-size="10" font-family="JetBrains Mono,monospace" text-anchor="end">${Math.round(a.sp)}</text></g>`;
   });
   return s;
@@ -625,17 +630,17 @@ function renderTables(){
   document.getElementById('ztab').innerHTML = ZONES.map(z=>{
     const [,st]=ZFILL[z.kind];
     return `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;
-      background:${st};margin-right:7px"></span>${z.id} ${E(z.name)}</td>
+      background:${st};margin-right:7px"></span>${E(z.id)} ${E(z.name)}</td>
       <td><span class="tag ${z.kind==='restrict'?'t-crit':z.kind==='speed'?'t-warn':'t-ok'}">${z.type}</span></td>
       <td class="sub2">${E(z.rule)}</td><td class="m">${z.inside}</td></tr>`;}).join('');
 
   const vis=visibleAssets();
   document.getElementById('ftab').innerHTML = vis.length ? vis.map(a=>
-    `<tr data-click class="${a.id===SELECTED?'sel':''}" onclick="selectAsset('${a.id}')">
-      <td><b>${a.id}</b><span class="sub2">${E(a.t)}</span></td>
+    `<tr data-click class="${a.id===SELECTED?'sel':''}" onclick="selectAsset(${J(a.id)})">
+      <td><b>${E(a.id)}</b><span class="sub2">${E(a.t)}</span></td>
       <td class="m sub2">${E(a.age||'—')}</td>
       <td><span class="tag ${a.offline?'t-warn':a.sev==='crit'?'t-crit':a.sev==='warn'?'t-warn':'t-mut'}">${E(a.st)}</span>
-        <span class="sub2">${a.offline?'data feed down':a.zone}</span></td>
+        <span class="sub2">${a.offline?'data feed down':E(a.zone)}</span></td>
       <td class="m">${Math.round(a.sp)} km/h</td></tr>`).join('')
     : `<tr><td colspan="4" class="sub2" style="text-align:center;padding:14px">No machines match the filter.</td></tr>`;
   const fc=document.getElementById('fcount'); if(fc) fc.textContent=`${vis.length} of ${ASSETS.length} shown`;
@@ -644,7 +649,7 @@ function renderTables(){
     const ackd = x.state && x.state!=='open';
     const action = ackd
       ? `<span class="sub2">ack ${x.ack_by?E(x.ack_by):''}</span>`
-      : `<button class="ackbtn" onclick="ackAlarm('${x.event_id}')">Acknowledge</button>`;
+      : `<button class="ackbtn" onclick="ackAlarm(${J(x.event_id)})">Acknowledge</button>`;
     return `<tr class="${ackd?'ackd':''}"><td class="m">${x.t}</td><td class="m">${E(x.a||'')}</td>
       <td>${E(x.ty)}</td><td class="sub2" style="color:var(--ink2)">${E(x.d)}</td>
       <td><span class="tag ${x.s==='crit'?'t-crit':'t-warn'}">${x.s==='crit'?'Critical':x.s==='warn'?'Warning':'Info'}</span></td>
@@ -730,19 +735,19 @@ async function renderMachineDetail(id){
       <div>Speed</div><div>${Math.round(a.sp)} km/h</div>
       <div>Ignition</div><div>${a.ignition===true?'on':a.ignition===false?'off':'—'}</div>
       <div>Position</div><div>${a.lat!=null?a.lat.toFixed(5):'—'}, ${a.lon!=null?a.lon.toFixed(5):'—'}</div>
-      <div>State basis</div><div>${a.state_basis||'—'}${basis?'':''}</div>
+      <div>State basis</div><div>${E(a.state_basis||'—')}${basis?'':''}</div>
     </div>
     <div class="md-hist">
       <span class="an-lab">History on map</span>
-      <button class="ackbtn" onclick="historyThisShift('${E(a.id)}')">This shift</button>
-      <button class="ackbtn" onclick="historyHoursAgo('${E(a.id)}',1)">Last 1h</button>
-      <button class="ackbtn" onclick="historyHoursAgo('${E(a.id)}',3)">Last 3h</button>
+      <button class="ackbtn" onclick="historyThisShift(${J(a.id)})">This shift</button>
+      <button class="ackbtn" onclick="historyHoursAgo(${J(a.id)},1)">Last 1h</button>
+      <button class="ackbtn" onclick="historyHoursAgo(${J(a.id)},3)">Last 3h</button>
       <button class="ackbtn" onclick="clearHistory()">Clear</button>
       <span class="sub2" id="md-hist-msg">${HISTORY.assetId===a.id?`${HISTORY.count} fix(es) shown`:'draws the stored track on the site plan'}</span>
     </div>
     <div class="md-grid">
       <div><h3>Active alarms &amp; incidents</h3><div id="md-alarms">${
-        alarms.length ? alarms.map(e=>`<div class="md-line"><span class="tag ${e.severity==='critical'?'t-crit':'t-warn'}">${e.severity}</span> ${E(e.summary)} <button class="ackbtn" style="padding:1px 6px;font-size:10px" onclick="historyAroundEvent('${E(a.id)}','${E(e.ts)}')">▷ history</button></div>`).join('')
+        alarms.length ? alarms.map(e=>`<div class="md-line"><span class="tag ${e.severity==='critical'?'t-crit':'t-warn'}">${E(e.severity)}</span> ${E(e.summary)} <button class="ackbtn" style="padding:1px 6px;font-size:10px" onclick="historyAroundEvent(${J(a.id)},${J(e.ts)})">▷ history</button></div>`).join('')
                       : '<p class="note">None affecting this machine.</p>'}<div id="md-incidents"></div></div></div>
       <div><h3>Recent cycles</h3><div id="md-cycles"><p class="note">Loading…</p></div></div>
       <div><h3>Telemetry &amp; data quality</h3><div id="md-dq"><p class="note">Loading…</p></div></div>
@@ -808,7 +813,7 @@ function cycleBar(){
     g+=`<rect x="${lx.toFixed(1)}" y="80" width="9" height="9" fill="${T(c)}" rx="1.5"/>`;
     g+=`<text x="${(lx+13).toFixed(1)}" y="88.5" fill="${T('--ink2')}" font-size="10.5" font-family="Barlow,sans-serif">${n}</text>`;
   });
-  g+=`<text x="${L}" y="18" fill="${T('--mut')}" font-size="11" font-family="Barlow Condensed,sans-serif" font-weight="600" letter-spacing="1.1">MINUTES PER CYCLE · MEAN ${total.toFixed(1)} · ${c.cycles} CYCLES (${(c.shift||'').toUpperCase()})</text>`;
+  g+=`<text x="${L}" y="18" fill="${T('--mut')}" font-size="11" font-family="Barlow Condensed,sans-serif" font-weight="600" letter-spacing="1.1">MINUTES PER CYCLE · MEAN ${total.toFixed(1)} · ${c.cycles} CYCLES (${E((c.shift||'').toUpperCase())})</text>`;
   const qp = c.queue_pct==null?0:c.queue_pct;
   g+=`<text x="${L}" y="112" fill="${T('--crit')}" font-size="11.5" font-family="Barlow,sans-serif">Queue at face is ${qp.toFixed(0)}% of every cycle (observed).</text>`;
   el.innerHTML=g;
@@ -1000,7 +1005,7 @@ function renderNeedsAttention(ex, dq, bn){
     const wrap=document.createElement('div'); wrap.className='exgrp';
     const chip=document.createElement('button');
     chip.className=`exchip ex-${g.cls}`; chip.setAttribute('aria-expanded','false');
-    chip.innerHTML=`<b>${g.n}</b> ${g.label}`;
+    chip.innerHTML=`<b>${E(g.n)}</b> ${E(g.label)}`;
     const list=document.createElement('div'); list.className='exlist'; list.hidden=true;
     g.lines.forEach(t=>{ const d=document.createElement('div'); d.className='exitem'; d.textContent=t; list.appendChild(d); });
     chip.onclick=()=>{ const open=list.hidden; list.hidden=!open; chip.setAttribute('aria-expanded',String(open)); };
@@ -1177,10 +1182,10 @@ function renderBottleneckCards(bn){
   if(!obs.length){ el.innerHTML='<p class="note">No bottleneck observations this shift.</p>'; return; }
   el.innerHTML = obs.map(o=>{
     const ev=o.evidence||{};
-    const evtxt=Object.entries(ev).map(([k,v])=>`${k.replace(/_/g,' ')}: ${typeof v==='number'?(+v).toFixed(1):E(String(v))}`).join(' · ');
+    const evtxt=Object.entries(ev).map(([k,v])=>`${E(k.replace(/_/g,' '))}: ${typeof v==='number'?(+v).toFixed(1):E(String(v))}`).join(' · ');
     const asset=ev.asset_id;
     const action = asset
-      ? `<button class="ackbtn" onclick="go('site');selectAsset('${E(asset)}')">Investigate ${E(asset)}</button>`
+      ? `<button class="ackbtn" onclick="go('site');selectAsset(${J(asset)})">Investigate ${E(asset)}</button>`
       : `<button class="ackbtn" onclick="go('site')">Open Fleet view</button>`;
     return `<div class="bn-card">
       <div class="bn-what">${E(o.summary)}</div>
@@ -1247,7 +1252,7 @@ function renderHandoverCreate(shift){
     <p class="note">Records a handover for <b>${E(shift.name)}</b> (${E(shift.operating_date)}), snapshotting the shift scorecard.</p>
     <textarea id="ho-notes" rows="4" placeholder="Outgoing notes — what the incoming crew must know…"
       style="width:100%;font-family:var(--sans);font-size:13px;padding:8px;border:1px solid var(--line);border-radius:3px;margin:8px 0"></textarea>
-    <button class="ackbtn" onclick="submitHandover('${E(shift.shift_id)}')">Record handover</button>
+    <button class="ackbtn" onclick="submitHandover(${J(shift.shift_id)})">Record handover</button>
     <span class="sub2" id="ho-msg" style="margin-left:8px"></span>`;
 }
 async function submitHandover(shiftId){
@@ -1268,7 +1273,7 @@ function renderHandoverList(list){
     const sc=h.summary&&h.summary.cycles ? `queue ${h.summary.cycles.queue_pct==null?'—':Math.round(h.summary.cycles.queue_pct)+'%'} · ${h.summary.cycles.count} cycles` : '';
     const ack = h.state==='acknowledged'
       ? `<span class="tag t-ok">acknowledged</span> <span class="sub2">by ${E(h.incoming_by||'')}</span>`
-      : (canAck ? `<button class="ackbtn" onclick="ackHandover('${E(h.id)}')">Acknowledge incoming</button>`
+      : (canAck ? `<button class="ackbtn" onclick="ackHandover(${J(h.id)})">Acknowledge incoming</button>`
                 : `<span class="tag t-warn">open</span>`);
     return `<div class="bn-card">
       <div class="bn-row"><b>${E(h.shift_id)}</b> <span class="sub2">${sc}</span></div>
@@ -1279,7 +1284,7 @@ function renderHandoverList(list){
   }).join('');
 }
 async function ackHandover(id){
-  try{ await fetch(`/sites/${SITE}/handovers/${id}/acknowledge`,{method:'POST',headers:{'content-type':'application/json'},
+  try{ await fetch(`/sites/${SITE}/handovers/${encodeURIComponent(id)}/acknowledge`,{method:'POST',headers:{'content-type':'application/json'},
         body:JSON.stringify({incoming_notes:'acknowledged from command centre'})}); }
   catch(e){}
   loadHandover();
@@ -1388,7 +1393,7 @@ function renderSysConfig(defs){
   const el=document.getElementById('sy-config'); if(!el) return;
   const list=(defs&&defs.definitions)||[];
   const rows = list.length ? `<div class="kv">${list.map(d=>
-    `<div>${E(d.name)}${d.enabled?'':' (disabled)'}</div><div>${d.start_hour_local}:00 · ${d.duration_hours}h</div>`).join('')}</div>`
+    `<div>${E(d.name)}${d.enabled?'':' (disabled)'}</div><div>${E(d.start_hour_local)}:00 · ${E(d.duration_hours)}h</div>`).join('')}</div>`
     : '<p class="note">No shift definitions.</p>';
   const src = defs&&defs.source==='configured' ? 'site-configured' : 'defaults';
   const admin = CAPS.can.configure_site
@@ -1415,7 +1420,7 @@ async function renderSysAudit(){
 }
 
 async function ackAlarm(id){
-  try{ await fetch(`/sites/${SITE}/events/${id}/ack`,{method:'POST',headers:{'content-type':'application/json'},
+  try{ await fetch(`/sites/${SITE}/events/${encodeURIComponent(id)}/ack`,{method:'POST',headers:{'content-type':'application/json'},
         body:JSON.stringify({acknowledged_by:'control room'})}); }
   catch(e){}
   await loadState();
