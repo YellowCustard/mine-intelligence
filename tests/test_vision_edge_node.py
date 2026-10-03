@@ -378,11 +378,20 @@ def test_core_url_must_be_https_off_box() -> None:
         "http://api:8000",
         "http://localhost:8000",
         "http://127.0.0.1:18000",
+        "http://[::1]:8000",
         "https://core.mine.local",
         "https://10.20.0.2:8443",
     ):
         assert EdgeSettings(**base, core_url=ok).core_url == ok  # type: ignore[arg-type]
-    for bad in ("http://10.20.0.2:8000", "http://core.mine.local", "ftp://api", "api:8000"):
+    for bad in (
+        "http://10.20.0.2:8000",
+        "http://core.mine.local",
+        "ftp://api",
+        "api:8000",
+        # Names that merely *start* like a loopback address are DNS names, not loopback.
+        "http://127.attacker.example:8000",
+        "http://127.0.0.1.nip.io",
+    ):
         with pytest.raises(ValidationError, match="https"):
             EdgeSettings(**base, core_url=bad)  # type: ignore[arg-type]
 
