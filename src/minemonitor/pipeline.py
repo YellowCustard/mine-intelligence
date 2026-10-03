@@ -11,11 +11,13 @@ for live rule evaluation — they remain available for retrospective recompute.
 
 from __future__ import annotations
 
-from datetime import UTC
+import logging
+from datetime import UTC, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from minemonitor.config import get_settings
 from minemonitor.contracts import EventV1
 from minemonitor.contracts.position import AssetPositionV1
 from minemonitor.events.repository import persist_event
@@ -25,6 +27,8 @@ from minemonitor.storage.models import Asset
 from minemonitor.zones import engine
 from minemonitor.zones.geometry import distance_to_polygon_m, point_in_polygon
 from minemonitor.zones.repository import get_or_create_state, list_zones
+
+log = logging.getLogger("minemonitor.pipeline")
 
 
 def _asset_class(session: Session, site_id: str, asset_id: str) -> str:
@@ -44,6 +48,7 @@ def process_position(session: Session, pos: AssetPositionV1, created: bool) -> l
 
     asset_class = _asset_class(session, pos.site_id, pos.asset_id)
     events: list[EventV1] = []
+    max_skew = timedelta(seconds=get_settings().max_future_skew_s)
 
     for zone in zones:
         state = get_or_create_state(session, pos.site_id, pos.asset_id, zone.zone_id)
@@ -51,7 +56,20 @@ def process_position(session: Session, pos: AssetPositionV1, created: bool) -> l
         # Normalise last_ts: SQLite returns naive, Postgres returns aware.
         if state.last_ts is not None:
             last_ts = state.last_ts if state.last_ts.tzinfo else state.last_ts.replace(tzinfo=UTC)
-            if pos.ts <= last_ts:
+            if last_ts > pos.received_at + max_skew:
+                # A watermark in the future can only come from a bad-clock fix stored before
+                # ingest rejected them; trusting it would mute live rules for this asset
+                # until wall-clock time caught up. Ignore it so this fix is evaluated.
+                log.warning(
+                    "ignoring future-dated zone watermark",
+                    extra={
+                        "site_id": pos.site_id,
+                        "asset_id": pos.asset_id,
+                        "zone_id": zone.zone_id,
+                        "last_ts": last_ts.isoformat(),
+                    },
+                )
+            elif pos.ts <= last_ts:
                 continue
 
         cfg = parse_rules(zone.kind, zone.rules)

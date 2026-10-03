@@ -28,8 +28,14 @@ from minemonitor.ingest.authz import (
     topic_matches_payload,
     vision_topic_matches_payload,
 )
-from minemonitor.ingest.service import PositionIngest, store_and_process
+from minemonitor.ingest.service import (
+    FutureTimestampError,
+    PositionIngest,
+    reject_if_future,
+    store_and_process,
+)
 from minemonitor.ingest.spool import Spool
+from minemonitor.platform.metrics import metrics
 from minemonitor.storage.db import get_session_factory
 
 log = logging.getLogger("minemonitor.mqtt")
@@ -193,6 +199,17 @@ class MqttIngestor:
                     "payload_site": payload.site_id,
                     "payload_asset": payload.asset_id,
                 },
+            )
+            self.rejected_count += 1
+            return
+        try:
+            reject_if_future(payload)
+        except FutureTimestampError as exc:
+            # A bad device clock never becomes good on redelivery: ack and drop, loudly.
+            metrics().incr("ingest.rejected.future_ts")
+            log.error(
+                "rejected future-dated position",
+                extra={"site_id": payload.site_id, "asset_id": payload.asset_id, "error": str(exc)},
             )
             self.rejected_count += 1
             return
