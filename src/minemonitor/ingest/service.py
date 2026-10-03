@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from minemonitor.config import get_settings
 from minemonitor.contracts import AssetPositionV1
+from minemonitor.contracts.ids import Identifier
 from minemonitor.storage.repositories import insert_position
 
 
@@ -28,8 +29,8 @@ class PositionIngest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_: str = Field(default="asset.position.v1", alias="schema")
-    site_id: str = Field(min_length=1)
-    asset_id: str = Field(min_length=1)
+    site_id: Identifier
+    asset_id: Identifier
     ts: AwareDatetime
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)

@@ -16,8 +16,8 @@
   ],
   "properties": {
     "schema": { "const": "asset.position.v1" },
-    "site_id": { "type": "string", "minLength": 1 },
-    "asset_id": { "type": "string", "minLength": 1 },
+    "site_id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$", "not": { "pattern": "\\n" } },
+    "asset_id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$", "not": { "pattern": "\\n" } },
     "ts": {
       "type": "string",
       "format": "date-time",
