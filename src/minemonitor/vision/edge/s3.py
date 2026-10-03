@@ -20,6 +20,8 @@ import urllib.request
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
+from minemonitor import net
+
 _ALGO = "AWS4-HMAC-SHA256"
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 
@@ -143,7 +145,7 @@ class S3Uploader:
             self.base + _uri_encode(path, keep_slash=True), data=data, headers=headers, method="PUT"
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:  # noqa: S310
+            with net.urlopen(req, timeout=self.timeout_s) as resp:
                 if resp.status not in (200, 201, 204):
                     raise S3Error(f"PUT {key}: HTTP {resp.status}")
         except urllib.error.HTTPError as exc:

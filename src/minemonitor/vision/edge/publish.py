@@ -23,6 +23,7 @@ import urllib.request
 from collections.abc import Callable
 from typing import Any
 
+from minemonitor import net
 from minemonitor.vision.edge.outbox import Outbox
 
 Publisher = Callable[[list[dict[str, Any]]], dict[str, Any]]
@@ -80,7 +81,7 @@ class HttpPublisher:
             self.url, data=json.dumps(payloads).encode(), headers=self._headers, method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:  # noqa: S310
+            with net.urlopen(req, timeout=self.timeout_s) as resp:
                 return dict(json.loads(resp.read() or b"{}"))
         except urllib.error.HTTPError as exc:
             if exc.code == 422:
