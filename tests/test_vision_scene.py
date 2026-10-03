@@ -187,6 +187,29 @@ def test_scene_state_counts_condition_and_staleness(db_session: Session, cam: Ca
     assert later["cameras"][0]["stale"] is True  # old rollup is labelled, not shown as live
 
 
+def test_scene_state_merges_a_bucket_split_by_a_node_restart(
+    db_session: Session, cam: Camera
+) -> None:
+    """Regression: a restart inside a bucket stores it as two rows (distinct rollup ids). The live
+    view showed whichever row it read last; it must combine them as the shift report does."""
+    cam.image_zones = [{"zone_id": "gr", "zone_version": "v1", "polygon": SQUARE}]
+    db_session.commit()
+    halves = [
+        dict(rollup_id="before", count_max=4, count_mean=2.0, entries=3, observed_s=120.0),
+        dict(rollup_id="after", count_max=1, count_mean=0.5, entries=1, observed_s=180.0),
+    ]
+    _ingest(db_session, [_rollup(cam.id, None, T0, **h) for h in halves])
+    _ingest(
+        db_session,
+        [_rollup(cam.id, "gr", T0, **{**h, "rollup_id": f"gr-{h['rollup_id']}"}) for h in halves],
+    )
+    (c,) = scene.scene_state(db_session, SITE, now=T0 + timedelta(minutes=6))["cameras"]
+    assert c["people_in_view_peak"] == 4 and c["coverage_s"] == 300.0
+    (z,) = c["zones"]
+    assert z["people_peak"] == 4 and z["entries"] == 4
+    assert z["people_mean"] == pytest.approx((2.0 * 120 + 0.5 * 180) / 300, abs=1e-3)
+
+
 def test_scene_state_omits_unconfigured_cameras(db_session: Session, cam: Camera) -> None:
     assert scene.scene_state(db_session, SITE)["cameras"] == []
     viewer = make_client(db_session, VIEWER)

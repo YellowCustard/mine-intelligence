@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import csv
 import io
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -131,10 +132,42 @@ def scene_config(cam: Camera) -> dict[str, Any]:
 # ---------------------------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class _BucketView:
+    """One camera × zone × bucket, merged across every rollup row stored for it."""
+
+    ts: datetime
+    bucket_s: int
+    count_max: int
+    count_mean: float
+    entries: int
+    observed_s: float
+
+
+def _merge_bucket(rows: list[VisionZoneRollup]) -> _BucketView:
+    """A bucket can arrive as several rows: the edge node restarted inside it, or its scene was
+    edited mid-bucket (each half has its own rollup id). Combine them the way the shift report
+    does — peak is the max, entries and observed time add up, the mean is time-weighted."""
+    observed = sum(r.observed_s for r in rows)
+    mean = (
+        sum(r.count_mean * r.observed_s for r in rows) / observed
+        if observed
+        else sum(r.count_mean for r in rows) / len(rows)
+    )
+    return _BucketView(
+        ts=rows[0].ts,
+        bucket_s=rows[0].bucket_s,
+        count_max=max(r.count_max for r in rows),
+        count_mean=round(mean, 3),
+        entries=sum(r.entries for r in rows),
+        observed_s=min(observed, float(rows[0].bucket_s)),
+    )
+
+
 def _latest_rollups(
     session: Session, site_id: str, camera_id: str
-) -> dict[str | None, VisionZoneRollup]:
-    """Latest person rollup per zone (``None`` = whole view) for one camera."""
+) -> dict[str | None, _BucketView]:
+    """Latest person bucket per zone (``None`` = whole view) for one camera."""
     latest_ts = (
         session.execute(
             select(func.max(VisionZoneRollup.ts)).where(
@@ -156,7 +189,10 @@ def _latest_rollups(
             VisionZoneRollup.ts == latest_ts,
         )
     ).scalars()
-    return {r.zone_id: r for r in rows}
+    by_zone: dict[str | None, list[VisionZoneRollup]] = {}
+    for r in rows:
+        by_zone.setdefault(r.zone_id, []).append(r)
+    return {zid: _merge_bucket(rs) for zid, rs in by_zone.items()}
 
 
 def scene_state(session: Session, site_id: str, *, now: datetime | None = None) -> dict[str, Any]:

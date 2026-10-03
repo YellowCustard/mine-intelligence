@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 import logging
 import secrets
@@ -114,17 +115,23 @@ class EdgeSettings(BaseSettings):
         host = (parts.hostname or "").lower()
         if parts.scheme == "https" and host:
             return v
-        same_box = (
-            host in ("localhost", "::1")
-            or host.startswith("127.")
-            or (host != "" and "." not in host and ":" not in host)
-        )
-        if parts.scheme == "http" and same_box:
+        if parts.scheme == "http" and _same_box_host(host):
             return v
         raise ValueError(
             "must be https:// for a core on another host (the device password is sent with "
             "every request); plain http is allowed only for localhost or a compose service name"
         )
+
+
+def _same_box_host(host: str) -> bool:
+    """Loopback (a literal loopback IP, not a name that merely starts with ``127.``) or a
+    single-label name, which in this deployment is a compose service on the same Docker host."""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host != "" and "." not in host and ":" not in host
 
 
 class FrameSource(Protocol):
