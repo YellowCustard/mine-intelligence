@@ -25,15 +25,19 @@ def get_engine():
     if _engine is None:
         settings = get_settings()
         url = settings.database_url
+        # hide_parameters: DBAPI errors otherwise embed bound values (e.g. a fix's lat/lon)
+        # in their message, so any logged exception would copy personal data out of the
+        # database and beyond the reach of the retention jobs.
         if url.startswith("sqlite"):
             _engine = create_engine(
                 url,
                 future=True,
                 connect_args={"check_same_thread": False},
                 poolclass=StaticPool,
+                hide_parameters=True,
             )
         else:
-            _engine = create_engine(url, pool_pre_ping=True, future=True)
+            _engine = create_engine(url, pool_pre_ping=True, future=True, hide_parameters=True)
     return _engine
 
 
