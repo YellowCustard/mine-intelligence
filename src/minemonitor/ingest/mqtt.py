@@ -28,9 +28,9 @@ from minemonitor.ingest.authz import (
     topic_matches_payload,
     vision_topic_matches_payload,
 )
-from minemonitor.ingest.service import PositionIngest, store_and_process
+from minemonitor.ingest.service import PositionIngest, store_and_process, store_position
 from minemonitor.ingest.spool import Spool
-from minemonitor.storage.db import get_session_factory
+from minemonitor.storage.db import get_session_factory, is_transient_db_error
 
 log = logging.getLogger("minemonitor.mqtt")
 
@@ -163,6 +163,7 @@ class MqttIngestor:
         self._last_retention = 0.0
         self._require_registered_device = s.mqtt_require_registered_device
         self.rejected_count = 0
+        self.processing_failed_count = 0
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
         topic = f"{self.prefix}/+/+/position"
@@ -252,8 +253,17 @@ class MqttIngestor:
                 log.error("refused vision record", extra={"topic": msg.topic, "error": str(exc)})
                 self.rejected_count += 1
                 return
-            except Exception as exc:  # noqa: BLE001 - DB may be down; retry
+            except Exception as exc:  # noqa: BLE001 - classified below
                 session.rollback()
+                if not is_transient_db_error(exc):
+                    # Deterministic failure: retrying would wedge the ingest loop.
+                    log.error(
+                        "dropping vision record that cannot be stored",
+                        exc_info=True,
+                        extra={"topic": msg.topic},
+                    )
+                    self.rejected_count += 1
+                    return
                 log.warning("vision store failed, will retry", extra={"error": str(exc)})
                 time.sleep(self.write_retry_s)
             finally:
@@ -270,6 +280,15 @@ class MqttIngestor:
             session.close()
 
     def _store_with_retry(self, payload: PositionIngest) -> None:
+        """Store and process a position, retrying only while the database is unreachable.
+
+        Retrying is correct for a transient fault (the broker keeps the message unacked
+        until the DB returns), but a deterministic failure would retry forever inside the
+        paho callback and wedge ingest for every asset behind it. So a non-transient
+        failure in zone/rule processing falls back to storing the raw fix alone (it stays
+        recomputable; live rules miss this one fix, loudly logged), and only if even the
+        raw insert fails deterministically is the message dropped, with an error log.
+        """
         while not self._stop.is_set():
             session = self._session_factory()
             try:
@@ -285,13 +304,53 @@ class MqttIngestor:
                     },
                 )
                 return
-            except Exception as exc:  # noqa: BLE001 - DB may be down; retry
+            except Exception as exc:  # noqa: BLE001 - classified below
                 session.rollback()
-                log.warning(
-                    "store failed, will retry",
-                    extra={"asset_id": payload.asset_id, "error": str(exc)},
+                if is_transient_db_error(exc):
+                    log.warning(
+                        "store failed, will retry",
+                        extra={"asset_id": payload.asset_id, "error": str(exc)},
+                    )
+                    time.sleep(self.write_retry_s)
+                    continue
+                log.error(
+                    "position processing failed; storing raw fix without live rules",
+                    exc_info=True,
+                    extra={"site_id": payload.site_id, "asset_id": payload.asset_id},
                 )
-                time.sleep(self.write_retry_s)
+                self.processing_failed_count += 1
+                self._store_raw_with_retry(payload)
+                return
+            finally:
+                session.close()
+
+    def _store_raw_with_retry(self, payload: PositionIngest) -> None:
+        """Insert the raw fix only (no zone/rule processing); same transient-only retry."""
+        while not self._stop.is_set():
+            session = self._session_factory()
+            try:
+                store_position(session, payload)
+                return
+            except Exception as exc:  # noqa: BLE001 - classified below
+                session.rollback()
+                if is_transient_db_error(exc):
+                    log.warning(
+                        "raw store failed, will retry",
+                        extra={"asset_id": payload.asset_id, "error": str(exc)},
+                    )
+                    time.sleep(self.write_retry_s)
+                    continue
+                log.error(
+                    "dropping position that cannot be stored",
+                    exc_info=True,
+                    extra={
+                        "site_id": payload.site_id,
+                        "asset_id": payload.asset_id,
+                        "payload": payload.model_dump_json(by_alias=True),
+                    },
+                )
+                self.rejected_count += 1
+                return
             finally:
                 session.close()
 

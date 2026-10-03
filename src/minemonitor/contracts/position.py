@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 class AssetPositionV1(BaseModel):
@@ -20,8 +19,8 @@ class AssetPositionV1(BaseModel):
     schema_: Literal["asset.position.v1"] = Field(default="asset.position.v1", alias="schema")
     site_id: str = Field(min_length=1)
     asset_id: str = Field(min_length=1)
-    ts: datetime
-    received_at: datetime
+    ts: AwareDatetime
+    received_at: AwareDatetime
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
     altitude_m: float | None = None

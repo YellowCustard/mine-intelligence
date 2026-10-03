@@ -54,3 +54,27 @@ def get_db() -> Iterator[Session]:
         yield session
     finally:
         session.close()
+
+
+def is_transient_db_error(exc: BaseException) -> bool:
+    """True if ``exc`` means "the database is unreachable or busy — retry later".
+
+    Connectivity loss, a dropped/invalidated connection, pool exhaustion, lock or
+    serialization conflicts (all :class:`OperationalError` / :class:`InterfaceError`
+    in SQLAlchemy's DBAPI mapping) are transient. Anything else — constraint or data
+    errors, and plain Python exceptions from processing code — will fail identically
+    on every retry, so callers must not loop on it.
+    """
+    from sqlalchemy import exc as sa_exc
+
+    if isinstance(
+        exc,
+        sa_exc.OperationalError
+        | sa_exc.InterfaceError
+        | sa_exc.DisconnectionError
+        | sa_exc.TimeoutError,
+    ):
+        return True
+    if isinstance(exc, sa_exc.DBAPIError) and exc.connection_invalidated:
+        return True
+    return isinstance(exc, ConnectionError | TimeoutError)
