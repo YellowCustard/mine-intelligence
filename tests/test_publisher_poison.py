@@ -56,7 +56,13 @@ def _publisher(tmp_path: Path) -> tuple[MqttPublisher, _FakeClient]:
     return pub, fake
 
 
-@pytest.mark.parametrize("bad", [_raw("HT 102"), "{not json", json.dumps({"asset_id": "x"})])
+# A naive ``ts`` was accepted by older releases and is now refused by ``AwareDatetime``.
+_NAIVE_TS = json.dumps({**json.loads(_raw("HT-102")), "ts": "2026-09-05T11:42:07"})
+
+
+@pytest.mark.parametrize(
+    "bad", [_raw("HT 102"), _NAIVE_TS, "{not json", json.dumps({"asset_id": "x"})]
+)
 def test_drain_quarantines_invalid_entry_and_continues(tmp_path: Path, bad: str) -> None:
     pub, fake = _publisher(tmp_path)
     pub.spool.append(_raw("HT-101"))
