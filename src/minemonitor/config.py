@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # The credentials shipped in ``.env.example`` for local development. They must
@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     # A fix whose device time is this far AHEAD of server receipt is a bad device clock and
     # is rejected at ingest: stored, it would advance the asset's live-rule watermark into
     # the future and every genuine fix after it would be skipped as "late".
-    max_future_skew_s: int = 120
+    max_future_skew_s: int = Field(default=120, ge=0)
     default_site_id: str = "kn-zw-01"
     # First-party vision (Stage B). A commissioned camera whose health heartbeat is silent this
     # long raises ``camera_offline`` (the "missed" lane).

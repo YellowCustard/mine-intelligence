@@ -125,3 +125,67 @@ def test_poisoned_watermark_is_ignored(magazine: Session) -> None:
         process_position(magazine, pos, created=True)
         magazine.commit()
     assert _breaches(magazine) == 1
+
+
+def _poison(session: Session, now: datetime, **extra: object) -> None:
+    session.add(
+        AssetZoneState(
+            site_id="kn-zw-01",
+            asset_id="LV-07",
+            zone_id="r1-explosives-magazine",
+            last_ts=now + timedelta(days=365),
+            **extra,
+        )
+    )
+    session.commit()
+
+
+def _process(session: Session, ts: datetime, received_at: datetime, **over: object) -> None:
+    body = {**_body(ts), "received_at": received_at.isoformat(), **over}
+    process_position(session, AssetPositionV1.model_validate(body), created=True)
+    session.commit()
+
+
+def test_watermark_recovery_does_not_evaluate_historical_backfill(magazine: Session) -> None:
+    """Recovery heals on a live fix; buffered history is not replayed as live alarms."""
+    now = datetime.now(UTC)
+    _poison(magazine, now)
+    for i in range(3):  # three-day-old buffered fixes inside the magazine
+        _process(magazine, now - timedelta(days=3) + timedelta(seconds=i), now)
+    assert _breaches(magazine) == 0
+    state = magazine.execute(select(AssetZoneState)).scalar_one()
+    last = state.last_ts if state.last_ts.tzinfo else state.last_ts.replace(tzinfo=UTC)
+    assert last > now + timedelta(days=300)  # untouched until a live fix heals it
+    for i in range(3):
+        _process(magazine, now + timedelta(seconds=i), now + timedelta(seconds=i))
+    assert _breaches(magazine) == 1
+
+
+def test_watermark_recovery_resets_future_dwell_episode(db_session: Session) -> None:
+    upsert_zone(
+        db_session,
+        site_id="kn-zw-01",
+        zone_id="r1-explosives-magazine",
+        name="Loading bay",
+        kind="loading",
+        geometry=box_polygon(MAG_LAT, MAG_LON, 40),
+        rules={"dwell_s": 60},
+    )
+    db_session.commit()
+    now = datetime.now(UTC)
+    _poison(db_session, now, inside=True, stationary_since=now + timedelta(days=365))
+    for s in (0, 30, 61):
+        ts = now + timedelta(seconds=s)
+        _process(db_session, ts, ts, speed_kph=0.0)
+    dwell = db_session.execute(select(Event).where(Event.type == "zone_dwell")).all()
+    assert len(dwell) == 1
+
+
+def test_negative_future_skew_is_rejected() -> None:
+    from pydantic import ValidationError
+
+    from minemonitor.config import Settings
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, max_future_skew_s=-1)  # type: ignore[call-arg]
+    assert Settings(_env_file=None).max_future_skew_s == 120  # type: ignore[call-arg]

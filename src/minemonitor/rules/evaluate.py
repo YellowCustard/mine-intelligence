@@ -8,6 +8,8 @@ one alarm, not a storm (brief §9, M3 acceptance).
 
 from __future__ import annotations
 
+from datetime import UTC
+
 from minemonitor.contracts import EventV1
 from minemonitor.contracts.position import AssetPositionV1
 from minemonitor.events.repository import new_event_id
@@ -93,14 +95,14 @@ def on_inzone_fix(
 
     if cfg.dwell_s is not None:
         if speed < STATIONARY_KPH:
-            if state.stationary_since is None:
+            since = state.stationary_since
+            if since is not None and since.tzinfo is None:
+                since = since.replace(tzinfo=UTC)  # SQLite returns naive, Postgres aware
+            if since is None:
                 state.stationary_since = pos.ts
-            elif (
-                not state.dwell_fired
-                and (pos.ts - state.stationary_since).total_seconds() >= cfg.dwell_s
-            ):
+            elif not state.dwell_fired and (pos.ts - since).total_seconds() >= cfg.dwell_s:
                 state.dwell_fired = True
-                dwell_s = (pos.ts - state.stationary_since).total_seconds()
+                dwell_s = (pos.ts - since).total_seconds()
                 events.append(
                     _event(
                         pos=pos,

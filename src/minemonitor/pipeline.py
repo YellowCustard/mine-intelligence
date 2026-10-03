@@ -59,7 +59,11 @@ def process_position(session: Session, pos: AssetPositionV1, created: bool) -> l
             if last_ts > pos.received_at + max_skew:
                 # A watermark in the future can only come from a bad-clock fix stored before
                 # ingest rejected them; trusting it would mute live rules for this asset
-                # until wall-clock time caught up. Ignore it so this fix is evaluated.
+                # until wall-clock time caught up. Heal it on the next *live* fix; buffered
+                # history arriving first must not be replayed as live alarms (it is stored
+                # and recomputable), nor drag the watermark back for later backfill.
+                if pos.ts < pos.received_at - max_skew:
+                    continue
                 log.warning(
                     "ignoring future-dated zone watermark",
                     extra={
@@ -69,6 +73,15 @@ def process_position(session: Session, pos: AssetPositionV1, created: bool) -> l
                         "last_ts": last_ts.isoformat(),
                     },
                 )
+                # The same bad clock may have opened a dwell episode in the future, which
+                # would never reach its threshold: start the episode afresh.
+                since = state.stationary_since
+                if (
+                    since is not None
+                    and (since if since.tzinfo else since.replace(tzinfo=UTC)) > pos.ts
+                ):
+                    state.stationary_since = None
+                    state.dwell_fired = False
             elif pos.ts <= last_ts:
                 continue
 
