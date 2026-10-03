@@ -27,6 +27,7 @@ from typing import Any, Protocol
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from minemonitor import net
 from minemonitor.access import service
 from minemonitor.contracts import EventV1
 from minemonitor.ingest.adapters.access_sim import normalise_access_event
@@ -48,7 +49,7 @@ def _urllib_get(url: str, token: str, timeout_s: float) -> bytes:
         headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
         method="GET",
     )
-    with urllib.request.urlopen(req, timeout=timeout_s) as resp:  # noqa: S310 - operator-configured URL
+    with net.urlopen(req, timeout=timeout_s) as resp:
         if resp.status >= 300:
             raise RuntimeError(f"gate API returned {resp.status}")
         return bytes(resp.read())

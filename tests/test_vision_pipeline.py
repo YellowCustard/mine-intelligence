@@ -449,19 +449,19 @@ def test_http_publisher_maps_422_and_outages() -> None:
     body = json.dumps({"detail": {"index": 2, "error": "bad"}}).encode()
     err = urllib.error.HTTPError(pub.url, 422, "Unprocessable", {}, io.BytesIO(body))  # type: ignore[arg-type]
     with (
-        mock.patch("urllib.request.urlopen", side_effect=err),
+        mock.patch("minemonitor.net.urlopen", side_effect=err),
         pytest.raises(RejectedRecordError) as exc,
     ):
         pub([{}])
     assert exc.value.index == 2
     with (
-        mock.patch("urllib.request.urlopen", side_effect=urllib.error.URLError("down")),
+        mock.patch("minemonitor.net.urlopen", side_effect=urllib.error.URLError("down")),
         pytest.raises(TransientPublishError),
     ):
         pub([{}])
     e503 = urllib.error.HTTPError(pub.url, 503, "down", {}, io.BytesIO(b""))  # type: ignore[arg-type]
     with (
-        mock.patch("urllib.request.urlopen", side_effect=e503),
+        mock.patch("minemonitor.net.urlopen", side_effect=e503),
         pytest.raises(TransientPublishError),
     ):
         pub([{}])

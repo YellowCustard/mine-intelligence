@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+from minemonitor import net
+
 Auth = tuple[str, str] | None
 
 
@@ -60,7 +62,7 @@ class UrllibHttp:
             token = base64.b64encode(f"{auth[0]}:{auth[1]}".encode()).decode()
             req.add_header("Authorization", f"Basic {token}")
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout_s) as r:
+            with net.urlopen(req, timeout=self.timeout_s) as r:
                 raw = r.read().decode()
                 status = r.status
         except urllib.error.HTTPError as e:
