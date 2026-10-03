@@ -115,6 +115,29 @@ def test_processing_bug_stores_raw_fix_and_moves_on(
     assert _stored(db_session) == 2  # raw telemetry kept; recompute can still use it
 
 
+def test_unstorable_fix_is_not_counted_and_not_logged_with_coordinates(
+    ingestor: MqttIngestor,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def boom(*_a: object, **_k: object) -> object:
+        raise sa_exc.IntegrityError("INSERT", {}, Exception("deterministic"))
+
+    monkeypatch.setattr(mqtt_mod, "store_and_process", boom)
+    monkeypatch.setattr(mqtt_mod, "store_position", boom)
+    with caplog.at_level("ERROR", logger="minemonitor.mqtt"):
+        _deliver(ingestor, _Msg(_TOPIC, _body(_iso())))
+    assert ingestor.rejected_count == 1 and ingestor.stored_count == 0
+    msg = "dropping position that cannot be stored"
+    dropped = [r for r in caplog.records if r.getMessage() == msg]
+    assert len(dropped) == 1
+    assert dropped[0].asset_id == "HT-102"  # type: ignore[attr-defined]
+    # Positions can locate an identifiable operator; logs sit outside retention jobs.
+    for field in vars(dropped[0]).values():
+        assert "-17.8252" not in str(field) and "31.0335" not in str(field)
+
+
 def test_transient_db_error_is_retried(
     ingestor: MqttIngestor, db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:

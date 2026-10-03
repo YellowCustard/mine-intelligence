@@ -206,8 +206,8 @@ class MqttIngestor:
             return
         # Withhold the ack (by not returning) until the write succeeds, so the
         # broker redelivers rather than the consumer dropping on a DB outage.
-        self._store_with_retry(payload)
-        self.stored_count += 1
+        if self._store_with_retry(payload):
+            self.stored_count += 1
 
     def _on_vision_message(self, msg: mqtt.MQTTMessage) -> None:
         """Validate and store one edge vision record (``vision.*.v1``).
@@ -279,7 +279,7 @@ class MqttIngestor:
         finally:
             session.close()
 
-    def _store_with_retry(self, payload: PositionIngest) -> None:
+    def _store_with_retry(self, payload: PositionIngest) -> bool:
         """Store and process a position, retrying only while the database is unreachable.
 
         Retrying is correct for a transient fault (the broker keeps the message unacked
@@ -288,6 +288,7 @@ class MqttIngestor:
         failure in zone/rule processing falls back to storing the raw fix alone (it stays
         recomputable; live rules miss this one fix, loudly logged), and only if even the
         raw insert fails deterministically is the message dropped, with an error log.
+        Returns whether the fix was stored (False if dropped or the ingestor stopped).
         """
         while not self._stop.is_set():
             session = self._session_factory()
@@ -303,7 +304,7 @@ class MqttIngestor:
                         "events": len(events),
                     },
                 )
-                return
+                return True
             except Exception as exc:  # noqa: BLE001 - classified below
                 session.rollback()
                 if is_transient_db_error(exc):
@@ -319,18 +320,18 @@ class MqttIngestor:
                     extra={"site_id": payload.site_id, "asset_id": payload.asset_id},
                 )
                 self.processing_failed_count += 1
-                self._store_raw_with_retry(payload)
-                return
+                return self._store_raw_with_retry(payload)
             finally:
                 session.close()
+        return False
 
-    def _store_raw_with_retry(self, payload: PositionIngest) -> None:
+    def _store_raw_with_retry(self, payload: PositionIngest) -> bool:
         """Insert the raw fix only (no zone/rule processing); same transient-only retry."""
         while not self._stop.is_set():
             session = self._session_factory()
             try:
                 store_position(session, payload)
-                return
+                return True
             except Exception as exc:  # noqa: BLE001 - classified below
                 session.rollback()
                 if is_transient_db_error(exc):
@@ -340,19 +341,22 @@ class MqttIngestor:
                     )
                     time.sleep(self.write_retry_s)
                     continue
+                # Identifiers and device time only: coordinates can locate an
+                # identifiable operator, and logs are outside the retention jobs.
                 log.error(
                     "dropping position that cannot be stored",
                     exc_info=True,
                     extra={
                         "site_id": payload.site_id,
                         "asset_id": payload.asset_id,
-                        "payload": payload.model_dump_json(by_alias=True),
+                        "ts": payload.ts.isoformat(),
                     },
                 )
                 self.rejected_count += 1
-                return
+                return False
             finally:
                 session.close()
+        return False
 
     def _offline_loop(self) -> None:
         """Periodic maintenance: offline detection and cycle/metric recompute.
