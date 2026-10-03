@@ -14,7 +14,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from minemonitor.auth.deps import require_device, require_viewer
-from minemonitor.ingest.service import PositionIngest, store_and_process
+from minemonitor.ingest.service import (
+    FutureTimestampError,
+    PositionIngest,
+    reject_if_future,
+    store_and_process,
+)
+from minemonitor.platform.metrics import metrics
 from minemonitor.storage.db import get_db
 from minemonitor.storage.models import User
 from minemonitor.storage.repositories import list_positions
@@ -50,6 +56,15 @@ def ingest_position(
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "device not authorised to publish for this site"
         )
+    try:
+        reject_if_future(payload)
+    except FutureTimestampError as exc:
+        metrics().incr("ingest.rejected.future_ts")
+        log.warning(
+            "rejected future-dated position",
+            extra={"site_id": payload.site_id, "asset_id": payload.asset_id, "error": str(exc)},
+        )
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     created, events = store_and_process(db, payload)
     log.info(
         "position ingested",

@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # Rules.
     offline_threshold_s: int = 600  # silent this long (while active) = offline
     offline_check_interval_s: int = 60  # how often the ingestor scans for offline
+    # A fix whose device time is this far AHEAD of server receipt is a bad device clock and
+    # is rejected at ingest: stored, it would advance the asset's live-rule watermark into
+    # the future and every genuine fix after it would be skipped as "late".
+    max_future_skew_s: int = 120
     default_site_id: str = "kn-zw-01"
     # First-party vision (Stage B). A commissioned camera whose health heartbeat is silent this
     # long raises ``camera_offline`` (the "missed" lane).
