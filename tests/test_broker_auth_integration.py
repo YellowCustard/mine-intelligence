@@ -133,6 +133,42 @@ def test_real_broker_accepts_rendered_credentials_and_enforces_acl(
         broker.wait(timeout=5)
 
 
+def test_service_account_publishes_positions_the_ingestor_receives(
+    db_session: Session, tmp_path: Path
+) -> None:
+    """The simulator and the Teltonika adapter publish as the service account the ingestor
+    subscribes with. A read-only ACL for it let them connect, then dropped every position."""
+    passwd = render_password_file(
+        db_session, service_user=_SVC_USER, service_hash=mosquitto_password_hash(_SVC_PASS)
+    )
+    acl = render_mosquitto_acl(db_session, ingest_user=_SVC_USER)
+    port = _free_port()
+    broker = _start_broker(tmp_path, port, passwd, acl)
+    clients: list[mqtt.Client] = []
+    try:
+        ingestor, rc = _connect(port, _SVC_USER, _SVC_PASS, "mm-ingestor")
+        clients.append(ingestor)
+        assert rc == 0
+        publisher, rc = _connect(port, _SVC_USER, _SVC_PASS, "mm-publisher")
+        clients.append(publisher)
+        assert rc == 0
+        received: list[str] = []
+        ingestor.on_message = lambda c, u, msg: received.append(msg.topic)
+        ingestor.subscribe("mm/+/+/position", qos=1)
+        time.sleep(0.5)
+        publisher.publish("mm/kn-zw-01/HT-102/position", b"{}", qos=1).wait_for_publish(timeout=5)
+        deadline = time.monotonic() + 5
+        while not received and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert received == ["mm/kn-zw-01/HT-102/position"]
+    finally:
+        for c in clients:
+            c.loop_stop()
+            c.disconnect()
+        broker.terminate()
+        broker.wait(timeout=5)
+
+
 def test_real_broker_confines_a_vision_edge_node_to_its_sites_vision_topics(
     db_session: Session, tmp_path: Path
 ) -> None:

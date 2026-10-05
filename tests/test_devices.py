@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy.orm import Session
 
 from minemonitor.devices import service
@@ -62,7 +63,8 @@ def test_acl_scopes_each_device_to_its_topic(db_session: Session) -> None:
     service.set_enabled(db_session, "trk-2", False)  # disabled → not in the ACL
     db_session.commit()
     acl = render_mosquitto_acl(db_session)
-    assert "user mm-ingestor" in acl and "topic read mm/#" in acl
+    # The service account is the ingestor *and* the simulator/Teltonika publishers.
+    assert "user mm-ingestor" in acl and "topic readwrite mm/#" in acl
     assert "user trk-1" in acl and "topic write mm/kn-zw-01/HT-102/position" in acl
     assert "trk-2" not in acl  # disabled device excluded
 
@@ -128,3 +130,38 @@ def test_provisioning_is_audited(db_session: Session) -> None:
     c.post("/sites/kn-zw-01/devices", json={"device_id": "trk-1", "asset_id": "HT-102"})
     audit = c.get("/sites/kn-zw-01/audit").json()
     assert any(a["action"] == "device.register" and a["entity_id"] == "trk-1" for a in audit)
+
+
+def test_acl_cli_names_the_broker_login_not_the_client_id(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Mosquitto matches ACL "user" lines against the login username; the client id never
+    # matches, so naming it would leave the service account with no rights at all.
+    from types import SimpleNamespace
+
+    from minemonitor.devices import acl
+
+    settings = SimpleNamespace(
+        mqtt_username="mm-svc", mqtt_ingest_client_id="mm-ingestor", mqtt_topic_prefix="mm"
+    )
+    monkeypatch.setattr(acl, "get_settings", lambda: settings)
+    monkeypatch.setattr(acl, "get_session_factory", lambda: lambda: db_session)
+    assert acl.main() == 0
+    out = capsys.readouterr().out
+    assert "user mm-svc\ntopic readwrite mm/#" in out
+    assert "user mm-ingestor" not in out
+
+
+def test_acl_cli_refuses_without_a_broker_login(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from types import SimpleNamespace
+
+    from minemonitor.devices import acl
+
+    settings = SimpleNamespace(
+        mqtt_username="", mqtt_ingest_client_id="mm-ingestor", mqtt_topic_prefix="mm"
+    )
+    monkeypatch.setattr(acl, "get_settings", lambda: settings)
+    assert acl.main() == 2
+    assert "MM_MQTT_USERNAME" in capsys.readouterr().err

@@ -8,9 +8,10 @@ A vision edge node is a device too (``source = "vision-edge"``, its ``asset_id``
 It writes ``mm/<site>/vision/#`` for its own site only, and never a position topic; the ingestor
 additionally rejects any record whose topic and payload disagree.
 
-Regenerate and reload the broker whenever devices change:
+Regenerate and reload the broker whenever devices change (this writes the ACL and the password
+file together):
 
-    docker compose exec api uv run python -m minemonitor.devices.acl > mosquitto/acl
+    docker compose exec api uv run python -m minemonitor.devices.broker_config
     docker compose exec mqtt kill -HUP 1
 """
 
@@ -31,13 +32,20 @@ VISION_EDGE_SOURCE = "vision-edge"
 def render_mosquitto_acl(
     session: Session, *, prefix: str = "mm", ingest_user: str = "mm-ingestor"
 ) -> str:
-    """Return the ACL text: the ingestor may read everything; each device writes one topic."""
+    """Return the ACL text: the service account reads and writes everything; each device writes
+    one topic.
+
+    ``ingest_user`` is the service account's login (MM_MQTT_USERNAME). The ingestor subscribes
+    with it, and the simulator and the Teltonika adapter publish every asset's positions with it,
+    so it needs both. The broker matches ``user`` lines against the login, never the client id.
+    """
     lines = [
         "# Generated from the devices table — do not edit by hand.",
-        "# The ingestor subscribes to all telemetry; each device writes only its own topic.",
+        "# The service account (ingestor, simulator, Teltonika adapter) reads and writes all",
+        "# telemetry; each device writes only its own topic.",
         "",
         f"user {ingest_user}",
-        f"topic read {prefix}/#",
+        f"topic readwrite {prefix}/#",
         "",
     ]
     devices = session.execute(
@@ -55,13 +63,16 @@ def render_mosquitto_acl(
 
 def main() -> int:
     settings = get_settings()
+    if not settings.mqtt_username:
+        sys.stderr.write("MM_MQTT_USERNAME is not set — the broker service account is undefined.\n")
+        return 2
     session = get_session_factory()()
     try:
         sys.stdout.write(
             render_mosquitto_acl(
                 session,
                 prefix=settings.mqtt_topic_prefix,
-                ingest_user=settings.mqtt_ingest_client_id,
+                ingest_user=settings.mqtt_username,
             )
         )
     finally:
