@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from minemonitor.config import get_settings
@@ -31,7 +31,7 @@ class PositionIngest(BaseModel):
     schema_: str = Field(default="asset.position.v1", alias="schema")
     site_id: Identifier
     asset_id: Identifier
-    ts: datetime
+    ts: AwareDatetime
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
     altitude_m: float | None = None
