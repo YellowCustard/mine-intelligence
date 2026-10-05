@@ -36,7 +36,8 @@ if [ "$1 $2 $3 $4 $5 $6" = "compose exec -T db sh -c" ] && [ "$#" -ge 8 ]; then
   exit 0
 fi
 case "$*" in
-  "compose exec -T api printenv MM_MQTT_USERNAME")
+  "compose exec -T api python -c "*MM_MQTT_USERNAME*)
+    [ "$STUB_LOOKUP" = fail ] && { echo "service \"api\" is not running" >&2; exit 1; }
     printf '%s\n' "$STUB_MQTT_USER" ;;
   "compose exec -T mqtt mosquitto_pub "*)
     case "$STUB_BROKER" in
@@ -66,6 +67,7 @@ def _run(
     user: str,
     broker: str = "auth",
     timescale: str = "current",
+    lookup: str = "ok",
     args: tuple[str, ...] = (),
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     repo = tmp_path / "repo"
@@ -90,6 +92,7 @@ def _run(
         "STUB_MQTT_USER": user,
         "STUB_BROKER": broker,
         "STUB_TS": timescale,
+        "STUB_LOOKUP": lookup,
     }
     # No MM_MQTT_USERNAME in the script's own environment: the login lives in .env only.
     result = subprocess.run(
@@ -151,6 +154,18 @@ def test_fails_when_the_broker_never_answers(tmp_path: Path, script: str) -> Non
     assert result.returncode != 0
     assert "docker compose logs mqtt" in result.stdout
     assert calls.count(ANON_PROBE) > 1  # retried while the broker starts
+
+
+@pytest.mark.parametrize("script", ["deploy.sh", "restore.sh"])
+def test_stops_when_the_login_cannot_be_read(tmp_path: Path, script: str) -> None:
+    # A failed lookup must not read as "no broker login": that would skip the broker files and
+    # the anonymous-client check, and start whatever broker config compose picked.
+    args = ("dump.sql",) if script == "restore.sh" else ()
+    result, calls = _run(tmp_path, script, user="mm-svc", lookup="fail", args=args)
+    assert result.returncode != 0
+    assert "could not read MM_MQTT_USERNAME" in result.stderr
+    assert FULL_UP not in calls
+    assert BROKER_FILES not in calls
 
 
 def test_restore_loads_the_dump_before_starting_the_api(tmp_path: Path) -> None:

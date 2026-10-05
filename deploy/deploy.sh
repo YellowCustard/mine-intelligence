@@ -41,7 +41,7 @@ mm_wait_for_api || exit 1
 # Broker auth (brief §10/§11). docker-compose.yml runs the authenticated broker
 # (docker/mosquitto.auth.conf, allow_anonymous false) whenever MM_MQTT_USERNAME is set, in .env or
 # the shell. It needs the password and ACL files, so write them before the broker starts.
-MQTT_USER=$(mm_mqtt_username)
+MQTT_USER=$(mm_mqtt_username) || exit 1
 if [ -n "$MQTT_USER" ]; then
   mm_generate_broker_files
 fi
