@@ -218,5 +218,7 @@ the rest of the stack. (Both scripts wrap `pg_dump`/`psql` and honour the
       provides login; TLS protects the Basic credentials in transit).
 - [ ] Firewall (ufw) allows only 22/80/443. ufw does **not** filter ports Docker
       publishes, so also pass commissioning check A8: 8000/5432/1883/8333 bound to
-      `127.0.0.1` (the `MM_*_BIND` defaults) and closed when probed from another machine.
+      `127.0.0.1` (the `MM_*_BIND` defaults) and closed when probed from another machine,
+      unless one was opened on purpose with its `MM_*_BIND` setting (1883 only to the
+      device VLAN, with broker auth on).
 - [ ] Retention days (`MM_RETAIN_*`) set to the mine's agreed policy.
