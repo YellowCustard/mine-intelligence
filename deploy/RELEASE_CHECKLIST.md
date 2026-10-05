@@ -45,6 +45,9 @@ Tick every box. A red box is a blocked release, not a note for later.
       `--profile tls`, or your own reverse proxy) or an SSH tunnel — Basic auth must
       ride TLS. For a public domain, the Caddyfile uses `tls {$MM_TLS_EMAIL}`
       (Let's Encrypt); on-prem uses Caddy's internal CA.
+- [ ] Database and broker published on localhost only (`MM_DB_BIND`, `MM_MQTT_BIND`
+      default `127.0.0.1`); commissioning check A8 passes. Docker-published ports
+      bypass ufw, so the firewall alone proves nothing.
 - [ ] **MQTT broker requires auth** — `MM_MQTT_USERNAME`/`PASSWORD` set, the broker
       runs `allow_anonymous false` (`docker/mosquitto.auth.conf`), and the password +
       ACL files were generated from the devices table. No anonymous access to 1883.

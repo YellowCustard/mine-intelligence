@@ -16,7 +16,7 @@ simulator for demo data until real trackers are on site). So it runs on a
 ## 1. Prerequisites (once, on the VPS)
 
 - Ubuntu 22.04+ (or similar), **2 GB RAM minimum** (4 GB comfortable), ~10 GB disk.
-- Docker Engine + the Compose plugin:
+- Docker Engine 28.0 or later + the Compose plugin:
   ```bash
   curl -fsSL https://get.docker.com | sh
   sudo usermod -aG docker "$USER"   # log out/in so this takes effect
@@ -145,8 +145,10 @@ Then `certbot --nginx -d mine.example.com`.
 - **Real trackers (M7):** stop the simulator (`docker compose stop simulator`) and
   bring up the Teltonika listener — `docker compose --profile trackers up -d` —
   then point trackers at `<host>:5027` (Codec 8/8E over TCP). It decodes and
-  republishes into MQTT, so nothing else changes at the ingest boundary. Open
-  5027/tcp only to the tracker network, never the public internet. The
+  republishes into MQTT, so nothing else changes at the ingest boundary. Keep
+  5027/tcp to the tracker network, never the public internet. ufw cannot do this,
+  because Docker-published ports bypass it: set `MM_TELTONIKA_BIND` in `.env` to the
+  host address the trackers arrive on (for a private APN, that interface). The
   IMEI→asset mapping is a placeholder (`teltonika-<imei>`) until the fleet list
   is confirmed.
 
@@ -214,5 +216,7 @@ the rest of the stack. (Both scripts wrap `pg_dump`/`psql` and honour the
 - [ ] Created real admin/user accounts, then blanked `MM_BOOTSTRAP_ADMIN_*`.
 - [ ] API reachable only via SSH tunnel **or** nginx with TLS in front (the app
       provides login; TLS protects the Basic credentials in transit).
-- [ ] Firewall (ufw) allows only 22/80/443; **not** 8000/5432/1883/8333.
+- [ ] Firewall (ufw) allows only 22/80/443. ufw does **not** filter ports Docker
+      publishes, so also pass commissioning check A8: 8000/5432/1883/8333 bound to
+      `127.0.0.1` (the `MM_*_BIND` defaults) and closed when probed from another machine.
 - [ ] Retention days (`MM_RETAIN_*`) set to the mine's agreed policy.

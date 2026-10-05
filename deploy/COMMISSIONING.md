@@ -20,14 +20,27 @@ Run on the clean on-site server, from the repo root.
 
 | # | Action | Command | Expected | Result |
 |---|---|---|---|---|
-| A1 | Install Docker Engine + compose plugin | (distro package) | `docker compose version` prints a version | |
+| A1 | Install Docker Engine + compose plugin | (distro package) | `docker compose version` prints a version; `docker version --format '{{.Server.Version}}'` is 28.0 or later (older engines can let a host on the same LAN reach container ports directly) | |
 | A2 | Configure environment | `cp .env.example .env` then edit | strong `POSTGRES_PASSWORD` (plus `MM_OBJECTSTORE_*` and `MM_EDGE_S3_*` only if the `evidence` profile is used); set `MM_ENV=prod`, `MM_DEFAULT_SITE_TZ=Africa/Harare`, `MM_DEFAULT_SITE_ID`, and `MM_MQTT_USERNAME`/`MM_MQTT_PASSWORD` (prod refuses an anonymous broker) | |
 | A3 | Bring up the stack (auto-generates broker creds when `MM_MQTT_USERNAME` is set) | `bash deploy/deploy.sh` | script waits for the API to be healthy and prints next steps | |
 | A4 | Enable TLS | `docker compose --profile tls up -d` | Caddy on 443; internal CA on-prem, or Let's Encrypt for a public domain (see DEPLOY.md) | |
 | A5 | Confirm migrations ran | `docker compose exec api uv run alembic current` | head is the latest revision | |
 | A6 | Create the first admin | `docker compose exec api uv run python -m minemonitor.auth.cli <user> admin` | user created | |
 | A7 | Post-deploy smoke test | `MM_SMOKE_URL=… MM_SMOKE_USER=… MM_SMOKE_PASSWORD=… MM_SMOKE_SITE=… docker compose exec -T api uv run python -m minemonitor.smoke` | 6/6 checks pass, exit 0 | |
-| A8 | Firewall | `ufw` allows only 22/80/443 | 8000/5432/1883/8333 **not** publicly reachable | |
+| A8 | Exposure | on the server `docker compose ps`; then the probe below **from another machine** on the mine LAN (and from outside, if the box has a public address) | PORTS shows 8000/5432/1883/8333 on `127.0.0.1` only, and the probe prints `closed` for each, unless one was opened on purpose with its `MM_*_BIND` setting (1883 to the device VLAN only) | |
+
+**A8 probe.** `ufw` does not cover these ports: Docker forwards published ports through its own
+iptables rules, which `ufw`'s rules never see. Only the `MM_*_BIND` addresses in `.env` keep a port
+off the network, so check from another machine rather than reading the firewall. Replace `SERVER`
+with the box's LAN address; a refused or filtered port both print `closed`:
+
+```bash
+for p in 5432 1883 8000 8333; do
+  if timeout 3 bash -c "</dev/tcp/SERVER/$p" 2>/dev/null; then echo "OPEN   $p"; else echo "closed $p"; fi
+done
+```
+
+80/443 (the `tls` profile) and 5027 (the `trackers` profile) are meant to answer.
 
 ## Stage B — Site configuration
 

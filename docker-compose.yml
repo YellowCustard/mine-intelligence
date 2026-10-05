@@ -14,7 +14,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minemonitor}
       POSTGRES_DB: ${POSTGRES_DB:-minemonitor}
     ports:
-      - "5432:5432"
+      # Loopback only: the API, ingestor and backup reach the database over the compose network.
+      # Docker-published ports bypass ufw, so this bind address is what keeps 5432 off the LAN.
+      - "${MM_DB_BIND:-127.0.0.1}:5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -27,7 +29,11 @@ services:
     image: eclipse-mosquitto:2
     restart: unless-stopped
     ports:
-      - "1883:1883"
+      # Loopback by default: every client in this stack reaches the broker over the compose
+      # network. Set MM_MQTT_BIND to this host's device-VLAN address only when a device on another
+      # box publishes over MQTT (a vision edge node with MM_EDGE_TRANSPORT=mqtt), and only with
+      # the authenticated broker. ufw does not filter Docker-published ports.
+      - "${MM_MQTT_BIND:-127.0.0.1}:1883:1883"
     volumes:
       # Default is the anonymous dev config; set MM_MOSQUITTO_CONF=./docker/mosquitto.auth.conf
       # for the hardened, authenticated broker (generate ./docker/mosquitto first with
@@ -216,6 +222,8 @@ services:
       MM_DEFAULT_SITE_ID: ${MM_DEFAULT_SITE_ID:-kn-zw-01}
       MM_TELTONIKA_PORT: ${MM_TELTONIKA_PORT:-5027}
     ports:
+      # Trackers dial in, so this one faces the network. ufw cannot narrow it (Docker-published
+      # ports bypass ufw); set MM_TELTONIKA_BIND to the host address the trackers reach.
       - "${MM_TELTONIKA_BIND:-0.0.0.0}:${MM_TELTONIKA_PORT:-5027}:${MM_TELTONIKA_PORT:-5027}"
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.adapters.teltonika"]
 
