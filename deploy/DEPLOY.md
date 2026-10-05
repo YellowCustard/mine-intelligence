@@ -29,7 +29,9 @@ git clone https://github.com/YellowCustard/mine-intelligence.git
 cd mine-intelligence
 ```
 
-(To update later: `git pull`, then re-run the deploy script. A box that ran the old `minio`
+(To update later: `git pull`, then re-run the deploy script. When the database image moves to a
+new TimescaleDB release, the script updates the extension itself; back up again afterwards, as
+[Operations §5](../docs/OPERATIONS.md#5-backup-and-restore) explains. A box that ran the old `minio`
 service also needs [Upgrading a deployment that ran MinIO](../docs/OBJECT_STORAGE.md#upgrading-a-deployment-that-ran-minio):
 its container keeps running, and any S3 evidence must be copied across.)
 

@@ -256,6 +256,16 @@ then starts the API. With broker auth on it writes the broker files from the res
 devices table, then brings up the rest of the stack. Verify with `docker compose ps` and
 `curl -fsS http://127.0.0.1:8000/health`, then run the smoke test (§3).
 
+**TimescaleDB upgrades.** When the `db` image moves to a new TimescaleDB release, `deploy.sh`
+runs `ALTER EXTENSION timescaledb UPDATE` before the API starts, prints
+`Updated the TimescaleDB extension to <version>`, and closes the sessions still on the old
+version so the API and ingestor reconnect, as after a database restart. A dump restores only
+into the TimescaleDB version it was taken on
+([Timescale](https://github.com/timescale/docs/blob/latest/_partials/_migrate_from_timescaledb_version.md)),
+so **take a new backup right after a deploy that prints that line**. To restore an older dump,
+check out the release it was taken on, restore it there, then check out the current release
+and run `deploy.sh`.
+
 ---
 
 ## 6. Data retention and erasure (CDPA / SI 155 of 2024)

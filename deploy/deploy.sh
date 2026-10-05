@@ -26,9 +26,15 @@ fi
 
 . deploy/common.sh
 
-# The API migrates the database on start, and the broker files are written from the database, so
-# the database and the API come up first.
-echo "==> Starting the database and the API"
+# The database first: a new db image needs its extension updated before the API connects. The
+# API migrates the database on start, and the broker files are written from the database, so the
+# API comes up next.
+echo "==> Starting the database"
+docker compose up -d db
+mm_wait_for_db || exit 1
+mm_update_timescaledb || exit 1
+
+echo "==> Starting the API"
 docker compose up -d --build db api
 mm_wait_for_api || exit 1
 
