@@ -220,7 +220,9 @@ the rest of the stack. (Both scripts wrap `pg_dump`/`psql` and honour the
       publishes, so also pass commissioning check A8. 5432 and 8000 are always bound
       to `127.0.0.1` and closed when probed from another machine. 1883 and 8333 are too,
       unless deliberately opened: 1883 on the device-VLAN address with broker auth on,
-      8333 on the LAN for a vision edge node on another box. With trackers, 5027 is
+      8333 on the LAN for a vision edge node on another box (that node then sets
+      `MM_EDGE_S3_ENDPOINT=http://<core LAN address>:8333`, because the default
+      `objectstore` name resolves only on this box's compose network). With trackers, 5027 is
       bound to `MM_TELTONIKA_BIND` (the address the trackers arrive on) and closed from
       outside the site.
 - [ ] Retention days (`MM_RETAIN_*`) set to the mine's agreed policy.
