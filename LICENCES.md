@@ -72,7 +72,7 @@ need them. Selection and the full per-model audit: `docs/VISION_MODEL_LICENSES.m
 | Image | Licence | Source |
 |---|---|---|
 | timescale/timescaledb (2.30.2-pg16) | Apache-2.0 (Timescale Community for some features) | https://github.com/timescale/timescaledb |
-| eclipse-mosquitto | EPL-2.0 / EDL-1.0 | https://github.com/eclipse/mosquitto |
+| eclipse-mosquitto (2.0.22) | EPL-2.0 / EDL-1.0 | https://github.com/eclipse/mosquitto |
 | chrislusf/seaweedfs (4.48, opt-in `evidence` profile) | Apache-2.0 (the open-source edition; the separate SeaweedFS Enterprise edition is not used) | https://github.com/seaweedfs/seaweedfs |
 | python (base image) | PSF | https://hub.docker.com/_/python |
 

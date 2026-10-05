@@ -26,7 +26,10 @@ services:
       retries: 10
 
   mqtt:
-    image: eclipse-mosquitto:2
+    # Pinned: the floating `2` tag moved to 2.1 (September 2026), which deprecates acl_file and
+    # password_file and quits on a reload that finds a bad entry in either. Move to 2.1 as its own
+    # change, with the broker files tested under it.
+    image: eclipse-mosquitto:2.0.22
     restart: unless-stopped
     ports:
       # Loopback by default: every client in this stack reaches the broker over the compose

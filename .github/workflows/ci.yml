@@ -117,6 +117,24 @@ jobs:
           echo "$out"
           grep -q "edge node misconfigured" <<<"$out"
           grep -q "MM_EDGE_SITE_ID: Field required" <<<"$out"
+      - name: Broker persistence survives the move from Mosquitto 2.1 back to the pinned 2.0
+        run: |
+          # A box that pulled the floating `2` tag runs 2.1 and wrote its persistence file with it.
+          # A message queued for the ingestor's persistent session must still arrive after the pin.
+          docker volume create mq-downgrade
+          run() { docker run -d --name "$1" -v mq-downgrade:/mosquitto/data \
+            -v "$PWD/docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro" "$2"; sleep 2; }
+          run mq21 eclipse-mosquitto:2.1.2
+          docker exec mq21 mosquitto_sub -c -i ci-ingestor -q 1 -t ci/queued -E
+          docker exec mq21 mosquitto_pub -q 1 -t ci/queued -m queued-on-2.1
+          docker stop mq21
+          run mq20 "$(docker compose config --format json | jq -r .services.mqtt.image)"
+          docker logs mq20 2>&1 | grep -m1 'mosquitto version'
+          docker logs mq20 2>&1 | grep -q 'mosquitto version 2.0.22 running'
+          got=$(docker exec mq20 mosquitto_sub -c -i ci-ingestor -q 1 -t ci/queued -C 1 -W 10)
+          echo "delivered after the downgrade: $got"
+          [ "$got" = queued-on-2.1 ]
+          docker rm -f mq21 mq20 && docker volume rm mq-downgrade
       - name: Deploy over a site on the previous database image, with the broker login only in .env
         run: |
           printf 'MM_MQTT_USERNAME=mm-ci\nMM_MQTT_PASSWORD=ci-broker-password\n' > .env

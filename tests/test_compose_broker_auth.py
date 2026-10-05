@@ -13,6 +13,7 @@ from __future__ import annotations
 import getpass
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -191,3 +192,12 @@ def test_healthcheck_passes_on_the_anonymous_broker(broker: Any) -> None:
 @needs_mosquitto
 def test_healthcheck_fails_when_no_broker_answers() -> None:
     assert _healthcheck(_free_port()) != 0
+
+
+@pytest.mark.parametrize("service", ["db", "backup", "mqtt"])
+def test_stateful_images_are_pinned_to_a_release(service: str) -> None:
+    # These images own on-disk formats (the database, the broker's persistence file). A floating
+    # tag moved the broker from 2.0 to 2.1 without a change here; an upgrade must be a commit.
+    image = yaml.safe_load(COMPOSE.read_text())["services"][service]["image"]
+    name, _, tag = image.partition(":")
+    assert re.fullmatch(r"\d+\.\d+\.\d+(-pg\d+)?", tag), f"{service} runs {image}"
