@@ -35,14 +35,18 @@ services:
       # the authenticated broker. ufw does not filter Docker-published ports.
       - "${MM_MQTT_BIND:-127.0.0.1}:1883:1883"
     volumes:
-      # Default is the anonymous dev config; set MM_MOSQUITTO_CONF=./docker/mosquitto.auth.conf
-      # for the hardened, authenticated broker (generate ./docker/mosquitto first with
-      # `python -m minemonitor.devices.broker_config`).
-      - ${MM_MOSQUITTO_CONF:-./docker/mosquitto.conf}:/mosquitto/config/mosquitto.conf:ro
+      # The authenticated broker (docker/mosquitto.auth.conf, allow_anonymous false) whenever
+      # MM_MQTT_USERNAME is set, so the broker and its clients follow the same setting; the
+      # anonymous dev config otherwise. MM_MOSQUITTO_CONF overrides the choice. The authenticated
+      # broker needs the password and ACL files in ./docker/mosquitto, which deploy.sh writes
+      # (`python -m minemonitor.devices.broker_config`); without them it refuses to start.
+      - ${MM_MOSQUITTO_CONF:-./docker/mosquitto${MM_MQTT_USERNAME:+.auth}.conf}:/mosquitto/config/mosquitto.conf:ro
       - ./docker/mosquitto:/mosquitto/config/auth:ro
       - mqtt_data:/mosquitto/data
     healthcheck:
-      test: ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -t healthcheck -m ok || exit 1"]
+      # Healthy when the broker answers. The authenticated broker refuses this anonymous publish
+      # with "not authorised", which only a live broker can send.
+      test: ["CMD-SHELL", 'out=$$(mosquitto_pub -h 127.0.0.1 -t healthcheck -m ok 2>&1) || echo "$$out" | grep -qi "not authori"']
       interval: 15s
       timeout: 5s
       retries: 5

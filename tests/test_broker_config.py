@@ -4,13 +4,21 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
+import stat
+from pathlib import Path
 
+import pytest
 from sqlalchemy.orm import Session
 
 from minemonitor.devices import service
 from minemonitor.devices.broker_config import (
+    BROKER_GID,
+    BROKER_UID,
+    broker_file_owner,
     mosquitto_password_hash,
     render_password_file,
+    write_broker_files,
 )
 
 
@@ -61,3 +69,47 @@ def test_rotate_secret_returns_cleartext_and_stores_only_hash(db_session: Sessio
     assert dev.broker_pw_hash.startswith("$7$")
     # Rotating again issues a different secret and hash.
     assert service.rotate_secret(db_session, "trk-1") != secret
+
+
+def _write(db_session: Session, out_dir: Path, owner: tuple[int, int] | None) -> tuple[Path, Path]:
+    passwd, acl = write_broker_files(
+        db_session,
+        out_dir=str(out_dir),
+        prefix="mm",
+        service_user="mm-ingestor",
+        service_password="svc",
+        owner=owner,
+    )
+    return Path(passwd), Path(acl)
+
+
+def test_broker_files_are_private_to_the_given_owner(db_session: Session, tmp_path: Path) -> None:
+    owner = (os.getuid(), os.getgid())
+    for path in _write(db_session, tmp_path, owner):
+        st = path.stat()
+        assert stat.S_IMODE(st.st_mode) == 0o600, path
+        assert (st.st_uid, st.st_gid) == owner, path
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["acl", "passwd"]  # no temp files left
+
+
+def test_broker_files_are_replaced_whole(db_session: Session, tmp_path: Path) -> None:
+    # The broker re-reads both files on SIGHUP, and the site loses power without warning, so a
+    # rewrite swaps in a complete new file rather than truncating the one the broker reads.
+    old = tmp_path / "passwd"
+    old.write_text("stale\n")
+    old.chmod(0o644)
+    inode = old.stat().st_ino
+    passwd, _ = _write(db_session, tmp_path, None)
+    assert passwd.stat().st_ino != inode
+    assert stat.S_IMODE(passwd.stat().st_mode) == 0o600
+    assert "\nmm-ingestor:$7$" in passwd.read_text()
+
+
+def test_files_go_to_the_broker_user_only_when_running_as_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The broker drops from root to the image's mosquitto user before it reads these files.
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    assert broker_file_owner() == (BROKER_UID, BROKER_GID) == (1883, 1883)
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    assert broker_file_owner() is None

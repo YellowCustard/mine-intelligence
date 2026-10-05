@@ -25,10 +25,12 @@ Regenerate and reload the broker whenever devices change:
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import os
 import secrets
 import sys
+import tempfile
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -43,6 +45,12 @@ from minemonitor.storage.models import Device
 _ITERATIONS = 100_000
 _SALT_BYTES = 12
 _DKLEN = 64  # SHA-512 output width, as mosquitto_passwd uses
+
+# The broker image (eclipse-mosquitto) starts as root, drops to its mosquitto user (uid/gid 1883),
+# and only then opens the password and ACL files. It cannot chown them itself because they are
+# mounted read-only, so files left owned by root make the broker exit at start.
+BROKER_UID = 1883
+BROKER_GID = 1883
 
 
 def mosquitto_password_hash(
@@ -80,6 +88,36 @@ def render_password_file(session: Session, *, service_user: str, service_hash: s
     return "\n".join(lines) + "\n"
 
 
+def broker_file_owner() -> tuple[int, int] | None:
+    """The owner to give the broker files: the broker's user when we can chown (root), else none.
+
+    The API container runs as root. Run by hand as an ordinary user (a dev box), the files stay
+    with that user.
+    """
+    return (BROKER_UID, BROKER_GID) if os.geteuid() == 0 else None
+
+
+def _replace_private(path: str, content: str, owner: tuple[int, int] | None) -> None:
+    """Replace ``path`` with a complete 0600 file in one rename.
+
+    The broker re-reads the file on SIGHUP and the site can lose power mid-write, so it must
+    never see a truncated file: write a temp file beside it, fsync, then rename over.
+    """
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=f".{os.path.basename(path)}.")
+    try:
+        with os.fdopen(fd, "w") as fh:  # mkstemp creates it 0600
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if owner is not None:
+            os.chown(tmp, *owner)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp)
+        raise
+
+
 def write_broker_files(
     session: Session,
     *,
@@ -87,12 +125,14 @@ def write_broker_files(
     prefix: str,
     service_user: str,
     service_password: str,
+    owner: tuple[int, int] | None = None,
 ) -> tuple[str, str]:
     """Write ``passwd`` and ``acl`` into ``out_dir``; return their paths.
 
     The service account (ingestor consumer + internal publishers: the simulator and
     the Teltonika adapter) may read and write everything; each device is confined by
-    the ACL to its own topic.
+    the ACL to its own topic. Both files are 0600 (the password file holds credential
+    hashes), owned by ``owner`` (uid, gid) when given.
     """
     os.makedirs(out_dir, exist_ok=True)
     passwd_path = os.path.join(out_dir, "passwd")
@@ -103,12 +143,8 @@ def write_broker_files(
         service_hash=mosquitto_password_hash(service_password),
     )
     acl = render_mosquitto_acl(session, prefix=prefix, ingest_user=service_user)
-    with open(passwd_path, "w") as fh:
-        fh.write(passwd)
-    with open(acl_path, "w") as fh:
-        fh.write(acl)
-    # The password file holds credential hashes — keep it owner-readable only.
-    os.chmod(passwd_path, 0o600)
+    _replace_private(passwd_path, passwd, owner)
+    _replace_private(acl_path, acl, owner)
     return passwd_path, acl_path
 
 
@@ -129,6 +165,7 @@ def main() -> int:
             prefix=settings.mqtt_topic_prefix,
             service_user=settings.mqtt_username,
             service_password=settings.mqtt_password,
+            owner=broker_file_owner(),
         )
     finally:
         session.close()

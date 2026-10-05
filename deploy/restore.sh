@@ -8,8 +8,10 @@
 #
 #   bash deploy/restore.sh backups/minemonitor_20260905_120000.sql.gz
 #
-# It brings up ONLY the database, waits for it to be healthy, loads the dump, then
-# starts the rest of the stack. Accepts a plain .sql or a gzipped .sql.gz dump.
+# It brings up ONLY the database, waits for it to be healthy, loads the dump, then starts the API.
+# With broker auth on (MM_MQTT_USERNAME set), it writes the broker password and ACL files from the
+# restored devices table, which a clean box does not have yet. Then it starts the rest of the
+# stack. Accepts a plain .sql or a gzipped .sql.gz dump.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -24,6 +26,7 @@ PGDB="${POSTGRES_DB:-minemonitor}"
 
 command -v docker >/dev/null || { echo "ERROR: Docker Engine is not installed. See deploy/DEPLOY.md"; exit 1; }
 docker compose version >/dev/null 2>&1 || { echo "ERROR: the Docker Compose plugin is not installed."; exit 1; }
+. deploy/common.sh
 
 echo "==> Starting the database only"
 docker compose up -d db
@@ -44,7 +47,18 @@ case "$DUMP" in
   *)    docker compose exec -T db psql -U "$PGUSER" "$PGDB" < "$DUMP" ;;
 esac
 
+echo "==> Starting the API"
+docker compose up -d --build db api
+mm_wait_for_api || exit 1
+MQTT_USER=$(mm_mqtt_username)
+if [ -n "$MQTT_USER" ]; then
+  mm_generate_broker_files
+fi
+
 echo "==> Starting the rest of the stack"
 docker compose up -d --build
+if [ -n "$MQTT_USER" ]; then
+  mm_check_broker_refuses_anonymous || exit 1
+fi
 
 echo "==> Restore complete. Check: docker compose ps && curl -fsS http://127.0.0.1:8000/health"

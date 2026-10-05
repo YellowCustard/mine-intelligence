@@ -117,6 +117,34 @@ jobs:
           echo "$out"
           grep -q "edge node misconfigured" <<<"$out"
           grep -q "MM_EDGE_SITE_ID: Field required" <<<"$out"
+      - name: Deploy with the broker login only in .env, on the real images
+        run: |
+          # deploy.sh must pick the login up from .env, write broker files the broker can read,
+          # and fail unless the broker refuses a client with no login.
+          printf 'MM_MQTT_USERNAME=mm-ci\nMM_MQTT_PASSWORD=ci-broker-password\n' > .env
+          bash deploy/deploy.sh --demo
+          # The demo fleet and the ingestor log in as the service account, so stored positions
+          # prove the broker accepted that login end to end.
+          n=0
+          for i in $(seq 1 30); do
+            n=$(docker compose exec -T db psql -U minemonitor -d minemonitor -tAc 'select count(*) from positions') || n=0
+            [ "$n" -gt 0 ] && break
+            sleep 2
+          done
+          echo "positions stored: $n"
+          [ "$n" -gt 0 ]
+          # The healthcheck reports the authenticated broker healthy.
+          state=""
+          for i in $(seq 1 30); do
+            state=$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose ps -q mqtt)")
+            [ "$state" = healthy ] && break
+            sleep 3
+          done
+          echo "mqtt health: $state"
+          [ "$state" = healthy ]
+      - name: Stack status and logs
+        if: failure()
+        run: docker compose --profile sim ps -a && docker compose --profile sim logs --no-color --tail 100
 
   # Browser end-to-end: load the real dashboard in Chromium and acknowledge an alarm.
   dashboard:

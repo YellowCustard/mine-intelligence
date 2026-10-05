@@ -206,7 +206,7 @@ cp .env.example .env && $EDITOR .env  # set the same passwords as the source box
 bash deploy/restore.sh backups/minemonitor_<timestamp>.sql.gz
 ```
 `restore.sh` brings up `db`, waits for it to be healthy, loads the dump, then starts
-the rest of the stack. (Both scripts wrap `pg_dump`/`psql` and honour the
+the rest of the stack (writing the broker files first when broker auth is on). (Both scripts wrap `pg_dump`/`psql` and honour the
 `POSTGRES_*` values in `.env`.)
 
 ## Security checklist before any public exposure

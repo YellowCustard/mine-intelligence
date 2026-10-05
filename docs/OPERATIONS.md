@@ -252,7 +252,8 @@ bash deploy/restore.sh backups/minemonitor_20260905_120000.sql.gz
 ```
 
 It starts only the database, waits for it, loads the dump (plain `.sql` or `.sql.gz`),
-then brings up the rest of the stack. Verify with `docker compose ps` and
+then starts the API. With broker auth on it writes the broker files from the restored
+devices table, then brings up the rest of the stack. Verify with `docker compose ps` and
 `curl -fsS http://127.0.0.1:8000/health`, then run the smoke test (§3).
 
 ---
@@ -298,9 +299,11 @@ authenticates with its `device_id` and is confined by ACL to writing only its ow
 `mm/<site>/<asset>/position` topic.
 
 **Dev/demo default is anonymous** (`docker/mosquitto.conf`, `allow_anonymous true`) so
-a fresh install runs with no setup. **On a real site, set the service account** —
-`deploy.sh` then generates the broker credential files, selects the hardened config
-(`docker/mosquitto.auth.conf`, `allow_anonymous false`), and enforces auth. With
+a fresh install runs with no setup. **On a real site, set the service account** in
+`.env`. Compose then runs the hardened config (`docker/mosquitto.auth.conf`,
+`allow_anonymous false`) on every `docker compose up`, and `deploy.sh` writes the broker
+credential files it needs and fails unless the broker refuses a client with no login.
+Without those files the hardened broker does not start, so it never falls back to open. With
 `MM_ENV=prod` the API refuses to boot if the broker would be anonymous.
 
 ```bash
