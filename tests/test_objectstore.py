@@ -102,13 +102,36 @@ def test_edge_and_admin_keys_must_differ(tmp_path: Path) -> None:
     assert "must differ" in proc.stderr
 
 
+# Every name SeaweedFS 4.48 refuses at bucket creation (s3bucket.VerifyS3BucketName).
 @pytest.mark.parametrize(
-    "bucket", ["Mine-Evidence", "ab", "-evidence", "evidence-", "mine_evidence"]
+    "bucket",
+    [
+        "Mine-Evidence",
+        "ab",
+        "x" * 64,
+        "-evidence",
+        "evidence-",
+        "mine_evidence",
+        "mine..evidence",
+        "filemeta",
+        "xn--evidence",
+        "evidence-s3alias",
+        "192.168.5.4",
+    ],
 )
 def test_invalid_bucket_refuses_to_start(tmp_path: Path, bucket: str) -> None:
-    proc, _ = _run(tmp_path, {**GOOD_ENV, "MM_EDGE_S3_BUCKET": bucket})
+    proc, config = _run(tmp_path, {**GOOD_ENV, "MM_EDGE_S3_BUCKET": bucket})
     assert proc.returncode == 1
     assert "MM_EDGE_S3_BUCKET" in proc.stderr
+    assert not config.exists()
+
+
+@pytest.mark.parametrize("bucket", ["mine-evidence", "mine.evidence", "abc", "123", "x" * 63])
+def test_valid_bucket_starts(tmp_path: Path, bucket: str) -> None:
+    proc, config = _run(tmp_path, {**GOOD_ENV, "MM_EDGE_S3_BUCKET": bucket})
+    assert proc.returncode == 0, proc.stderr
+    edge = json.loads(config.read_text())["identities"][1]
+    assert edge["actions"] == [f"Write:{bucket}"]
 
 
 def test_usage_error_without_a_command(tmp_path: Path) -> None:

@@ -226,7 +226,11 @@ outbox at `GET /sites/{id}/notifications?state=failed` (supervisor+).
 
 ## 5. Backup and restore
 
-The database is the only thing that must be backed up.
+The database is the only thing that must be backed up, with one exception: if the `evidence`
+profile runs with `MM_EDGE_EVIDENCE=s3`, its stills live in the `objectstore_data` volume, which
+the commands below do not cover. Decide with the mine whether to back that volume up or accept
+losing stills under the evidence retention before `s3` mode goes live; see
+[Evidence object storage](OBJECT_STORAGE.md).
 
 ```bash
 bash deploy/backup.sh                       # -> backups/minemonitor_<timestamp>.sql.gz

@@ -46,9 +46,17 @@ check MM_OBJECTSTORE_ADMIN_SECRET "$admin_secret" 16
 check MM_EDGE_S3_ACCESS_KEY "$edge_key" 3
 check MM_EDGE_S3_SECRET_KEY "$edge_secret" 16
 [ "$admin_key" != "$edge_key" ] || fail "MM_EDGE_S3_ACCESS_KEY must differ from MM_OBJECTSTORE_ADMIN_KEY"
-# S3 bucket naming: 3-63 of lowercase letters, digits, '.' and '-', starting and ending alphanumeric.
+# The bucket name rules SeaweedFS 4.48 enforces at creation (s3bucket.VerifyS3BucketName), checked
+# here so a bad name stops the store instead of leaving objectstore-init failing: 3-63 of lowercase
+# letters, digits, '.' and '-', alphanumeric at both ends, no '..', not "filemeta", no "xn--"
+# prefix or "-s3alias" suffix, and not an IP address (any all-digit dotted name is refused).
 case "$bucket" in
-  *[!a-z0-9.-]* | [.-]* | *[.-]) fail "MM_EDGE_S3_BUCKET is not a valid bucket name: $bucket" ;;
+  *[!a-z0-9.-]* | [.-]* | *[.-] | *..* | xn--* | *-s3alias | filemeta)
+    fail "MM_EDGE_S3_BUCKET is not a valid bucket name: $bucket" ;;
+esac
+case "$bucket" in
+  *[!0-9.]*) ;;
+  *.*) fail "MM_EDGE_S3_BUCKET must not be formatted as an IP address: $bucket" ;;
 esac
 [ "${#bucket}" -ge 3 ] && [ "${#bucket}" -le 63 ] || fail "MM_EDGE_S3_BUCKET must be 3-63 characters"
 

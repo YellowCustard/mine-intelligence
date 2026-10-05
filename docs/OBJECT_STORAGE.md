@@ -37,6 +37,8 @@ through `docker/objectstore-start.sh`.
 | S3 lifecycle rule (`PUT ?lifecycle`, 30-day expiry on a prefix) | accepted and read back; actual expiry not observed (needs days) |
 | Listening sockets | S3 HTTP 8333 on all interfaces; master, volume and filer on 127.0.0.1 only; Iceberg (8181) and Lance (9101) catalog ports off |
 | Usage telemetry | off (`-master.telemetry=false`); upstream default is **on**, posting to `telemetry.seaweedfs.com` |
+| MinIO → SeaweedFS migration (below): MinIO built from the pinned release's source (commit `d10bb7e1`), 44 stills written by the edge `S3Uploader` (one 12 MB, one key with spaces and `+`), then rclone 1.75.1 `copy` and `check --one-way --download` | 44/44 byte-identical by an independent SHA-256 read-back, content type kept; re-running `copy` transfers nothing; one deleted and one altered object make `check` exit 1, and re-running `copy` repairs both; the edge identity uploads to the new store afterwards. The procedure's commands were run as written, with `docker` replaced by a shim that runs the same MinIO and rclone binaries; Docker itself was not run |
+| Bucket-name check in `objectstore-start.sh` against SeaweedFS's own `VerifyS3BucketName` (4.48 source), 2,455 names | never accepts a name SeaweedFS rejects; additionally refuses all-digit dotted names such as `1.2.3` |
 
 ## Hardening in the compose service
 
@@ -52,6 +54,81 @@ through `docker/objectstore-start.sh`.
   and `vision-edge`; the API, ingestor, broker and tracker listener cannot reach it.
 - **Host exposure.** S3 is published on `${MM_OBJECTSTORE_BIND:-127.0.0.1}:8333`. Set the LAN
   address only when an edge box elsewhere uploads, behind TLS if that link leaves the site LAN.
+
+## Upgrading a deployment that ran MinIO
+
+This change deletes nothing. After `git pull` and `docker compose up -d`, the old `minio`
+container keeps running as an orphan that compose no longer manages, still publishing 9000/9001,
+and its `minio_data` volume stays. The volume holds evidence only if `vision-edge` ran with
+`MM_EDGE_EVIDENCE=s3`; the default, `edge`, keeps stills on the edge node. Events reference
+evidence as `s3://<bucket>/<key>`, so it is copied under the same bucket and keys.
+
+1. **Stop writes and remove the old container.** Removing a container keeps its volume and image.
+
+   ```bash
+   docker compose --profile vision stop vision-edge
+   docker ps -aq --filter label=com.docker.compose.service=minio | xargs -r docker rm -f
+   docker image inspect minio/minio:RELEASE.2024-10-13T13-34-11Z >/dev/null && echo cached
+   ```
+
+   If the image is not cached, stop here and keep the volume: Docker Hub no longer serves that
+   tag, and only a MinIO server can read the volume's on-disk format.
+2. **Start the new store.** Set `MM_OBJECTSTORE_ADMIN_KEY`/`_SECRET` and the edge credentials in
+   `.env`; the edge secret now needs at least 16 characters. Keep `MM_EDGE_S3_BUCKET` and, until
+   step 5, `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` (unset means `minioadmin`).
+
+   ```bash
+   docker compose --profile evidence up -d objectstore objectstore-init
+   set -a; . ./.env; set +a
+   BUCKET=${MM_EDGE_S3_BUCKET:-mine-evidence}
+   OLD_VOL=$(docker volume ls -q --filter label=com.docker.compose.volume=minio_data)
+   NET=$(docker network ls -q --filter label=com.docker.compose.network=evidence)
+   echo "$OLD_VOL $NET"   # exactly one of each
+   ```
+3. **Serve the old volume once more**, unpublished, on the `evidence` network:
+
+   ```bash
+   docker run -d --name mm-minio-migrate --network "$NET" -v "$OLD_VOL:/data" \
+     -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD \
+     minio/minio:RELEASE.2024-10-13T13-34-11Z server /data
+   ```
+4. **Copy and verify** with rclone (MIT, run as a pinned image, not shipped):
+
+   ```bash
+   RC_ENV=$(mktemp)   # mode 0600
+   cat >"$RC_ENV" <<EOF
+   RCLONE_CONFIG_OLD_TYPE=s3
+   RCLONE_CONFIG_OLD_PROVIDER=Minio
+   RCLONE_CONFIG_OLD_ENDPOINT=http://mm-minio-migrate:9000
+   RCLONE_CONFIG_OLD_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+   RCLONE_CONFIG_OLD_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+   RCLONE_CONFIG_NEW_TYPE=s3
+   RCLONE_CONFIG_NEW_PROVIDER=SeaweedFS
+   RCLONE_CONFIG_NEW_ENDPOINT=http://objectstore:8333
+   RCLONE_CONFIG_NEW_ACCESS_KEY_ID=$MM_OBJECTSTORE_ADMIN_KEY
+   RCLONE_CONFIG_NEW_SECRET_ACCESS_KEY=$MM_OBJECTSTORE_ADMIN_SECRET
+   EOF
+   rc() { docker run --rm --network "$NET" --env-file "$RC_ENV" rclone/rclone:1.75.1 "$@"; }
+   rc lsd old:            # retry until MinIO answers; copy each bucket it lists, not just $BUCKET
+   rc size old:"$BUCKET"  # 0 objects: nothing to copy, go to step 5
+   rc copy old:"$BUCKET" new:"$BUCKET" --checksum
+   rc check old:"$BUCKET" new:"$BUCKET" --one-way --download   # must report 0 differences
+   ```
+
+   `check --download` compares every object byte for byte and exits non-zero on any missing or
+   altered object; re-running `copy` fixes those and skips what already matches. Keep the
+   `check` output as the record of the migration.
+5. **Re-point the edge and clean up.** If `.env` sets `MM_EDGE_S3_ENDPOINT=http://minio:9000`,
+   change it to `http://objectstore:8333` or remove it. Stills queued on the edge upload to the
+   new store when it restarts.
+
+   ```bash
+   docker compose --profile vision --profile evidence up -d
+   docker rm -f mm-minio-migrate; rm -f "$RC_ENV"
+   ```
+
+   Keep `$OLD_VOL` until the mine has accepted the copy, then remove it and the image
+   (`docker volume rm "$OLD_VOL"`, `docker image rm minio/minio:RELEASE.2024-10-13T13-34-11Z`).
 
 ## Residual risks
 

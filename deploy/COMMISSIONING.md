@@ -27,7 +27,7 @@ Run on the clean on-site server, from the repo root.
 | A5 | Confirm migrations ran | `docker compose exec api uv run alembic current` | head is the latest revision | |
 | A6 | Create the first admin | `docker compose exec api uv run python -m minemonitor.auth.cli <user> admin` | user created | |
 | A7 | Post-deploy smoke test | `MM_SMOKE_URL=… MM_SMOKE_USER=… MM_SMOKE_PASSWORD=… MM_SMOKE_SITE=… docker compose exec -T api uv run python -m minemonitor.smoke` | 6/6 checks pass, exit 0 | |
-| A8 | Firewall | `ufw` allows only 22/80/443 | 8000/5432/1883/9000 **not** publicly reachable | |
+| A8 | Firewall | `ufw` allows only 22/80/443 | 8000/5432/1883/8333 **not** publicly reachable | |
 
 ## Stage B — Site configuration
 

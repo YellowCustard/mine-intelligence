@@ -29,7 +29,9 @@ git clone https://github.com/YellowCustard/mine-intelligence.git
 cd mine-intelligence
 ```
 
-(To update later: `git pull`, then re-run the deploy script.)
+(To update later: `git pull`, then re-run the deploy script. A box that ran the old `minio`
+service also needs [Upgrading a deployment that ran MinIO](../docs/OBJECT_STORAGE.md#upgrading-a-deployment-that-ran-minio):
+its container keeps running, and any S3 evidence must be copied across.)
 
 ## 3. Configure secrets
 
