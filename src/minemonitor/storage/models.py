@@ -755,7 +755,7 @@ class LaboratoryResult(Base):
     while ``original`` holds the raw instrument record **write-once** and ``original_hash`` is
     its SHA-256 — so tampering with the stored original is detectable and the record can be
     reconciled against the source file. ``original_file_ref`` points at the full export in
-    object storage (MinIO) once offloaded; null until then.
+    object storage (S3) once offloaded; null until then.
 
     Corrections **never** mutate this row — they are separate append-only
     ``LaboratoryCorrection`` entries. ``sample_ref`` is an opaque lab label, never personal

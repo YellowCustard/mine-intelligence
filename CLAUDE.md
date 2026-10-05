@@ -205,7 +205,7 @@ dwell breakdown, loads completed. Derived, recomputable from positions, never ha
 | ORM/migrations | SQLAlchemy 2.x + Alembic | Boring and well documented. |
 | Device transport | **MQTT (Mosquitto)** for anything that can speak it; raw **TCP** listener for trackers that cannot | Trackers mostly speak their own binary TCP protocol. Adapters normalise into MQTT internally. |
 | Live UI updates | **Server-Sent Events** | One-way server→browser. Simpler than WebSockets and survives flaky links better. |
-| Object storage | MinIO (S3 API) | Evidence clips later. Self-hostable. |
+| Object storage | SeaweedFS (S3 API), opt-in `evidence` profile | Evidence clips later. Self-hostable, Apache-2.0. Replaced MinIO in 2026-10 (AGPL-3.0, images no longer published); see `docs/OBJECT_STORAGE.md`. |
 | Packaging | **uv** | Fast, lockfile, reproducible. |
 | Lint/format | ruff | One tool. |
 | Tests | pytest | |

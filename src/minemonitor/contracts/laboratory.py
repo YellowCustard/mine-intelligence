@@ -41,7 +41,7 @@ class LaboratoryResultV1(BaseModel):
     method: str | None = None
     batch_ref: str | None = None
     # Hex SHA-256 of the canonicalised original record — tamper-evidence for the immutable
-    # original. The original itself is preserved separately (DB write-once column, plus a MinIO
+    # original. The original itself is preserved separately (DB write-once column, plus an S3
     # object when offloaded).
     original_hash: str = Field(min_length=1)
     original_file_ref: str | None = None

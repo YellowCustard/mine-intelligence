@@ -1,5 +1,6 @@
 # Mine Monitor — full stack. Must run entirely on one box at the mine (brief §3).
-# `docker compose up` brings up the database, broker, object store and API.
+# `docker compose up` brings up the database, broker and API. Optional services (trackers,
+# simulator, vision, evidence object store, TLS, backup) are compose profiles.
 #
 # Power and network will fail at a remote site (brief §3), so every long-running
 # service restarts unless explicitly stopped, and each has a healthcheck.
@@ -40,18 +41,75 @@ services:
       timeout: 5s
       retries: 5
 
-  minio:
-    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+  # Evidence object store (S3 API). Opt-in, because nothing in Phase 1 writes evidence; only the
+  # vision edge node does, with MM_EDGE_EVIDENCE=s3. Enable with:
+  #   docker compose --profile evidence up -d
+  # SeaweedFS (Apache-2.0) replaced MinIO, which is AGPL-3.0 and no longer publishes its images
+  # (docs/OBJECT_STORAGE.md). Locked down: telemetry off, the Iceberg/Lance catalog ports off,
+  # master/volume/filer bound to loopback inside the container so only the authenticated S3 port
+  # is reachable, on its own network shared only with vision-edge. Credentials come from .env and
+  # the store refuses to start without them (docker/objectstore-start.sh).
+  objectstore:
+    image: chrislusf/seaweedfs:4.48
+    profiles: ["evidence"]
     restart: unless-stopped
-    command: server /data --console-address ":9001"
+    entrypoint: ["/bin/sh", "/mm/objectstore-start.sh", "/tmp/s3.json", "/entrypoint.sh"]
+    command:
+      - server
+      - -ip=127.0.0.1
+      - -ip.bind=127.0.0.1
+      - -s3.ip.bind=0.0.0.0
+      - -master.telemetry=false
+      - -filer
+      - -s3
+      - -s3.port=8333
+      - -s3.port.iceberg=0
+      - -s3.port.lance=0
+      - -s3.config=/tmp/s3.json
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MM_OBJECTSTORE_ADMIN_KEY: ${MM_OBJECTSTORE_ADMIN_KEY:-}
+      MM_OBJECTSTORE_ADMIN_SECRET: ${MM_OBJECTSTORE_ADMIN_SECRET:-}
+      MM_EDGE_S3_ACCESS_KEY: ${MM_EDGE_S3_ACCESS_KEY:-}
+      MM_EDGE_S3_SECRET_KEY: ${MM_EDGE_S3_SECRET_KEY:-}
+      MM_EDGE_S3_BUCKET: ${MM_EDGE_S3_BUCKET:-mine-evidence}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks: [evidence]
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      # Loopback by default. Set MM_OBJECTSTORE_BIND to the LAN address only when a vision edge
+      # node on another box uploads here, and put TLS in front if that link leaves the site LAN.
+      - "${MM_OBJECTSTORE_BIND:-127.0.0.1}:8333:8333"
     volumes:
-      - minio_data:/data
+      - objectstore_data:/data
+      - ./docker/objectstore-start.sh:/mm/objectstore-start.sh:ro
+
+  # One-shot: create the evidence bucket over the S3 API (idempotent; 409 = already there).
+  objectstore-init:
+    image: chrislusf/seaweedfs:4.48
+    profiles: ["evidence"]
+    restart: "no"
+    depends_on:
+      objectstore:
+        condition: service_healthy
+    networks: [evidence]
+    environment:
+      MM_OBJECTSTORE_ADMIN_KEY: ${MM_OBJECTSTORE_ADMIN_KEY:-}
+      MM_OBJECTSTORE_ADMIN_SECRET: ${MM_OBJECTSTORE_ADMIN_SECRET:-}
+      MM_EDGE_S3_BUCKET: ${MM_EDGE_S3_BUCKET:-mine-evidence}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        code=$$(curl -sS -o /dev/null -w '%{http_code}' --aws-sigv4 'aws:amz:us-east-1:s3'
+        --user "$$MM_OBJECTSTORE_ADMIN_KEY:$$MM_OBJECTSTORE_ADMIN_SECRET"
+        -X PUT "http://objectstore:8333/$$MM_EDGE_S3_BUCKET");
+        case "$$code" in
+        200|409) echo "objectstore: bucket $$MM_EDGE_S3_BUCKET ready (HTTP $$code)";;
+        *) echo "objectstore: creating bucket $$MM_EDGE_S3_BUCKET failed (HTTP $$code)" >&2; exit 1;;
+        esac
 
   api:
     build: .
@@ -65,7 +123,6 @@ services:
       # Broker service account (blank = anonymous broker for dev/demo).
       MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
       MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
-      MM_S3_ENDPOINT: http://minio:9000
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
       # First-run admin (M6): created only if the users table is empty. Leave
       # blank in production and create the first admin with the CLI instead.
@@ -219,11 +276,14 @@ services:
       MM_EDGE_EVIDENCE: ${MM_EDGE_EVIDENCE:-edge}
       MM_EDGE_EVIDENCE_MAX_ITEMS: ${MM_EDGE_EVIDENCE_MAX_ITEMS:-500}
       MM_EDGE_EVIDENCE_MAX_AGE_DAYS: ${MM_EDGE_EVIDENCE_MAX_AGE_DAYS:-7}
-      MM_EDGE_S3_ENDPOINT: ${MM_EDGE_S3_ENDPOINT:-http://minio:9000}
+      MM_EDGE_S3_ENDPOINT: ${MM_EDGE_S3_ENDPOINT:-http://objectstore:8333}
       MM_EDGE_S3_BUCKET: ${MM_EDGE_S3_BUCKET:-mine-evidence}
       MM_EDGE_S3_ACCESS_KEY: ${MM_EDGE_S3_ACCESS_KEY:-}
       MM_EDGE_S3_SECRET_KEY: ${MM_EDGE_S3_SECRET_KEY:-}
       MM_EDGE_S3_REGION: ${MM_EDGE_S3_REGION:-us-east-1}
+    # "evidence" is the object store's network. Without the evidence profile it is empty, and the
+    # node keeps stills on its own disk (MM_EDGE_EVIDENCE=edge, the default).
+    networks: [default, evidence]
     volumes:
       # Outbox, config cache and the evidence ring: survive restarts and power cuts.
       - vision_state:/var/lib/mm-edge
@@ -288,7 +348,10 @@ services:
 volumes:
   db_data:
   mqtt_data:
-  minio_data:
+  objectstore_data:
   caddy_data:
   caddy_config:
   vision_state:
+
+networks:
+  evidence:

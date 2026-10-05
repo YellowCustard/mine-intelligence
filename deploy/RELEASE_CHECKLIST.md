@@ -60,8 +60,8 @@ Tick every box. A red box is a blocked release, not a note for later.
 
 ## 5. Configuration
 
-- [ ] `.env` on the target has real `POSTGRES_PASSWORD` and `MINIO_ROOT_PASSWORD`
-      (not the samples).
+- [ ] `.env` on the target has a real `POSTGRES_PASSWORD` (not the sample), and real
+      `MM_OBJECTSTORE_*` / `MM_EDGE_S3_*` credentials if the `evidence` profile is used.
 - [ ] `MM_ENV` set correctly for the target (dev/staging/prod).
 - [ ] Site timezone (`MM_DEFAULT_SITE_TZ`) and `MM_DEFAULT_SITE_ID` correct.
 - [ ] MQTT: `MM_MQTT_USERNAME`/`PASSWORD` set (service account); decide

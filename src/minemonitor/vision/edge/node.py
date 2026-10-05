@@ -7,7 +7,7 @@ It is the Stage C pilot shape from ``docs/VISION_DEPLOYMENT.md``:
 camera streams ─► RtspSource (grabber thread each: reconnect, keep newest frame)
                ─► EdgeRuntime per camera (detect → track → zones → rules → rollups → health)
                ─► Outbox (SQLite, crash-safe) ─► HTTP or MQTT publisher ─► core
-               ─► EvidenceStore (a still per alarm; edge ring, optional MinIO upload)
+               ─► EvidenceStore (a still per alarm; edge ring, optional S3 upload)
 ```
 
 Operating behaviour, all designed for a remote site (``CLAUDE.md`` §3):
@@ -100,7 +100,7 @@ class EdgeSettings(BaseSettings):
     evidence: Literal["off", "edge", "s3"] = "edge"
     evidence_max_items: int = Field(default=500, ge=1)
     evidence_max_age_days: float = Field(default=7.0, gt=0)
-    s3_endpoint: str = "http://minio:9000"
+    s3_endpoint: str = "http://objectstore:8333"
     s3_bucket: str = "mine-evidence"
     s3_access_key: str = ""
     s3_secret_key: SecretStr = SecretStr("")

@@ -22,7 +22,7 @@ One `docker compose` stack:
 | `mqtt` | Mosquitto broker | New telemetry queues on the device spools; nothing is lost, backfilled on recovery. |
 | `api` | FastAPI + dashboard + SSE | Dashboard and API down; ingest via MQTT continues into the ingestor. |
 | `ingestor` | MQTT subscriber, rules, offline check, retention | No new events/metrics; positions still spool device-side. |
-| `minio` | S3-compatible object store (evidence, later) | No effect in Phase 1. |
+| `objectstore` | S3 object store for vision evidence (SeaweedFS, `--profile evidence`) | No effect in Phase 1; edge nodes in `s3` evidence mode keep stills on the node and retry. |
 | `simulator` | Synthetic fleet (`--profile sim`) | Demo/test only; never in production. |
 
 The API serves the dashboard on port **8000, bound to localhost**. HTTP Basic

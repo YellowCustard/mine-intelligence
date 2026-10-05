@@ -1,8 +1,9 @@
-"""A minimal S3 ``PUT`` client (AWS Signature V4, stdlib only) for evidence stills → MinIO.
+"""A minimal S3 ``PUT`` client (AWS Signature V4, stdlib only) for evidence stills.
 
 The edge node needs exactly one object-store operation — upload a small evidence still — so it
-signs requests itself rather than pulling boto3/botocore (tens of MB) or the MinIO SDK into the
-edge image. Path-style addressing (``<endpoint>/<bucket>/<key>``), which is what MinIO serves.
+signs requests itself rather than pulling boto3/botocore (tens of MB) or a vendor SDK into the
+edge image. Path-style addressing (``<endpoint>/<bucket>/<key>``), which SeaweedFS (the compose
+``evidence`` profile) and other S3-compatible stores serve.
 
 Signing follows the published SigV4 algorithm and is verified in the tests against AWS's own
 worked example, so a bug here fails CI rather than a commissioning visit.
@@ -97,7 +98,7 @@ def sign_v4(
 
 
 class S3Uploader:
-    """Upload objects to one bucket on an S3-compatible endpoint (MinIO), path-style."""
+    """Upload objects to one bucket on an S3-compatible endpoint, path-style."""
 
     def __init__(
         self,

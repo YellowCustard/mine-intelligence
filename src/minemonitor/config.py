@@ -143,10 +143,6 @@ class Settings(BaseSettings):
     # socket cannot linger. Trackers report far more often; keep it generous.
     teltonika_idle_timeout_s: int = 900
 
-    # Present for later milestones; unused now.
-    s3_endpoint: str = "http://localhost:9000"
-    s3_bucket: str = "mine-evidence"
-
     @model_validator(mode="after")
     def _guard_production_defaults(self) -> Settings:
         """Fail fast rather than ship dev defaults to production (brief §36).
