@@ -158,9 +158,10 @@ services:
       # bind-mounts the same host dir read-only at /mosquitto/config/auth.
       - ./docker/mosquitto:/app/docker/mosquitto
     ports:
-      # The API has auth (M6, HTTP Basic), but Basic credentials must ride TLS.
-      # Bind localhost by default and put nginx + TLS in front; set
-      # MM_API_BIND=0.0.0.0 only when that reverse proxy terminates TLS.
+      # The API has auth (M6, HTTP Basic), but Basic credentials must ride TLS, so keep
+      # MM_API_BIND on loopback: the bundled Caddy (--profile tls) reaches the API over the
+      # compose network and a reverse proxy on this host uses 127.0.0.1:8000. A proxy on
+      # another host would carry the credentials over plain HTTP to here.
       - "${MM_API_BIND:-127.0.0.1}:8000:8000"
 
   # MQTT ingestor: subscribes to position topics and stores them idempotently.

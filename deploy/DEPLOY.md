@@ -217,9 +217,8 @@ the rest of the stack. (Both scripts wrap `pg_dump`/`psql` and honour the
 - [ ] API reachable only via SSH tunnel **or** nginx with TLS in front (the app
       provides login; TLS protects the Basic credentials in transit).
 - [ ] Firewall (ufw) allows only 22/80/443. ufw does **not** filter ports Docker
-      publishes, so also pass commissioning check A8: 8000/5432/1883/8333 bound to
-      `127.0.0.1` (the `MM_*_BIND` defaults) and closed when probed from another machine.
-      5432 has no exception. The only ones allowed: 1883 on the device-VLAN address with
-      broker auth on, 8333 on the LAN for a vision edge node on another box, and 8000
-      for a TLS-terminating proxy on another host.
+      publishes, so also pass commissioning check A8. 5432 and 8000 are always bound
+      to `127.0.0.1` and closed when probed from another machine. 1883 and 8333 are too,
+      unless deliberately opened: 1883 on the device-VLAN address with broker auth on,
+      8333 on the LAN for a vision edge node on another box.
 - [ ] Retention days (`MM_RETAIN_*`) set to the mine's agreed policy.

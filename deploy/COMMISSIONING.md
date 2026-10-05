@@ -27,7 +27,7 @@ Run on the clean on-site server, from the repo root.
 | A5 | Confirm migrations ran | `docker compose exec api uv run alembic current` | head is the latest revision | |
 | A6 | Create the first admin | `docker compose exec api uv run python -m minemonitor.auth.cli <user> admin` | user created | |
 | A7 | Post-deploy smoke test | `MM_SMOKE_URL=… MM_SMOKE_USER=… MM_SMOKE_PASSWORD=… MM_SMOKE_SITE=… docker compose exec -T api uv run python -m minemonitor.smoke` | 6/6 checks pass, exit 0 | |
-| A8 | Exposure | on the server `docker compose ps`; then the probe below **from another machine** on the mine LAN (and from outside, if the box has a public address) | PORTS shows 8000/5432/1883/8333 on `127.0.0.1` only, and the probe prints `closed` for each. 5432 has no exception; the only ones allowed are 1883 on the device-VLAN address with broker auth on, 8333 on the LAN for a vision edge node on another box, and 8000 for a TLS-terminating proxy on another host, each set by its `MM_*_BIND` | |
+| A8 | Exposure | on the server `docker compose ps`; then the probe below **from another machine** on the mine LAN (and from outside, if the box has a public address) | 5432 and 8000, always: `127.0.0.1` in PORTS and `closed` from the probe. 1883 and 8333: the same, unless the site set `MM_MQTT_BIND` (device-VLAN address, broker auth on) or `MM_OBJECTSTORE_BIND` (LAN address, for a vision edge node on another box); then PORTS shows that address and the probe prints `OPEN` for that port only | |
 
 **A8 probe.** `ufw` does not cover these ports: Docker forwards published ports through its own
 iptables rules, which `ufw`'s rules never see. Only the `MM_*_BIND` addresses in `.env` keep a port
