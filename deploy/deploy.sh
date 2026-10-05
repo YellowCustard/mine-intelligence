@@ -19,7 +19,7 @@ docker compose version >/dev/null 2>&1 || { echo "ERROR: the Docker Compose plug
 if [ ! -f .env ]; then
   echo "==> No .env found — creating from .env.example"
   cp .env.example .env
-  echo "    !!! Edit .env NOW and change POSTGRES_PASSWORD and MINIO_ROOT_PASSWORD before going further."
+  echo "    !!! Edit .env NOW and change POSTGRES_PASSWORD before going further."
   echo "    Re-run this script once .env is set."
   exit 1
 fi
@@ -45,7 +45,7 @@ if [ -n "${MM_MQTT_USERNAME:-}" ]; then
   echo "    Broker will use the hardened config ($MM_MOSQUITTO_CONF)."
 fi
 
-echo "==> Building and starting the core stack (db, mqtt, minio, api, ingestor)"
+echo "==> Building and starting the core stack (db, mqtt, api, ingestor)"
 docker compose up -d --build
 
 if [ "$DEMO" = "1" ]; then

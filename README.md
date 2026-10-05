@@ -53,8 +53,9 @@ payload — queue time at the face), and a live operations dashboard. See
   out-of-order positions are corrected on recompute (analytics are
   order-independent). Password hashing is PBKDF2-HMAC-SHA256 from the standard
   library — no new dependency.
-- `docker compose up` brings up the database, MQTT broker, MinIO, the API and the
-  ingestor; `docker compose --profile sim up` adds the simulator. The dashboard
+- `docker compose up` brings up the database, MQTT broker, the API and the
+  ingestor; `docker compose --profile sim up` adds the simulator, and
+  `--profile evidence` adds the S3 object store for vision evidence. The dashboard
   is at `http://localhost:8000/` and now prompts for credentials.
 
 ## Quickstart

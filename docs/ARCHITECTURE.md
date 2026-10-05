@@ -9,8 +9,8 @@ actually built, not as it was planned.
 ## 1. One-paragraph summary
 
 Mine Monitor is a single Python service (FastAPI) over one database
-(PostgreSQL 16 + TimescaleDB), plus a Mosquitto broker and MinIO, all brought up by
-one `docker compose`. GNSS trackers (or the simulator) publish `asset.position.v1`
+(PostgreSQL 16 + TimescaleDB), plus a Mosquitto broker and an opt-in S3 object store
+(SeaweedFS, for evidence), all brought up by one `docker compose`. GNSS trackers (or the simulator) publish `asset.position.v1`
 over MQTT or HTTP; the ingestor normalises and durably stores every fix; a zone
 engine with debounce/hysteresis and a data-driven rules engine turn transitions into
 `event.v1` records in a unified alarm queue; a cycle state machine derives haul-cycle

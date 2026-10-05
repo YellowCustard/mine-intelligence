@@ -73,11 +73,13 @@ need them. Selection and the full per-model audit: `docs/VISION_MODEL_LICENSES.m
 |---|---|---|
 | timescale/timescaledb | Apache-2.0 (Timescale Community for some features) | https://github.com/timescale/timescaledb |
 | eclipse-mosquitto | EPL-2.0 / EDL-1.0 | https://github.com/eclipse/mosquitto |
-| minio/minio | AGPL-3.0 (used as an unmodified standalone service over its S3 API — not linked into our code) | https://github.com/minio/minio |
+| chrislusf/seaweedfs (4.48, opt-in `evidence` profile) | Apache-2.0 (the open-source edition; the separate SeaweedFS Enterprise edition is not used) | https://github.com/seaweedfs/seaweedfs |
 | python (base image) | PSF | https://hub.docker.com/_/python |
 
-> **MinIO is AGPL-3.0.** It is run as a separate, unmodified network service
-> accessed only over the S3 HTTP API; our code does not link against or modify
-> it, so the AGPL's source-distribution obligation is confined to MinIO itself.
-> This is the same posture the mine's own S3-compatible storage would take. If
-> we ever fork or embed MinIO, this must be revisited — flag before doing so.
+> **MinIO was removed (2026-10).** It is AGPL-3.0 and its community images are
+> no longer published, so a clean `docker compose up` could not pull it. The
+> evidence object store is now SeaweedFS (Apache-2.0), run unmodified as an
+> opt-in service and reached only over the S3 HTTP API; our edge uploader is a
+> stdlib SigV4 client (`vision/edge/s3.py`), so no SeaweedFS code is linked.
+> SeaweedFS's anonymous usage telemetry is on by default upstream and is
+> disabled here (`-master.telemetry=false`). See `docs/OBJECT_STORAGE.md`.

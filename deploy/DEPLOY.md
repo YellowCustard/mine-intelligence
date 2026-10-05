@@ -29,7 +29,9 @@ git clone https://github.com/YellowCustard/mine-intelligence.git
 cd mine-intelligence
 ```
 
-(To update later: `git pull`, then re-run the deploy script.)
+(To update later: `git pull`, then re-run the deploy script. A box that ran the old `minio`
+service also needs [Upgrading a deployment that ran MinIO](../docs/OBJECT_STORAGE.md#upgrading-a-deployment-that-ran-minio):
+its container keeps running, and any S3 evidence must be copied across.)
 
 ## 3. Configure secrets
 
@@ -37,7 +39,6 @@ cd mine-intelligence
 cp .env.example .env
 # EDIT .env — at minimum change:
 #   POSTGRES_PASSWORD    (database password)
-#   MINIO_ROOT_PASSWORD  (object-store password)
 # And set a first-run admin so the dashboard is reachable on first boot:
 #   MM_BOOTSTRAP_ADMIN_USER=admin
 #   MM_BOOTSTRAP_ADMIN_PASSWORD=<a strong password>
@@ -54,7 +55,7 @@ bash deploy/deploy.sh --demo     # core stack + the simulated fleet (demo data)
 # or:  bash deploy/deploy.sh     # core stack only (for real trackers later)
 ```
 
-This builds the image, starts `db`, `mqtt`, `minio`, `api` and `ingestor` (the API
+This builds the image, starts `db`, `mqtt`, `api` and `ingestor` (the API
 runs the Alembic migrations on start), and — with `--demo` — the `simulator`.
 
 The API (and the dashboard at `/`) listens on **127.0.0.1:8000** on the VPS.
@@ -208,9 +209,10 @@ the rest of the stack. (Both scripts wrap `pg_dump`/`psql` and honour the
 
 ## Security checklist before any public exposure
 
-- [ ] Changed `POSTGRES_PASSWORD` and `MINIO_ROOT_PASSWORD` in `.env`.
+- [ ] Changed `POSTGRES_PASSWORD` in `.env` (and, only if the `evidence` profile
+      is used, set the `MM_OBJECTSTORE_*` and `MM_EDGE_S3_*` credentials).
 - [ ] Created real admin/user accounts, then blanked `MM_BOOTSTRAP_ADMIN_*`.
 - [ ] API reachable only via SSH tunnel **or** nginx with TLS in front (the app
       provides login; TLS protects the Basic credentials in transit).
-- [ ] Firewall (ufw) allows only 22/80/443; **not** 8000/5432/1883/9000.
+- [ ] Firewall (ufw) allows only 22/80/443; **not** 8000/5432/1883/8333.
 - [ ] Retention days (`MM_RETAIN_*`) set to the mine's agreed policy.

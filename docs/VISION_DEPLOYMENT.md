@@ -31,7 +31,7 @@ mine LAN — not in the core service, not in the cloud.
 ```
 
 - **Raw video never leaves the edge.** Only structured events, and clip *references*
-  (clip bytes to MinIO under retention) cross. Bandwidth + data-protection.
+  (clip bytes to the evidence object store under retention) cross. Bandwidth + data-protection.
 - The edge node is its own container in the **same `docker compose`** model — the mine
   runs one `docker compose up`, vision included, on a box that may or may not have a GPU.
   It is a profile/service, not a separate cloud stack.
@@ -110,8 +110,9 @@ Rules:
   `evidence.clip_ref` — never inline bytes; the scheme is allow-listed (`edge://`, `s3://`,
   `nvr://`). `MM_EDGE_EVIDENCE=edge` (default) keeps stills only in the node's bounded ring
   (`MM_EDGE_EVIDENCE_MAX_ITEMS` / `_MAX_AGE_DAYS`); `s3` also forwards them, store-and-forward,
-  to MinIO under `<site>/vision/<camera>/<date>/` so a site's evidence is exportable and
-  deletable by prefix (set a MinIO lifecycle rule for its retention); `off` keeps none. Stills
+  to the evidence object store (SeaweedFS, compose profile `evidence`) under
+  `<site>/vision/<camera>/<date>/` so a site's evidence is exportable and deletable by prefix
+  (set an S3 lifecycle rule for its retention); `off` keeps none. Stills
   show people: personal data, never biometric templates.
 
 ## 5. Failure modes (designed for, and tested — `VISION_ARCHITECTURE.md` §13)
@@ -146,7 +147,7 @@ upgradeable behind a stable event boundary, without a core rewrite.
 | Live source | `vision/edge/rtsp.py` | grabber thread per camera; FFmpeg over TCP with a socket timeout; keeps only the newest sampled frame (drop-old-not-recent, counted); fixed-cadence sampling at `MM_EDGE_SAMPLE_FPS` with jitter tolerance; capped backoff + jitter; credentials redacted |
 | Node service | `vision/edge/node.py` | all cameras, one model, one crash-safe outbox; config fetched and cached (`config.json`), boots offline from the cache; a refresh rebuilds only a camera whose scene/rules changed (tracks and the open rollup carry over when only rules change); node health every heartbeat (`degraded` while a camera is down or running from cache, `down` on clean stop); SIGTERM → flush + final drain |
 | Transport | `vision/edge/publish.py` | HTTP (default) or MQTT QoS 1 to `mm/<site>/vision/<camera_or_node>/<kind>` (node waits for the broker connection rather than queueing in memory) |
-| Evidence | `vision/edge/evidence.py`, `vision/edge/s3.py` | one still per alarm; bounded edge ring; optional MinIO upload via a stdlib SigV4 client (checked against AWS's worked example) |
+| Evidence | `vision/edge/evidence.py`, `vision/edge/s3.py` | one still per alarm; bounded edge ring; optional S3 upload via a stdlib SigV4 client (checked against AWS's worked example and SeaweedFS 4.48) |
 | Image | `Dockerfile.vision` | `python:3.11-slim` + the `vision` extra, non-root, no weights (mounted at `/models`), heartbeat healthcheck; ≈826 MB |
 | Compose | `docker-compose.yml` service `vision-edge`, profile `vision` | opt-in like `trackers`; state on the `vision_state` volume |
 
@@ -172,8 +173,9 @@ does). One ~25 s dip in frames coincided with the test stream's FFmpeg loop rest
 reproduced in other loops and is attributed to the test stream, not the node.
 
 **Not verified here:** a real Dahua camera and the real edge box (Stage C), detection accuracy on
-site footage, the `s3` evidence mode against a running MinIO (the image is not pullable from this
-build environment; the client is verified against a signature-checking server instead), and the
+site footage, the `s3` evidence mode inside the compose `evidence` profile (the client is verified
+against a signature-checking server and against the SeaweedFS 4.48 release binary run with the same
+flags; see `docs/OBJECT_STORAGE.md`), and the
 node in MQTT mode end to end through the ingestor (the broker ACL and QoS 1 publish are tested
 against a real Mosquitto).
 
@@ -235,5 +237,5 @@ the commissioning log (`deploy/COMMISSIONING.md`).
 
 **Data protection, before go-live:** the mine (controller) confirms signage/consent for camera
 analytics in the covered area; choose `MM_EDGE_EVIDENCE` (`edge` keeps stills on the node only);
-set the MinIO lifecycle rule if `s3` is used. No face template is produced or stored anywhere in
+set the evidence bucket's S3 lifecycle rule if `s3` is used. No face template is produced or stored anywhere in
 this path.

@@ -1,4 +1,4 @@
-"""Evidence stills for operational events: a bounded edge ring, optionally forwarded to MinIO.
+"""Evidence stills for operational events: a bounded edge ring, optionally forwarded to S3.
 
 When a rule concludes an operational event, the node keeps **one still** of the frame that
 confirmed it, so a supervisor can see *why* without video ever crossing the link
