@@ -105,6 +105,34 @@ def test_broker_files_are_replaced_whole(db_session: Session, tmp_path: Path) ->
     assert "\nmm-ingestor:$7$" in passwd.read_text()
 
 
+def test_broker_files_survive_a_power_cut_once_written(
+    db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A file fsync covers the data and the owner set before it, not a later chown or the rename:
+    # the owner goes on first, and the directory is synced after the rename, so neither an old
+    # file nor one the broker's user cannot read comes back after a power cut.
+    ops: list[str] = []
+    real_fchown, real_fsync, real_replace = os.fchown, os.fsync, os.replace
+
+    def fchown(fd: int, uid: int, gid: int) -> None:
+        ops.append("chown")
+        real_fchown(fd, uid, gid)
+
+    def fsync(fd: int) -> None:
+        ops.append("fsync-dir" if stat.S_ISDIR(os.fstat(fd).st_mode) else "fsync-file")
+        real_fsync(fd)
+
+    def replace(src: str, dst: str) -> None:
+        ops.append("rename")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "fchown", fchown)
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(os, "replace", replace)
+    _write(db_session, tmp_path, (os.getuid(), os.getgid()))
+    assert ops == ["chown", "fsync-file", "rename", "fsync-dir"] * 2
+
+
 def test_files_go_to_the_broker_user_only_when_running_as_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

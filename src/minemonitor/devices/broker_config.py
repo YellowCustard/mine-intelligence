@@ -101,21 +101,28 @@ def _replace_private(path: str, content: str, owner: tuple[int, int] | None) -> 
     """Replace ``path`` with a complete 0600 file in one rename.
 
     The broker re-reads the file on SIGHUP and the site can lose power mid-write, so it must
-    never see a truncated file: write a temp file beside it, fsync, then rename over.
+    never see a truncated file: write a temp file beside it, set its owner, fsync, rename over,
+    then fsync the directory so the rename itself survives a power cut.
     """
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=f".{os.path.basename(path)}.")
+    directory = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=f".{os.path.basename(path)}.")
     try:
         with os.fdopen(fd, "w") as fh:  # mkstemp creates it 0600
             fh.write(content)
             fh.flush()
+            if owner is not None:
+                os.fchown(fh.fileno(), *owner)
             os.fsync(fh.fileno())
-        if owner is not None:
-            os.chown(tmp, *owner)
         os.replace(tmp, path)
     except BaseException:
         with contextlib.suppress(FileNotFoundError):
             os.unlink(tmp)
         raise
+    dir_fd = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
 
 
 def write_broker_files(

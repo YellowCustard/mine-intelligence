@@ -15,6 +15,7 @@ import getpass
 import shutil
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -81,6 +82,21 @@ def _connect(port: int, user: str, password: str, cid: str) -> tuple[mqtt.Client
     client.loop_start()
     done.wait(timeout=5)
     return client, got.get("rc", -1)
+
+
+def _subscribe(client: mqtt.Client, topic: str) -> list[int]:
+    """Subscribe at QoS 1 and wait for the broker's SUBACK; return its reason codes."""
+    got: list[int] = []
+    done = threading.Event()
+
+    def on_subscribe(c, u, mid, reason_codes, properties=None) -> None:
+        got.extend(int(rc.value) for rc in reason_codes)
+        done.set()
+
+    client.on_subscribe = on_subscribe
+    client.subscribe(topic, qos=1)
+    assert done.wait(timeout=5), f"no SUBACK for {topic}"
+    return got
 
 
 def test_real_broker_accepts_rendered_credentials_and_enforces_acl(
@@ -154,8 +170,7 @@ def test_service_account_publishes_positions_the_ingestor_receives(
         assert rc == 0
         received: list[str] = []
         ingestor.on_message = lambda c, u, msg: received.append(msg.topic)
-        ingestor.subscribe("mm/+/+/position", qos=1)
-        time.sleep(0.5)
+        assert _subscribe(ingestor, "mm/+/+/position") == [1]  # granted QoS 1, not 0x80
         publisher.publish("mm/kn-zw-01/HT-102/position", b"{}", qos=1).wait_for_publish(timeout=5)
         deadline = time.monotonic() + 5
         while not received and time.monotonic() < deadline:
