@@ -20,14 +20,36 @@ Run on the clean on-site server, from the repo root.
 
 | # | Action | Command | Expected | Result |
 |---|---|---|---|---|
-| A1 | Install Docker Engine + compose plugin | (distro package) | `docker compose version` prints a version | |
+| A1 | Install Docker Engine + compose plugin | (distro package) | `docker compose version` prints a version; `docker version --format '{{.Server.Version}}'` is 28.0 or later (older engines can let a host on the same LAN reach container ports directly) | |
 | A2 | Configure environment | `cp .env.example .env` then edit | strong `POSTGRES_PASSWORD` (plus `MM_OBJECTSTORE_*` and `MM_EDGE_S3_*` only if the `evidence` profile is used); set `MM_ENV=prod`, `MM_DEFAULT_SITE_TZ=Africa/Harare`, `MM_DEFAULT_SITE_ID`, and `MM_MQTT_USERNAME`/`MM_MQTT_PASSWORD` (prod refuses an anonymous broker) | |
 | A3 | Bring up the stack (auto-generates broker creds when `MM_MQTT_USERNAME` is set) | `bash deploy/deploy.sh` | script waits for the API to be healthy and prints next steps | |
 | A4 | Enable TLS | `docker compose --profile tls up -d` | Caddy on 443; internal CA on-prem, or Let's Encrypt for a public domain (see DEPLOY.md) | |
 | A5 | Confirm migrations ran | `docker compose exec api uv run alembic current` | head is the latest revision | |
 | A6 | Create the first admin | `docker compose exec api uv run python -m minemonitor.auth.cli <user> admin` | user created | |
 | A7 | Post-deploy smoke test | `MM_SMOKE_URL=… MM_SMOKE_USER=… MM_SMOKE_PASSWORD=… MM_SMOKE_SITE=… docker compose exec -T api uv run python -m minemonitor.smoke` | 6/6 checks pass, exit 0 | |
-| A8 | Firewall | `ufw` allows only 22/80/443 | 8000/5432/1883/8333 **not** publicly reachable | |
+| A8 | Exposure | on the server `docker compose ps`; then the probes below, each **from another machine** | 5432 and 8000, always: `127.0.0.1` in PORTS and `closed` from every probe. 1883 and 8333: the same, unless the site set `MM_MQTT_BIND` (device-VLAN address, broker auth on) or `MM_OBJECTSTORE_BIND` (LAN address, for a vision edge node on another box); then PORTS shows that address, the probe of that address from the network it serves prints `OPEN`, and every other probe of that port prints `closed`. 5027 (`trackers` profile): PORTS shows the `MM_TELTONIKA_BIND` address; the outside probe prints `closed`; the LAN probe prints `closed` unless tracker traffic arrives on the box's LAN address (a private APN routed to it); D1 proves the trackers reach it | |
+
+**A8 probes.** `ufw` does not cover these ports: Docker forwards published ports through its own
+iptables rules, which `ufw`'s rules never see. Only the `MM_*_BIND` addresses in `.env` keep a port
+off a network, so check from other machines rather than reading the firewall. A port answers only on
+the address PORTS shows, so each probe targets the address a given network would use. Define this
+in a shell on the probing machine; a refused or filtered port both print `closed`:
+
+```bash
+probe() { local h=$1 p; shift; for p in "$@"; do
+  if timeout 3 bash -c "</dev/tcp/$h/$p" 2>/dev/null; then echo "OPEN   $h:$p"; else echo "closed $h:$p"; fi
+done; }
+```
+
+| From | Run |
+|---|---|
+| a machine on the mine LAN | `probe <box LAN address> 5432 1883 8000 8333 5027` |
+| outside the site, if it has a public address (the box's own, or the router's if it forwards ports) | `probe <public address> 5432 1883 8000 8333 5027` |
+| a host on the device VLAN, only if `MM_MQTT_BIND` is set | `probe <MM_MQTT_BIND> 1883` |
+| a host on the LAN, only if `MM_OBJECTSTORE_BIND` is set to an address other than the box's LAN address | `probe <MM_OBJECTSTORE_BIND> 8333` |
+
+80/443 (the `tls` profile) are meant to answer. A tracker cannot run the probe, so D1 is the check
+that 5027 answers on the tracker network.
 
 ## Stage B — Site configuration
 
