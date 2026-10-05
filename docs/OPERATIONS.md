@@ -301,8 +301,10 @@ authenticates with its `device_id` and is confined by ACL to writing only its ow
 **Dev/demo default is anonymous** (`docker/mosquitto.conf`, `allow_anonymous true`) so
 a fresh install runs with no setup. **On a real site, set the service account** in
 `.env`. Compose then runs the hardened config (`docker/mosquitto.auth.conf`,
-`allow_anonymous false`) on every `docker compose up`, and `deploy.sh` writes the broker
-credential files it needs and fails unless the broker refuses a client with no login.
+`allow_anonymous false`) on every `docker compose up`, unless `MM_MOSQUITTO_CONF` is set: that
+override wins over the login, so leave it unset on a site. `deploy.sh` writes the broker
+credential files the hardened config needs and fails unless the broker refuses a client with no
+login, which also catches an override that leaves the broker open.
 Without those files the hardened broker does not start, so it never falls back to open. With
 `MM_ENV=prod` the API refuses to boot if the broker would be anonymous.
 

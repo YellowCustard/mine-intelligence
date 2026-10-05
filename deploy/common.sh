@@ -16,9 +16,14 @@ mm_wait_for_api() {
 
 # The broker login as the containers see it. Compose takes MM_MQTT_USERNAME from the shell first,
 # then .env, and the same value picks the broker config in docker-compose.yml. This script's own
-# environment usually has neither, so ask the running API.
+# environment usually has neither, so ask the running API. Prints nothing when the login is unset;
+# fails when the API cannot be asked, so a failed lookup never passes for "no broker login" and
+# skips the broker files and the anonymous-client check.
 mm_mqtt_username() {
-  docker compose exec -T api printenv MM_MQTT_USERNAME || true
+  if ! docker compose exec -T api python -c 'import os; print(os.environ.get("MM_MQTT_USERNAME", ""))'; then
+    echo "ERROR: could not read MM_MQTT_USERNAME from the API container — check: docker compose logs api" >&2
+    return 1
+  fi
 }
 
 # Write the broker password and ACL files from the devices table, into ./docker/mosquitto, which

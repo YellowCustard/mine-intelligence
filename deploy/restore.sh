@@ -50,7 +50,7 @@ esac
 echo "==> Starting the API"
 docker compose up -d --build db api
 mm_wait_for_api || exit 1
-MQTT_USER=$(mm_mqtt_username)
+MQTT_USER=$(mm_mqtt_username) || exit 1
 if [ -n "$MQTT_USER" ]; then
   mm_generate_broker_files
 fi
