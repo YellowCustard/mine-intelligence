@@ -39,6 +39,13 @@ has_dump() {  # label: a whole dump with that label exists
   fi
   echo "ok: dump $(basename "$f")"
 }
+empty_host() {  # a clean box: no containers, images or volumes, and no $MM_HOME
+  docker ps -aq | xargs -r docker rm -f >/dev/null
+  docker system prune -af --volumes >/dev/null
+  docker volume prune -af >/dev/null
+  rm -rf "$MM_HOME"
+  expect "images on the host" "$(docker images -q | wc -l)" 0
+}
 https_status() { curl -sk -o /dev/null -w '%{http_code}' ${1:+-u "$1"} https://localhost/me; }
 new_user() {
   "$MMCTL" compose exec -T -e MM_NEW_USER_PASSWORD=test-user-password api \
@@ -66,11 +73,7 @@ ls -l "$WORK"/v*/
 (cd "$WORK/v1" && sha256sum -c SHA256SUMS)
 
 step "Empty the host: no images, containers or volumes, so the install needs no registry"
-docker ps -aq | xargs -r docker rm -f >/dev/null
-docker system prune -af --volumes >/dev/null
-docker volume prune -af >/dev/null
-rm -rf "$MM_HOME"
-expect "images on the host" "$(docker images -q | wc -l)" 0
+empty_host
 
 step "Fresh install of $V1 from the offline bundle"
 B1=$(unpack "$WORK/v1/mine-monitor-$V1-linux-amd64-offline.tar")
@@ -163,9 +166,9 @@ expect "users after the restore" "$(users)" "admin,before-failed-upgrade"
 expect "HTTPS login after the restore" "$(https_status "admin:$ADMIN_PW")" 200
 
 step "Fresh install of $V2 from a dump on a clean box, without HTTPS"
-"$MMCTL" compose --profile '*' down --volumes >/dev/null 2>&1
-docker volume ls -q --filter label=com.minemonitor.role=rollback | xargs -r docker volume rm >/dev/null
-rm -rf "$MM_HOME"
+# The images go too, as on a real clean box: with both releases' images still loaded, a CI
+# runner's disk is under the installer's 10 GB minimum.
+empty_host
 bash "$B2/install.sh" --yes --no-tls --restore "$WORK/dump.sql.gz"
 expect "running release" "$(current)" "$V2"
 expect "restored users" "$(users)" "admin,before-failed-upgrade"
