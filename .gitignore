@@ -13,6 +13,9 @@ venv/
 # Environment / secrets
 .env
 
+# Database dumps (deploy/backup.sh, the backup service, every deploy): personal data, never commit.
+backups/
+
 # Generated Mosquitto broker credentials (hold credential hashes — never commit).
 docker/mosquitto/passwd
 docker/mosquitto/acl

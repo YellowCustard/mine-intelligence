@@ -23,6 +23,7 @@ PROJECT=minemonitor
 ROLLBACK_VOLUME=${PROJECT}_db_rollback
 MIN_DOCKER=28.0
 MIN_COMPOSE=2.20.0
+NO_BACKUP=0
 
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 BUNDLE=$(dirname "$(dirname "$SELF")")
@@ -180,7 +181,9 @@ check_ports() {
 }
 
 verify_bundle() {
-  [ -f "$BUNDLE/RELEASE" ] && [ -f "$BUNDLE/images.lock" ] || die "$BUNDLE is not a Mine Monitor release bundle"
+  if ! { [ -f "$BUNDLE/RELEASE" ] && [ -f "$BUNDLE/images.lock" ]; }; then
+    die "$BUNDLE is not a Mine Monitor release bundle"
+  fi
   if [ -f "$BUNDLE/SHA256SUMS" ] && [ ! -L "$BUNDLE/.env" ]; then
     say "Verifying the bundle's checksums"
     (cd "$BUNDLE" && sha256sum --quiet -c SHA256SUMS) || die "the bundle is damaged or incomplete; copy it again"
@@ -358,6 +361,22 @@ run_deploy() {  # dir
   (cd "$1" && MM_INSTALLER=1 bash deploy/deploy.sh)
 }
 
+# A dump restores only onto the TimescaleDB version it was taken on (docs/OPERATIONS.md §5), so
+# the dumps from before a release that moved it cannot restore onto it. Every install, upgrade,
+# deploy and rollback ends with a fresh dump once the release has verified. Its caller finishes
+# its report and then fails when the dump did: the release runs, but has no dump to restore yet.
+backup_after_deploy() {  # dir label
+  if [ "$NO_BACKUP" = 1 ]; then
+    warn "no database dump after this deploy (--no-backup); take one with: sudo mmctl backup"
+    return 0
+  fi
+  say "Dumping the database: the baseline for restores onto release $(release_field "$1" MM_RELEASE_VERSION)"
+  (cd "$1" && bash deploy/backup.sh "backups/minemonitor_$(date -u +%Y%m%d_%H%M%S)_$2.sql.gz")
+}
+backup_failed() {  # version
+  die "Mine Monitor $1 is running, but the database dump after the deploy failed (above), so there is no dump yet that restores onto it. Fix the cause, then: sudo mmctl backup"
+}
+
 # Every service compose runs in this configuration is up: healthy where it has a healthcheck,
 # running without restarts otherwise; one-shot services exited 0. Two passes, 10 s apart, so a
 # crash-looping container is not caught between restarts.
@@ -379,7 +398,7 @@ wait_containers() {  # dir timeout_s
             starting) pending+=" $svc(starting)" ;;
             *) bad+=" $svc($health)" ;;
           esac ;;
-        exited) [ "$code" = 0 ] && [ "$policy" = no ] || bad+=" $svc(exited $code)" ;;
+        exited) if ! { [ "$code" = 0 ] && [ "$policy" = no ]; }; then bad+=" $svc(exited $code)"; fi ;;
         created) pending+=" $svc(created)" ;;
         *) bad+=" $svc($state)" ;;
       esac
@@ -494,7 +513,7 @@ by itself if the new release does not come up.
   --admin-user NAME     first admin's username (default admin)
   --restore DUMP        fresh install from a database dump (deploy/backup.sh) instead of
                         an empty database
-  --no-backup           upgrade: skip the database dump taken after a successful upgrade
+  --no-backup           skip the database dump an install or upgrade ends with
   --yes                 do not prompt
 EOF
 }
@@ -630,6 +649,8 @@ do_fresh_install() {
     die "release $v is not healthy; logs: $out. Fix the cause and run install.sh again: it resumes"
   }
   printf 'MM_INSTALLED_VERSION=%s\nMM_INSTALLED_AT=%s\n' "$v" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$MMH/shared/installed"
+  local dumped=1
+  backup_after_deploy "$dir" "v$v-installed" || dumped=0
   say "Mine Monitor $v is installed under $MMH"
   print_access "$dir"
   if [ -n "$ADMIN_PASSWORD" ]; then
@@ -642,6 +663,7 @@ do_fresh_install() {
   echo
   echo "    Next: sudo mmctl status · settings in $MMH/shared/.env, applied with sudo mmctl deploy"
   echo "    Site commissioning (zones, devices, trackers): deploy/COMMISSIONING.md"
+  [ "$dumped" = 1 ] || backup_failed "$v"
 }
 
 report_new_settings() {  # new dir
@@ -666,6 +688,7 @@ do_upgrade() {  # new version
     since=$(date +%s)
     if run_deploy "$newdir" && verify_release "$newdir" "$new" "$since"; then
       say "Release $new re-applied"
+      backup_after_deploy "$newdir" "v$new" || backup_failed "$new"
       print_access "$newdir"
       return 0
     fi
@@ -703,17 +726,13 @@ do_upgrade() {  # new version
   since=$(date +%s)
   if run_deploy "$newdir" && verify_release "$newdir" "$new" "$since"; then
     say "Mine Monitor $new is running"
-    if [ "$NO_BACKUP" = 0 ]; then
-      # A dump restores only onto the TimescaleDB version it was taken on, so the dumps from
-      # before an upgrade that moved it cannot restore onto this release (OPERATIONS.md §5).
-      say "Dumping the upgraded database (the baseline for restores on this release)"
-      (cd "$newdir" && bash deploy/backup.sh "backups/minemonitor_$(date -u +%Y%m%d_%H%M%S)_v$new.sql.gz") ||
-        warn "the post-upgrade dump failed; take one with: sudo mmctl backup"
-    fi
+    local dumped=1
+    backup_after_deploy "$newdir" "v$new" || dumped=0
     link_cli
     prune_releases
     note "Rollback to $old stays available until the next upgrade (sudo mmctl rollback);"
     note "it returns the database to its state before this upgrade."
+    [ "$dumped" = 1 ] || backup_failed "$new"
     return 0
   fi
 
@@ -760,7 +779,7 @@ cmd_install() {
   local v
   v=$(release_field "$BUNDLE" MM_RELEASE_VERSION)
   [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "bundle has no valid release version"
-  mkdir -p "$MMH" 2>/dev/null && [ -w "$MMH" ] || die "cannot write to $MMH: run as root (sudo)"
+  if ! { mkdir -p "$MMH" 2>/dev/null && [ -w "$MMH" ]; }; then die "cannot write to $MMH: run as root (sudo)"; fi
   lock_or_die
 
   if is_installed; then
@@ -782,7 +801,7 @@ cmd_install() {
       fi
     fi
     HOSTNAMES=$(normalise_hostnames "$HOSTNAMES")
-    note "HTTPS on: $HOSTNAMES ($([ -n "$ACME_EMAIL" ] && echo "Let's Encrypt, $ACME_EMAIL" || echo "this box's own CA"))"
+    note "HTTPS on: $HOSTNAMES ($(if [ -n "$ACME_EMAIL" ]; then echo "Let's Encrypt, $ACME_EMAIL"; else echo "this box's own CA"; fi))"
   fi
   do_fresh_install "$v"
 }
@@ -820,6 +839,7 @@ cmd_rollback() {
   docker volume rm "$ROLLBACK_VOLUME" >/dev/null 2>&1 || true
   link_cli
   say "Rolled back: Mine Monitor $from is running"
+  backup_after_deploy "$dir" "v$from-rolled-back" || backup_failed "$from"
 }
 
 cmd_restore() {
@@ -832,7 +852,7 @@ cmd_restore() {
       *) dump=$(readlink -f "$1"); shift ;;
     esac
   done
-  [ -n "$dump" ] && [ -f "$dump" ] || die "usage: mmctl restore <dump.sql.gz> [--yes]"
+  if ! { [ -n "$dump" ] && [ -f "$dump" ]; }; then die "usage: mmctl restore <dump.sql.gz> [--yes]"; fi
   require_installed
   lock_or_die
   local dir vol since
@@ -890,7 +910,9 @@ Usage: sudo mmctl <command>
 
   status              release, containers and /health
   logs [service...]   follow the logs (api, ingestor, mqtt, db, caddy, ...)
-  deploy              apply changes to shared/.env (re-runs deploy.sh) and verify
+  deploy [--no-backup]
+                      apply changes to shared/.env (re-runs deploy.sh), verify, and dump
+                      the database
   backup [file]       dump the database (default shared/backups/minemonitor_<time>.sql.gz)
   restore <dump>      replace the database with a dump
   rollback            undo the last upgrade (database back to its pre-upgrade state)
@@ -916,6 +938,7 @@ main() {
     smoke) cmd_smoke ;;
     version) require_installed; current_version; echo ;;
     deploy)
+      case "${1:-}" in --no-backup) NO_BACKUP=1 ;; "") ;; *) die "usage: mmctl deploy [--no-backup]" ;; esac
       require_installed
       lock_or_die
       local dir since
@@ -924,6 +947,7 @@ main() {
       if ! { run_deploy "$dir" && verify_release "$dir" "$(current_version)" "$since"; }; then
         die "the stack is not healthy; logs: $(save_logs "$dir" deploy-failed)"
       fi
+      backup_after_deploy "$dir" "v$(current_version)" || backup_failed "$(current_version)"
       ;;
     backup)
       require_installed

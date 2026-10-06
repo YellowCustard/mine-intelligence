@@ -83,7 +83,8 @@ Tick every box. A red box is a blocked release, not a note for later.
 
 ## 7. Deploy & verify on target
 
-- [ ] `bash deploy/deploy.sh` (no `--demo` in production).
+- [ ] `bash deploy/deploy.sh` (no `--demo` in production); it ends with
+      `Wrote ... backups/minemonitor_<time>_after-deploy.sql.gz`.
 - [ ] First admin exists (bootstrap env, or `python -m minemonitor.auth.cli`).
 - [ ] `curl /healthz` and `curl /health` both green; `/version` reports the expected
       build.

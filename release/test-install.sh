@@ -6,7 +6,7 @@
 #
 # Builds release bundles from the two images, then on this host: a fresh install from the offline
 # bundle into an empty image store, an upgrade, a rollback, a failed upgrade that rolls itself
-# back, backup and restore, and a fresh install from a dump.
+# back, backup and restore, the dump every deploy ends with, and a fresh install from a dump.
 #
 # DESTRUCTIVE: removes every container, image and volume on the host, and $MMH. CI only.
 set -euo pipefail
@@ -27,6 +27,17 @@ expect() {  # description actual wanted
 sql() { docker exec "$(docker ps -q --filter label=com.docker.compose.project=minemonitor --filter label=com.docker.compose.service=db)" psql -U minemonitor -d minemonitor -tAc "$1"; }
 users() { sql "select string_agg(username, ',' order by username) from users"; }
 current() { basename "$(readlink -f "$MM_HOME/current")"; }
+dumps() { find "$MM_HOME/shared/backups" -name "minemonitor_*_$1.sql.gz" | wc -l; }
+# grep -c reads to the end: grep -q would stop early and, under pipefail, fail zcat with SIGPIPE.
+zcontains() { [ "$(zcat "$2" | grep -c -- "$1")" -gt 0 ]; }  # pattern file.gz
+has_dump() {  # label: a whole dump with that label exists
+  local f
+  f=$(find "$MM_HOME/shared/backups" -name "minemonitor_*_$1.sql.gz" | sort | tail -n 1)
+  if ! { [ -n "$f" ] && gzip -t "$f" && zcontains 'PostgreSQL database dump complete' "$f"; }; then
+    fail "no whole dump labelled $1"
+  fi
+  echo "ok: dump $(basename "$f")"
+}
 https_status() { curl -sk -o /dev/null -w '%{http_code}' ${1:+-u "$1"} https://localhost/me; }
 new_user() {
   "$MMCTL" compose exec -T -e MM_NEW_USER_PASSWORD=test-user-password api \
@@ -80,6 +91,7 @@ done
 [ "$n" -gt 0 ] || fail "the simulated fleet's positions never arrived"
 echo "ok: $n positions stored through the authenticated broker"
 [ -s "$MM_HOME/shared/mosquitto/passwd" ] || fail "broker password file missing from shared/"
+has_dump "v$V1-installed"
 rm -rf "$B1"
 
 step "Upgrade $V1 -> $V2"
@@ -90,7 +102,7 @@ expect "running release" "$(current)" "$V2"
 expect "rollback target" "$(sed -n 's/^MM_ROLLBACK_FROM=//p' "$MM_HOME/shared/rollback.env")" "$V1"
 expect "HTTPS login after the upgrade" "$(https_status "admin:$ADMIN_PW")" 200
 [ "$(sql 'select count(*) from positions')" -ge "$before" ] || fail "positions lost in the upgrade"
-ls "$MM_HOME"/shared/backups/*_v"$V2".sql.gz >/dev/null || fail "no post-upgrade dump"
+has_dump "v$V2"
 
 step "Roll back $V2 -> $V1: data written after the upgrade goes"
 new_user after-upgrade
@@ -100,11 +112,13 @@ expect "running release" "$(current)" "$V1"
 expect "users after the rollback" "$(users)" admin
 expect "HTTPS login after the rollback" "$(https_status "admin:$ADMIN_PW")" 200
 [ ! -e "$MM_HOME/shared/rollback.env" ] || fail "rollback record left behind"
-zcat "$MM_HOME"/shared/backups/*before-rollback-v"$V2".sql.gz | grep -q after-upgrade || fail "the pre-rollback dump lacks the discarded data"
+zcontains after-upgrade "$(ls "$MM_HOME"/shared/backups/*before-rollback-v"$V2".sql.gz)" || fail "the pre-rollback dump lacks the discarded data"
+has_dump "v$V1-rolled-back"
 
 step "Upgrade to $V2 again, from the installed images"
 bash "$B2/install.sh" --yes
 expect "running release" "$(current)" "$V2"
+expect "dumps after upgrading to $V2 twice" "$(dumps "v$V2")" 2
 
 step "A failed upgrade to $V3 rolls itself back to $V2"
 # $V3's bundle carries $V2's code, so /version answers $V2 and verification fails after deploying.
@@ -119,7 +133,17 @@ expect "running release" "$(current)" "$V2"
 expect "users after the automatic rollback" "$(users)" "admin,before-failed-upgrade"
 expect "HTTPS login after the automatic rollback" "$(https_status "admin:$ADMIN_PW")" 200
 ls "$MM_HOME"/shared/logs/upgrade-"$V3"-failed-*.log >/dev/null || fail "no log of the failed release"
+expect "dumps of the failed release" "$(dumps "v$V3")" 0
 rm -rf "$B3"
+
+step "A deploy ends with a dump; a dump that cannot complete fails and leaves no file"
+"$MMCTL" deploy
+expect "dumps of $V2 after mmctl deploy" "$(dumps "v$V2")" 3
+"$MMCTL" compose stop db >/dev/null 2>&1
+if "$MMCTL" backup "$WORK/no-db.sql.gz"; then fail "a backup with the database stopped reported success"; fi
+expect "files left by the failed backup" "$(find "$WORK" -maxdepth 1 -name 'no-db.sql.gz*' | wc -l)" 0
+"$MMCTL" deploy --no-backup
+expect "dumps of $V2 after mmctl deploy --no-backup" "$(dumps "v$V2")" 3
 
 step "Backup and restore"
 "$MMCTL" backup "$WORK/dump.sql.gz"
@@ -135,6 +159,7 @@ rm -rf "$MM_HOME"
 bash "$B2/install.sh" --yes --no-tls --restore "$WORK/dump.sql.gz"
 expect "running release" "$(current)" "$V2"
 expect "restored users" "$(users)" "admin,before-failed-upgrade"
+has_dump "v$V2-installed"
 [ ! -e "$MM_HOME/shared/initial-admin-password" ] || fail "an admin was generated over restored users"
 expect "API login with the restored admin" \
   "$("$MMCTL" compose exec -T api python -c "import base64, urllib.request as u

@@ -1,5 +1,5 @@
-"""deploy.sh and restore.sh: broker auth from .env alone (finding D1), and the TimescaleDB
-extension update after a db image change.
+"""deploy.sh and restore.sh: broker auth from .env alone (finding D1), the TimescaleDB
+extension update after a db image change, and the database dump every deploy ends with.
 
 Run against stub ``docker``, ``curl`` and ``sleep`` commands that log each call, so the order of
 the compose steps can be checked without a Docker daemon. The stub answers the two questions the
@@ -10,12 +10,16 @@ and .env), what the broker says to a client with no login, and what the database
 
 from __future__ import annotations
 
+import gzip
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+
+yaml = pytest.importorskip("yaml")
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -47,6 +51,11 @@ case "$*" in
     esac ;;
   "compose exec -T db psql "*)
     cat > /dev/null ;;
+  "compose exec -T db pg_dump "*)
+    if [ "$STUB_DUMP" = fail ]; then
+      echo "-- partial"; echo "pg_dump: error: connection lost" >&2; exit 1
+    fi
+    echo "-- dump" ;;
 esac
 exit 0
 """
@@ -57,6 +66,7 @@ FULL_UP = "compose up -d --build"
 API_UP = "compose up -d --build db api"
 DB_UP = "compose up -d db"
 TS_UPDATE = "mm_db_sql ALTER EXTENSION timescaledb UPDATE"
+DUMP = "compose exec -T db pg_dump -U minemonitor minemonitor"
 TERMINATE = "pg_terminate_backend"
 
 
@@ -68,7 +78,10 @@ def _run(
     broker: str = "auth",
     timescale: str = "current",
     lookup: str = "ok",
+    dump: str = "ok",
     args: tuple[str, ...] = (),
+    env_extra: dict[str, str] | None = None,
+    stubs: dict[str, str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     repo = tmp_path / "repo"
     shutil.copytree(ROOT / "deploy", repo / "deploy")
@@ -81,6 +94,7 @@ def _run(
         "docker": _DOCKER,
         "curl": "#!/bin/sh\nexit 0\n",
         "sleep": "#!/bin/sh\nexit 0\n",
+        **(stubs or {}),
     }.items():
         (bin_dir / name).write_text(body)
         (bin_dir / name).chmod(0o755)
@@ -93,6 +107,8 @@ def _run(
         "STUB_BROKER": broker,
         "STUB_TS": timescale,
         "STUB_LOOKUP": lookup,
+        "STUB_DUMP": dump,
+        **(env_extra or {}),
     }
     # No MM_MQTT_USERNAME in the script's own environment: the login lives in .env only.
     result = subprocess.run(
@@ -210,3 +226,104 @@ def test_deploy_stops_when_the_extension_update_fails(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "could not update the TimescaleDB extension" in result.stdout
     assert API_UP not in calls
+
+
+def _dumps(tmp_path: Path) -> list[Path]:
+    backups = tmp_path / "repo" / "backups"
+    return sorted(backups.iterdir()) if backups.exists() else []
+
+
+def test_deploy_ends_with_a_dump(tmp_path: Path) -> None:
+    # Dumps restore only onto the TimescaleDB version they were taken on, so each deploy takes one.
+    result, calls = _run(tmp_path, "deploy.sh", user="mm-svc")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _index(calls, ANON_PROBE) < _index(calls, DUMP), calls
+    (dump,) = _dumps(tmp_path)
+    assert re.fullmatch(r"minemonitor_\d{8}_\d{6}_after-deploy\.sql\.gz", dump.name)
+    assert gzip.decompress(dump.read_bytes()) == b"-- dump\n"
+
+
+def test_deploy_fails_loudly_when_its_dump_fails_and_leaves_no_file(tmp_path: Path) -> None:
+    result, calls = _run(tmp_path, "deploy.sh", user="mm-svc", dump="fail")
+    assert result.returncode != 0
+    assert DUMP in calls
+    assert "the database dump after the deploy failed" in result.stdout
+    assert "pg_dump: error" in result.stderr
+    assert _dumps(tmp_path) == []  # no truncated file under a dump's name
+
+
+def test_deploy_no_backup_skips_the_dump(tmp_path: Path) -> None:
+    result, calls = _run(tmp_path, "deploy.sh", user="mm-svc", args=("--no-backup", "--demo"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert DUMP not in calls
+    assert "compose --profile sim up -d --build simulator" in calls
+    assert "no database dump after this deploy" in result.stdout
+
+
+def test_deploy_under_the_installer_leaves_the_dump_to_it(tmp_path: Path) -> None:
+    # deploy/mmctl dumps once the release has verified, not before.
+    result, calls = _run(tmp_path, "deploy.sh", user="mm-svc", env_extra={"MM_INSTALLER": "1"})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert DUMP not in calls
+
+
+def test_deploy_rejects_an_unknown_argument(tmp_path: Path) -> None:
+    result, calls = _run(tmp_path, "deploy.sh", user="mm-svc", args=("--dmeo",))
+    assert result.returncode == 2
+    assert "usage:" in result.stderr
+    assert calls == []
+
+
+def test_backup_refuses_to_fill_the_disk(tmp_path: Path) -> None:
+    backups = tmp_path / "repo" / "backups"
+    backups.mkdir(parents=True)
+    (backups / "minemonitor_20261001_020000.sql.gz").write_bytes(b"x" * 300 * 1024)
+    df = (
+        "#!/bin/sh\n"
+        "echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'\n"
+        "echo '/dev/x 2000000 1000000 1000000 50% /'\n"
+    )
+    result, calls = _run(tmp_path, "backup.sh", user="", stubs={"df": df})
+    assert result.returncode != 0
+    assert "976 MB free" in result.stdout and "needs 1024 MB" in result.stdout, result.stdout
+    assert DUMP not in calls
+    assert _dumps(tmp_path) == [backups / "minemonitor_20261001_020000.sql.gz"]
+
+
+def _backup_service_script(backups: Path) -> str:
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    (script,) = compose["services"]["backup"]["command"]
+    return script.replace("$$", "$").replace("/backups", str(backups))
+
+
+@pytest.mark.parametrize("pg_dump", ["ok", "fail"])
+def test_backup_service_never_leaves_a_truncated_dump(tmp_path: Path, pg_dump: str) -> None:
+    # gzip exits 0 whatever pg_dump did, so without pipefail a failed dump looked written.
+    backups = tmp_path / "backups"
+    backups.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stubs = {
+        "pg_dump": "#!/bin/sh\necho '-- dump'\n"
+        + ("echo 'pg_dump: error' >&2; exit 1\n" if pg_dump == "fail" else ""),
+        "sleep": "#!/bin/sh\nkill -TERM $PPID\n",  # one pass of the loop
+    }
+    for name, body in stubs.items():
+        (bin_dir / name).write_text(body)
+        (bin_dir / name).chmod(0o755)
+    result = subprocess.run(
+        ["bash", "-c", _backup_service_script(backups)],
+        capture_output=True,
+        text=True,
+        env={"PATH": f"{bin_dir}:{os.environ['PATH']}", "MM_BACKUP_KEEP_DAYS": "14"},
+        check=False,
+        timeout=30,
+    )
+    files = [p.name for p in backups.iterdir()]
+    if pg_dump == "ok":
+        assert "backup written" in result.stdout
+        (name,) = files
+        assert name.endswith(".sql.gz")
+    else:
+        assert "backup FAILED" in result.stdout
+        assert files == []

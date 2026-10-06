@@ -33,10 +33,10 @@ while [ $# -gt 0 ]; do
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
-[ -n "$VERSION" ] && [ -n "$CORE" ] && [ -n "$VISION" ] && [ -n "$OUT" ] || {
+if [ -z "$VERSION" ] || [ -z "$CORE" ] || [ -z "$VISION" ] || [ -z "$OUT" ]; then
   echo "usage: build-bundle.sh --version X.Y.Z --core-image REF --vision-image REF --out DIR [--local-images]" >&2
   exit 2
-}
+fi
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "version must be MAJOR.MINOR.PATCH: $VERSION" >&2; exit 2; }
 
 repo_of() {  # repository part of an image reference (drops @digest, then :tag)
