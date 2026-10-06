@@ -64,6 +64,9 @@ bash deploy/deploy.sh --demo     # core stack + the simulated fleet (demo data)
 
 This builds the image, starts `db`, `mqtt`, `api` and `ingestor` (the API
 runs the Alembic migrations on start), and — with `--demo` — the `simulator`.
+It ends with a database dump to `backups/` and fails if the dump does: a dump restores only onto
+the TimescaleDB version it was taken on, so each deploy keeps one that fits it
+([Operations §5](../docs/OPERATIONS.md#5-backup-and-restore)). `--no-backup` skips it.
 
 The API (and the dashboard at `/`) listens on **127.0.0.1:8000** on the VPS.
 

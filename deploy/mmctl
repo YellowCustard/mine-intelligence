@@ -20,9 +20,13 @@
 set -euo pipefail
 
 PROJECT=minemonitor
+# Prefix of the snapshot volumes; rollback.env names the one a rollback uses.
 ROLLBACK_VOLUME=${PROJECT}_db_rollback
+ROLLBACK_ENV=shared/rollback.env
 MIN_DOCKER=28.0
 MIN_COMPOSE=2.20.0
+NO_BACKUP=0
+NO_SAFETY_DUMP=0
 
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 BUNDLE=$(dirname "$(dirname "$SELF")")
@@ -180,7 +184,9 @@ check_ports() {
 }
 
 verify_bundle() {
-  [ -f "$BUNDLE/RELEASE" ] && [ -f "$BUNDLE/images.lock" ] || die "$BUNDLE is not a Mine Monitor release bundle"
+  if ! { [ -f "$BUNDLE/RELEASE" ] && [ -f "$BUNDLE/images.lock" ]; }; then
+    die "$BUNDLE is not a Mine Monitor release bundle"
+  fi
   if [ -f "$BUNDLE/SHA256SUMS" ] && [ ! -L "$BUNDLE/.env" ]; then
     say "Verifying the bundle's checksums"
     (cd "$BUNDLE" && sha256sum --quiet -c SHA256SUMS) || die "the bundle is damaged or incomplete; copy it again"
@@ -317,56 +323,145 @@ copy_volume() {  # from to image
 # back by an older one, so rolling back means returning the database to its state before the
 # upgrade. The snapshot is a copy of the stopped database's volume: exact, and it restores onto
 # the previous release's database image whatever TimescaleDB version the new one moved to.
+#
+# The snapshot goes to a new volume, and the previous rollback (record and volume) stays usable
+# until the upgrade has verified: snapshot_db sets it aside, keep_rollback drops it once the new
+# release runs, and restore_previous_rollback puts it back when the upgrade fails. An upgrade cut
+# off part way (a power cut) can leave both records; reconcile_rollback settles them first.
+#
+# do_upgrade runs it as `if ! snapshot_db`, where errexit is off, so each step returns its own
+# failure: rollback.env must never record a snapshot that was not taken in full.
+rollback_volume() {  # rollback.env file: the snapshot volume it names
+  local v
+  v=$(env_get MM_ROLLBACK_VOLUME "$1")
+  printf '%s' "${v:-$ROLLBACK_VOLUME}"
+}
 snapshot_db() {  # old version, new version
-  local vol img
+  local vol img snap rb="$MMH/$ROLLBACK_ENV"
+  reconcile_rollback "$1" || return 1
   vol=$(db_volume)
   [ -n "$vol" ] || die "no database volume found for project $PROJECT"
   img=$(db_image "$MMH/releases/$1")
-  say "Snapshotting the database for rollback ($vol -> $ROLLBACK_VOLUME)"
-  rm -f "$MMH/shared/rollback.env"
-  docker volume inspect "$ROLLBACK_VOLUME" >/dev/null 2>&1 ||
-    docker volume create --label "com.minemonitor.role=rollback" "$ROLLBACK_VOLUME" >/dev/null
-  copy_volume "$vol" "$ROLLBACK_VOLUME" "$img"
-  {
+  [ -n "$img" ] || { warn "release $1's images.lock names no database image"; return 1; }
+  snap="${ROLLBACK_VOLUME}_$(date -u +%Y%m%d%H%M%S)"
+  say "Snapshotting the database for rollback ($vol -> $snap)"
+  docker volume create --label "com.minemonitor.role=rollback" "$snap" >/dev/null || return 1
+  if ! copy_volume "$vol" "$snap" "$img"; then
+    docker volume rm "$snap" >/dev/null 2>&1 || true
+    return 1
+  fi
+  if ! {
     echo "MM_ROLLBACK_FROM=$1"
     echo "MM_ROLLBACK_TO=$2"
     echo "MM_ROLLBACK_SNAPSHOT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  } > "$MMH/shared/rollback.env.new"
-  mv -f "$MMH/shared/rollback.env.new" "$MMH/shared/rollback.env"
+    echo "MM_ROLLBACK_VOLUME=$snap"
+  } > "$rb.new"; then
+    rm -f "$rb.new"
+    docker volume rm "$snap" >/dev/null 2>&1 || true
+    return 1
+  fi
+  if [ -f "$rb" ]; then mv -f "$rb" "$rb.prev" || return 1; fi
+  if ! mv -f "$rb.new" "$rb"; then
+    if [ -f "$rb.prev" ]; then mv -f "$rb.prev" "$rb"; fi
+    return 1
+  fi
+}
+keep_rollback() {  # the upgrade verified: the previous rollback is superseded
+  local rb="$MMH/$ROLLBACK_ENV"
+  if [ -f "$rb.prev" ]; then
+    docker volume rm "$(rollback_volume "$rb.prev")" >/dev/null 2>&1 || true
+    rm -f "$rb.prev"
+  fi
+}
+restore_previous_rollback() {  # the upgrade failed and was undone: drop its snapshot
+  local rb="$MMH/$ROLLBACK_ENV"
+  docker volume rm "$(rollback_volume "$rb")" >/dev/null 2>&1 || true
+  if [ -f "$rb.prev" ]; then mv -f "$rb.prev" "$rb"; else rm -f "$rb"; fi
+}
+
+# What an upgrade cut off part way leaves: rollback.env next to the record it set aside, or only
+# the set-aside record (cut between the two renames). Keep the one that rolls back the running
+# release: rollback.env if the upgrade had switched to it, otherwise the set-aside record, since
+# the cut-off upgrade's own snapshot predates what the running release has written since.
+reconcile_rollback() {  # running version
+  local rb="$MMH/$ROLLBACK_ENV"
+  [ -f "$rb.prev" ] || return 0
+  if [ -f "$rb" ] && [ "$(env_get MM_ROLLBACK_TO "$rb")" = "$1" ]; then
+    keep_rollback
+  elif [ "$(env_get MM_ROLLBACK_TO "$rb.prev")" = "$1" ]; then
+    if [ -f "$rb" ]; then docker volume rm "$(rollback_volume "$rb")" >/dev/null 2>&1 || true; fi
+    mv -f "$rb.prev" "$rb"
+  else
+    keep_rollback
+  fi
 }
 
 restore_snapshot() {  # version whose db image to use
-  local vol
+  local vol snap
   vol=$(db_volume)
   [ -n "$vol" ] || die "no database volume found for project $PROJECT"
-  docker volume inspect "$ROLLBACK_VOLUME" >/dev/null 2>&1 || die "the rollback snapshot ($ROLLBACK_VOLUME) is missing"
-  say "Restoring the database from the pre-upgrade snapshot"
-  copy_volume "$ROLLBACK_VOLUME" "$vol" "$(db_image "$MMH/releases/$1")"
+  snap=$(rollback_volume "$MMH/$ROLLBACK_ENV")
+  docker volume inspect "$snap" >/dev/null 2>&1 || die "the rollback snapshot ($snap) is missing"
+  say "Restoring the database from the pre-upgrade snapshot ($snap)"
+  # The copy empties the live volume first, so a failure part way leaves it incomplete; the
+  # snapshot and rollback.env stay, and the rollback can be run again once the cause is fixed.
+  copy_volume "$snap" "$vol" "$(db_image "$MMH/releases/$1")" ||
+    die "could not copy the pre-upgrade snapshot back into $vol. The snapshot is intact in $snap; fix the cause (often disk space) and run: sudo mmctl rollback"
 }
 
-safety_dump() {  # dir label: best effort, before an operation that discards data
-  local out
+# Before a rollback or restore replaces the live database. Without the dump the data it holds
+# would be gone, so the caller stops unless the operator said --no-safety-dump.
+safety_dump() {  # dir label
+  local out err
   out="backups/minemonitor_$(date -u +%Y%m%d_%H%M%S)_$2.sql.gz"
   say "Dumping the current database to shared/$out first"
-  if ! (cd "$1" && bash deploy/backup.sh "$out" >/dev/null 2>&1); then
-    rm -f "$1/$out"
-    warn "could not dump the current database (is it running?); continuing without that copy"
+  if ! err=$(cd "$1" && bash deploy/backup.sh "$out" 2>&1); then
+    printf '%s\n' "$err" >&2
+    if [ "$NO_SAFETY_DUMP" = 1 ]; then
+      warn "could not dump the current database; continuing without that copy (--no-safety-dump)"
+      return 0
+    fi
+    return 1
   fi
+}
+no_safety_dump() {  # command
+  die "could not dump the current database (above), so it is left as it is. Start it (sudo mmctl compose up -d db) and run this again, or, to replace it without a copy and lose what it holds: sudo mmctl $1 --no-safety-dump"
 }
 
 run_deploy() {  # dir
   (cd "$1" && MM_INSTALLER=1 bash deploy/deploy.sh)
 }
 
+# A dump restores only onto the TimescaleDB version it was taken on (docs/OPERATIONS.md §5), so
+# the dumps from before a release that moved it cannot restore onto it. Every install, upgrade,
+# deploy and rollback ends with a fresh dump once the release has verified. Its caller finishes
+# its report and then fails when the dump did: the release runs, but has no dump to restore yet.
+backup_after_deploy() {  # dir label
+  if [ "$NO_BACKUP" = 1 ]; then
+    warn "no database dump after this deploy (--no-backup); take one with: sudo mmctl backup"
+    return 0
+  fi
+  say "Dumping the database: the baseline for restores onto release $(release_field "$1" MM_RELEASE_VERSION)"
+  (cd "$1" && bash deploy/backup.sh "backups/minemonitor_$(date -u +%Y%m%d_%H%M%S)_$2.sql.gz")
+}
+backup_failed() {  # version
+  die "Mine Monitor $1 is running, but the database dump after the deploy failed (above), so there is no dump yet that restores onto it. Fix the cause, then: sudo mmctl backup"
+}
+
 # Every service compose runs in this configuration is up: healthy where it has a healthcheck,
 # running without restarts otherwise; one-shot services exited 0. Two passes, 10 s apart, so a
 # crash-looping container is not caught between restarts.
 wait_containers() {  # dir timeout_s
-  local dir=$1 deadline=$((SECONDS + $2)) svc id line bad pending prev="" now=""
+  local dir=$1 deadline=$((SECONDS + $2)) svc id line bad pending prev="" now="" services
   local state code health restarts policy
+  # Runs where errexit is off (verify_release is called under if/||): an empty list would pass.
+  if ! services=$(dc "$dir" config --services) || [ -z "$services" ]; then
+    echo "    cannot list the release's services (docker compose config failed)"
+    return 1
+  fi
   while :; do
     bad="" pending="" now=""
-    for svc in $(dc "$dir" config --services); do
+    for svc in $services; do
       id=$(dc "$dir" ps -a -q "$svc" | head -n 1)
       if [ -z "$id" ]; then pending+=" $svc(not created)"; continue; fi
       line=$(docker inspect --format '{{.State.Status}} {{.State.ExitCode}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.RestartCount}} {{.HostConfig.RestartPolicy.Name}}' "$id")
@@ -379,7 +474,7 @@ wait_containers() {  # dir timeout_s
             starting) pending+=" $svc(starting)" ;;
             *) bad+=" $svc($health)" ;;
           esac ;;
-        exited) [ "$code" = 0 ] && [ "$policy" = no ] || bad+=" $svc(exited $code)" ;;
+        exited) if ! { [ "$code" = 0 ] && [ "$policy" = no ]; }; then bad+=" $svc(exited $code)"; fi ;;
         created) pending+=" $svc(created)" ;;
         *) bad+=" $svc($state)" ;;
       esac
@@ -494,7 +589,7 @@ by itself if the new release does not come up.
   --admin-user NAME     first admin's username (default admin)
   --restore DUMP        fresh install from a database dump (deploy/backup.sh) instead of
                         an empty database
-  --no-backup           upgrade: skip the database dump taken after a successful upgrade
+  --no-backup           skip the database dump an install or upgrade ends with
   --yes                 do not prompt
 EOF
 }
@@ -630,6 +725,8 @@ do_fresh_install() {
     die "release $v is not healthy; logs: $out. Fix the cause and run install.sh again: it resumes"
   }
   printf 'MM_INSTALLED_VERSION=%s\nMM_INSTALLED_AT=%s\n' "$v" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$MMH/shared/installed"
+  local dumped=1
+  backup_after_deploy "$dir" "v$v-installed" || dumped=0
   say "Mine Monitor $v is installed under $MMH"
   print_access "$dir"
   if [ -n "$ADMIN_PASSWORD" ]; then
@@ -642,6 +739,7 @@ do_fresh_install() {
   echo
   echo "    Next: sudo mmctl status · settings in $MMH/shared/.env, applied with sudo mmctl deploy"
   echo "    Site commissioning (zones, devices, trackers): deploy/COMMISSIONING.md"
+  [ "$dumped" = 1 ] || backup_failed "$v"
 }
 
 report_new_settings() {  # new dir
@@ -666,6 +764,7 @@ do_upgrade() {  # new version
     since=$(date +%s)
     if run_deploy "$newdir" && verify_release "$newdir" "$new" "$since"; then
       say "Release $new re-applied"
+      backup_after_deploy "$newdir" "v$new" || backup_failed "$new"
       print_access "$newdir"
       return 0
     fi
@@ -703,17 +802,14 @@ do_upgrade() {  # new version
   since=$(date +%s)
   if run_deploy "$newdir" && verify_release "$newdir" "$new" "$since"; then
     say "Mine Monitor $new is running"
-    if [ "$NO_BACKUP" = 0 ]; then
-      # A dump restores only onto the TimescaleDB version it was taken on, so the dumps from
-      # before an upgrade that moved it cannot restore onto this release (OPERATIONS.md §5).
-      say "Dumping the upgraded database (the baseline for restores on this release)"
-      (cd "$newdir" && bash deploy/backup.sh "backups/minemonitor_$(date -u +%Y%m%d_%H%M%S)_v$new.sql.gz") ||
-        warn "the post-upgrade dump failed; take one with: sudo mmctl backup"
-    fi
+    local dumped=1
+    backup_after_deploy "$newdir" "v$new" || dumped=0
+    keep_rollback
     link_cli
     prune_releases
     note "Rollback to $old stays available until the next upgrade (sudo mmctl rollback);"
     note "it returns the database to its state before this upgrade."
+    [ "$dumped" = 1 ] || backup_failed "$new"
     return 0
   fi
 
@@ -724,8 +820,7 @@ do_upgrade() {  # new version
   switch_current "$old"
   since=$(date +%s)
   if run_deploy "$olddir" && verify_release "$olddir" "$old" "$since"; then
-    rm -f "$MMH/shared/rollback.env"
-    docker volume rm "$ROLLBACK_VOLUME" >/dev/null 2>&1 || true
+    restore_previous_rollback
     link_cli
     die "upgrade to $new failed and was rolled back: $old is running with its data as before. Logs of the failed release: $out"
   fi
@@ -760,7 +855,7 @@ cmd_install() {
   local v
   v=$(release_field "$BUNDLE" MM_RELEASE_VERSION)
   [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "bundle has no valid release version"
-  mkdir -p "$MMH" 2>/dev/null && [ -w "$MMH" ] || die "cannot write to $MMH: run as root (sudo)"
+  if ! { mkdir -p "$MMH" 2>/dev/null && [ -w "$MMH" ]; }; then die "cannot write to $MMH: run as root (sudo)"; fi
   lock_or_die
 
   if is_installed; then
@@ -782,7 +877,7 @@ cmd_install() {
       fi
     fi
     HOSTNAMES=$(normalise_hostnames "$HOSTNAMES")
-    note "HTTPS on: $HOSTNAMES ($([ -n "$ACME_EMAIL" ] && echo "Let's Encrypt, $ACME_EMAIL" || echo "this box's own CA"))"
+    note "HTTPS on: $HOSTNAMES ($(if [ -n "$ACME_EMAIL" ]; then echo "Let's Encrypt, $ACME_EMAIL"; else echo "this box's own CA"; fi))"
   fi
   do_fresh_install "$v"
 }
@@ -791,10 +886,17 @@ cmd_install() {
 
 cmd_rollback() {
   YES=0
-  case "${1:-}" in --yes | -y) YES=1 ;; "") ;; *) die "usage: mmctl rollback [--yes]" ;; esac
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --yes | -y) YES=1; shift ;;
+      --no-safety-dump) NO_SAFETY_DUMP=1; shift ;;
+      *) die "usage: mmctl rollback [--yes] [--no-safety-dump]" ;;
+    esac
+  done
   require_installed
   lock_or_die
   local rb="$MMH/shared/rollback.env" from to at cur since dir
+  reconcile_rollback "$(current_version)" || die "could not settle the rollback records left by an interrupted upgrade in $MMH/shared"
   [ -f "$rb" ] || die "no rollback is available: one exists only after an upgrade, until the next one"
   from=$(env_get MM_ROLLBACK_FROM "$rb")
   to=$(env_get MM_ROLLBACK_TO "$rb")
@@ -808,7 +910,7 @@ cmd_rollback() {
     docker image inspect "$ref" >/dev/null 2>&1 || die "image $ref of release $from is no longer on this host"
   done < <(lock_locals "$dir")
   confirm "Roll back from $to to $from? The database returns to its state at $at: whatever was recorded since is lost (it is dumped to shared/backups first)."
-  safety_dump "$(current_dir)" "before-rollback-v$to"
+  safety_dump "$(current_dir)" "before-rollback-v$to" || no_safety_dump rollback
   stop_stack
   restore_snapshot "$from"
   switch_current "$from"
@@ -816,10 +918,11 @@ cmd_rollback() {
   if ! { run_deploy "$dir" && verify_release "$dir" "$from" "$since"; }; then
     die "release $from did not come up after the rollback; logs: $(save_logs "$dir" "rollback-$from-failed")"
   fi
+  docker volume rm "$(rollback_volume "$rb")" >/dev/null 2>&1 || true
   rm -f "$rb"
-  docker volume rm "$ROLLBACK_VOLUME" >/dev/null 2>&1 || true
   link_cli
   say "Rolled back: Mine Monitor $from is running"
+  backup_after_deploy "$dir" "v$from-rolled-back" || backup_failed "$from"
 }
 
 cmd_restore() {
@@ -828,17 +931,18 @@ cmd_restore() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --yes | -y) YES=1; shift ;;
-      -*) die "usage: mmctl restore <dump.sql.gz> [--yes]" ;;
+      --no-safety-dump) NO_SAFETY_DUMP=1; shift ;;
+      -*) die "usage: mmctl restore <dump.sql.gz> [--yes] [--no-safety-dump]" ;;
       *) dump=$(readlink -f "$1"); shift ;;
     esac
   done
-  [ -n "$dump" ] && [ -f "$dump" ] || die "usage: mmctl restore <dump.sql.gz> [--yes]"
+  if ! { [ -n "$dump" ] && [ -f "$dump" ]; }; then die "usage: mmctl restore <dump.sql.gz> [--yes] [--no-safety-dump]"; fi
   require_installed
   lock_or_die
   local dir vol since
   dir=$(current_dir)
   confirm "Replace the database with $dump? Whatever was recorded after that dump is lost (the current database is dumped to shared/backups first). The dump must come from TimescaleDB $(db_image "$dir" | sed 's/.*:\([0-9.]*\)-.*/\1/')."
-  safety_dump "$dir" "before-restore"
+  safety_dump "$dir" "before-restore" || no_safety_dump "restore $dump"
   stop_stack
   vol=$(db_volume)
   dc "$dir" rm -f -s db >/dev/null
@@ -890,10 +994,14 @@ Usage: sudo mmctl <command>
 
   status              release, containers and /health
   logs [service...]   follow the logs (api, ingestor, mqtt, db, caddy, ...)
-  deploy              apply changes to shared/.env (re-runs deploy.sh) and verify
+  deploy [--no-backup]
+                      apply changes to shared/.env (re-runs deploy.sh), verify, and dump
+                      the database
   backup [file]       dump the database (default shared/backups/minemonitor_<time>.sql.gz)
-  restore <dump>      replace the database with a dump
+  restore <dump>      replace the database with a dump (the current one is dumped first)
   rollback            undo the last upgrade (database back to its pre-upgrade state)
+                      Both stop if the current database cannot be dumped first, unless
+                      given --no-safety-dump.
   smoke               post-deploy smoke test (writes one position for asset SMOKE-TEST)
   ca-cert             print the HTTPS root certificate operators' browsers should trust
   doctor              check this host against the release's requirements
@@ -916,6 +1024,7 @@ main() {
     smoke) cmd_smoke ;;
     version) require_installed; current_version; echo ;;
     deploy)
+      case "${1:-}" in --no-backup) NO_BACKUP=1 ;; "") ;; *) die "usage: mmctl deploy [--no-backup]" ;; esac
       require_installed
       lock_or_die
       local dir since
@@ -924,6 +1033,7 @@ main() {
       if ! { run_deploy "$dir" && verify_release "$dir" "$(current_version)" "$since"; }; then
         die "the stack is not healthy; logs: $(save_logs "$dir" deploy-failed)"
       fi
+      backup_after_deploy "$dir" "v$(current_version)" || backup_failed "$(current_version)"
       ;;
     backup)
       require_installed

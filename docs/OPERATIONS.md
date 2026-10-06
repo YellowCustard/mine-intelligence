@@ -48,6 +48,8 @@ bash deploy/deploy.sh --demo   # + simulated fleet (non-production only)
 
 The script is idempotent — re-run it to apply an update. It refuses to continue
 without a `.env` (it copies `.env.example` and stops so you can set real passwords).
+Every deploy ends with a database dump, `backups/minemonitor_<UTC time>_after-deploy.sql.gz`
+(§5), and fails if that dump does; `--no-backup` skips it.
 
 **First admin.** If you did not set `MM_BOOTSTRAP_ADMIN_*` in `.env`, create one:
 
@@ -243,6 +245,19 @@ bash deploy/backup.sh                       # -> backups/minemonitor_<timestamp>
 bash deploy/backup.sh /path/to/out.sql.gz   # explicit path
 ```
 
+`backup.sh` writes to a `<file>.partial.*` file and renames it only once `pg_dump` has finished, so
+a file under a dump's name is always a whole dump; a failed dump exits non-zero and leaves
+nothing. Dumps hold personal data: they are written readable by their owner only, and
+`backups/` is kept at 0700 (so restoring a dump the root-run backup service wrote needs `sudo`). It
+refuses to start when the disk could not take another dump the size of the largest one already
+in the directory, plus a fifth, with 1 GB left free for the database: copy old dumps off the box.
+
+**After every deploy.** `deploy.sh` ends with a dump (`_after-deploy`), and on a release install
+`mmctl` takes one after every install, upgrade, `mmctl deploy` and rollback once the release has
+verified (`_v<version>`, `_v<version>-installed`, `_v<version>-rolled-back`). A deploy whose dump
+fails reports an error although the stack is up: it has no dump yet that restores onto it. These
+dumps sit in the same directory as the scheduled ones and are pruned with them.
+
 **Scheduled backups** — run the sidecar and set the cadence in `.env`:
 
 ```bash
@@ -268,7 +283,7 @@ runs `ALTER EXTENSION timescaledb UPDATE` before the API starts, prints
 version so the API and ingestor reconnect, as after a database restart. A dump restores only
 into the TimescaleDB version it was taken on
 ([Timescale](https://github.com/timescale/docs/blob/latest/_partials/_migrate_from_timescaledb_version.md)),
-so **take a new backup right after a deploy that prints that line**. To restore an older dump,
+which is why every deploy ends with a fresh dump (above). To restore an older dump,
 check out the release it was taken on, restore it there, then check out the current release
 and run `deploy.sh`.
 

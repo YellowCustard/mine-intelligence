@@ -63,7 +63,8 @@ address, and `localhost`), then:
    in `/opt/mine-monitor/shared/initial-admin-password`. Log in, create the real accounts
    (`deploy/DEPLOY.md` §4a), then delete that file;
 6. verifies the release: every container healthy, `/health` green, the ingestor running, the
-   expected version answering, and the admin able to log in.
+   expected version answering, and the admin able to log in;
+7. dumps the database to `shared/backups/` (see §7).
 
 | Option | Effect |
 |---|---|
@@ -74,6 +75,7 @@ address, and `localhost`), then:
 | `--demo` | start the simulated fleet |
 | `--admin-user NAME` | first admin's username (default `admin`) |
 | `--restore DUMP` | start from a database dump instead of an empty database (§7) |
+| `--no-backup` | skip the database dump at the end (§7) |
 | `--prefix DIR` | install somewhere other than `/opt/mine-monitor` |
 | `--yes` | ask nothing |
 
@@ -102,6 +104,8 @@ Settings live in `/opt/mine-monitor/shared/.env`, which upgrades never touch. Ed
 sudo mmctl deploy
 ```
 
+It restarts what changed, verifies the release as on install, and dumps the database (§7).
+
 `COMPOSE_PROFILES` in that file lists the optional services that run: `backup`, `tls`,
 `trackers`, `sim`, `evidence` (object store, `docs/OBJECT_STORAGE.md`) and `vision`
 (`docs/VISION_DEPLOYMENT.md`). Retention, notifications and the rest are described in
@@ -127,7 +131,8 @@ It finds the installation and upgrades it:
 5. verifies it as on install. **If verification fails, it rolls back by itself**: it puts the
    snapshot back, restarts the previous release and says where the failed release's logs are;
 6. dumps the upgraded database to `shared/backups/`. A dump restores only onto the TimescaleDB
-   version it was taken on, so after an upgrade that moved it, this dump is the one to keep.
+   version it was taken on, so after an upgrade that moved it, this dump is the first one that
+   restores onto the new release.
 
 Settings new in the release take their defaults; the installer lists them. The stack is down for
 the snapshot copy and the restart, so pick a quiet moment on a large database.
@@ -142,11 +147,19 @@ sudo mmctl rollback
 
 The previous release starts again with the database as it was just before the upgrade. Whatever
 was recorded after the upgrade is lost from the live database; it is dumped to
-`shared/backups/` first. Only the last upgrade can be rolled back, until the next one.
+`shared/backups/` first. Only the last successful upgrade can be rolled back, until the next
+one succeeds: an upgrade that fails, rolls itself back, or is cut off before it switches
+releases (a power cut) leaves the earlier rollback in place.
 
 **Back up.** The `backup` service dumps the database daily to `shared/backups/` and keeps 14
-days (`MM_BACKUP_INTERVAL_S`, `MM_BACKUP_KEEP_DAYS`). `sudo mmctl backup [file]` takes one now.
-The dumps hold personal data and sit on the same disk as the database: copy them off the box.
+days (`MM_BACKUP_INTERVAL_S`, `MM_BACKUP_KEEP_DAYS`). On top of that, every install, upgrade,
+`mmctl deploy` and rollback ends with a dump once the release has verified, because a dump
+restores only onto the TimescaleDB version it was taken on. If that dump fails, the command
+reports an error although the release is running: fix the cause (often disk space) and run
+`sudo mmctl backup`. `--no-backup` skips it. `sudo mmctl backup [file]` takes one at any time.
+A dump that does not complete leaves no file, and a dump will not start when the disk could not
+take it with 1 GB to spare. The dumps hold personal data and sit on the same disk as the
+database: copy them off the box.
 
 **Restore** a dump onto this box, replacing its database:
 
@@ -156,6 +169,11 @@ sudo mmctl restore /path/to/minemonitor_20261006_020000.sql.gz
 
 The dump must come from the TimescaleDB version this release runs (`sudo mmctl status`). The
 current database is dumped first.
+
+Rollback and restore both stop, changing nothing, when that first dump of the current database
+fails, for example because the database is not running: start it (`sudo mmctl compose up -d db`)
+and run the command again. Only when the current database cannot start and you accept losing
+what it holds, add `--no-safety-dump`.
 
 **Move to a new box**, or onto a release from a git-checkout deployment: take a dump on the old
 box (`sudo mmctl backup`, or `bash deploy/backup.sh` in the checkout), stop the old stack, and on
@@ -169,7 +187,7 @@ logins.
 |---|---|
 | `sudo mmctl status` | release, containers, `/health`, and whether a rollback is available |
 | `sudo mmctl logs [service]` | follow the logs (`api`, `ingestor`, `mqtt`, `db`, `caddy`, ...) |
-| `sudo mmctl deploy` | apply a change to `shared/.env` |
+| `sudo mmctl deploy` | apply a change to `shared/.env`, verify, and dump the database (`--no-backup` skips the dump) |
 | `sudo mmctl backup [file]` | dump the database |
 | `sudo mmctl restore <dump>` | replace the database with a dump |
 | `sudo mmctl rollback` | undo the last upgrade |

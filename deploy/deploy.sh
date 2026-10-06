@@ -2,15 +2,23 @@
 # One-command deploy for Mine Monitor on a Docker-capable VPS (e.g. xneelo Cloud).
 # Run this ON THE SERVER, from the repo root, after: git clone / git pull.
 #
-#   bash deploy/deploy.sh            # bring the stack up (no demo fleet)
-#   bash deploy/deploy.sh --demo     # also start the simulated fleet
+#   bash deploy/deploy.sh               # bring the stack up (no demo fleet)
+#   bash deploy/deploy.sh --demo        # also start the simulated fleet
+#   bash deploy/deploy.sh --no-backup   # skip the database dump a deploy ends with
 #
 # It is idempotent — safe to re-run to apply updates.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DEMO=0
-[ "${1:-}" = "--demo" ] && DEMO=1
+BACKUP=1
+for arg in "$@"; do
+  case "$arg" in
+    --demo) DEMO=1 ;;
+    --no-backup) BACKUP=0 ;;
+    *) echo "usage: bash deploy/deploy.sh [--demo] [--no-backup]" >&2; exit 2 ;;
+  esac
+done
 
 echo "==> Checking prerequisites"
 command -v docker >/dev/null || { echo "ERROR: Docker Engine is not installed. See deploy/DEPLOY.md"; exit 1; }
@@ -68,8 +76,22 @@ for i in $(seq 1 30); do
   [ "$i" = "30" ] && { echo "    API did not become healthy in time — check: docker compose logs api"; exit 1; }
 done
 
-# deploy/mmctl (the release installer) runs this script and prints its own next steps.
+# deploy/mmctl (the release installer) runs this script, verifies the release, then takes the
+# dump itself and prints its own next steps.
 [ -n "${MM_INSTALLER:-}" ] && exit 0
+
+# A dump restores only onto the TimescaleDB version it was taken on (docs/OPERATIONS.md §5), so
+# the dumps from before a deploy that moved the db image cannot restore onto this one. Every
+# deploy ends with a fresh dump, and a deploy whose dump fails has failed.
+if [ "$BACKUP" = 1 ]; then
+  bash deploy/backup.sh "backups/minemonitor_$(date -u +%Y%m%d_%H%M%S)_after-deploy.sql.gz" || {
+    echo "ERROR: the stack is up, but the database dump after the deploy failed (above)."
+    echo "       Fix the cause, then take one: bash deploy/backup.sh"
+    exit 1
+  }
+else
+  echo "WARNING: no database dump after this deploy (--no-backup). Take one: bash deploy/backup.sh"
+fi
 
 echo
 echo "==> Up. The dashboard is served by the API on port 8000 (localhost on the VPS)."

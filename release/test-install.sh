@@ -6,7 +6,7 @@
 #
 # Builds release bundles from the two images, then on this host: a fresh install from the offline
 # bundle into an empty image store, an upgrade, a rollback, a failed upgrade that rolls itself
-# back, backup and restore, and a fresh install from a dump.
+# back, backup and restore, the dump every deploy ends with, and a fresh install from a dump.
 #
 # DESTRUCTIVE: removes every container, image and volume on the host, and $MMH. CI only.
 set -euo pipefail
@@ -27,6 +27,34 @@ expect() {  # description actual wanted
 sql() { docker exec "$(docker ps -q --filter label=com.docker.compose.project=minemonitor --filter label=com.docker.compose.service=db)" psql -U minemonitor -d minemonitor -tAc "$1"; }
 users() { sql "select string_agg(username, ',' order by username) from users"; }
 current() { basename "$(readlink -f "$MM_HOME/current")"; }
+rollback_volumes() { docker volume ls -q --filter label=com.minemonitor.role=rollback | wc -l; }
+dumps() { find "$MM_HOME/shared/backups" -name "minemonitor_*_$1.sql.gz" | wc -l; }
+# grep -c reads to the end: grep -q would stop early and, under pipefail, fail zcat with SIGPIPE.
+zcontains() { [ "$(zcat "$2" | grep -c -- "$1")" -gt 0 ]; }  # pattern file.gz
+has_dump() {  # label: a whole dump with that label exists
+  local f
+  f=$(find "$MM_HOME/shared/backups" -name "minemonitor_*_$1.sql.gz" | sort | tail -n 1)
+  if ! { [ -n "$f" ] && gzip -t "$f" && zcontains 'PostgreSQL database dump complete' "$f"; }; then
+    fail "no whole dump labelled $1"
+  fi
+  echo "ok: dump $(basename "$f")"
+}
+empty_host() {  # a clean box: no containers, images or volumes, and no $MM_HOME
+  docker ps -aq | xargs -r docker rm -f >/dev/null
+  docker system prune -af --volumes >/dev/null
+  docker volume prune -af >/dev/null
+  rm -rf "$MM_HOME"
+  expect "images on the host" "$(docker images -q | wc -l)" 0
+}
+cut_off_upgrade() {  # running version, version a cut-off attempt was upgrading to
+  # An upgrade cut off after its snapshot (a power cut) leaves its own record as rollback.env and
+  # the valid one set aside as rollback.env.prev. Sets $stale to the attempt's snapshot volume.
+  local rb="$MM_HOME/shared/rollback.env"
+  stale=minemonitor_db_rollback_cut_off
+  docker volume create --label com.minemonitor.role=rollback "$stale" >/dev/null
+  mv "$rb" "$rb.prev"
+  printf 'MM_ROLLBACK_FROM=%s\nMM_ROLLBACK_TO=%s\nMM_ROLLBACK_VOLUME=%s\n' "$1" "$2" "$stale" > "$rb"
+}
 https_status() { curl -sk -o /dev/null -w '%{http_code}' ${1:+-u "$1"} https://localhost/me; }
 new_user() {
   "$MMCTL" compose exec -T -e MM_NEW_USER_PASSWORD=test-user-password api \
@@ -54,11 +82,7 @@ ls -l "$WORK"/v*/
 (cd "$WORK/v1" && sha256sum -c SHA256SUMS)
 
 step "Empty the host: no images, containers or volumes, so the install needs no registry"
-docker ps -aq | xargs -r docker rm -f >/dev/null
-docker system prune -af --volumes >/dev/null
-docker volume prune -af >/dev/null
-rm -rf "$MM_HOME"
-expect "images on the host" "$(docker images -q | wc -l)" 0
+empty_host
 
 step "Fresh install of $V1 from the offline bundle"
 B1=$(unpack "$WORK/v1/mine-monitor-$V1-linux-amd64-offline.tar")
@@ -80,6 +104,7 @@ done
 [ "$n" -gt 0 ] || fail "the simulated fleet's positions never arrived"
 echo "ok: $n positions stored through the authenticated broker"
 [ -s "$MM_HOME/shared/mosquitto/passwd" ] || fail "broker password file missing from shared/"
+has_dump "v$V1-installed"
 rm -rf "$B1"
 
 step "Upgrade $V1 -> $V2"
@@ -88,23 +113,30 @@ before=$(sql 'select count(*) from positions')
 bash "$B2/install.sh" --yes
 expect "running release" "$(current)" "$V2"
 expect "rollback target" "$(sed -n 's/^MM_ROLLBACK_FROM=//p' "$MM_HOME/shared/rollback.env")" "$V1"
+[ ! -e "$MM_HOME/shared/rollback.env.prev" ] || fail "a superseded rollback record was left behind"
 expect "HTTPS login after the upgrade" "$(https_status "admin:$ADMIN_PW")" 200
 [ "$(sql 'select count(*) from positions')" -ge "$before" ] || fail "positions lost in the upgrade"
-ls "$MM_HOME"/shared/backups/*_v"$V2".sql.gz >/dev/null || fail "no post-upgrade dump"
+has_dump "v$V2"
 
 step "Roll back $V2 -> $V1: data written after the upgrade goes"
 new_user after-upgrade
 expect "users before the rollback" "$(users)" "admin,after-upgrade"
+# An attempt at $V3 was cut off before switching releases; the rollback to $V1 still applies.
+cut_off_upgrade "$V2" "$V3"
 "$MMCTL" rollback --yes
 expect "running release" "$(current)" "$V1"
+expect "rollback snapshot volumes after the rollback" "$(rollback_volumes)" 0
+[ ! -e "$MM_HOME/shared/rollback.env.prev" ] || fail "a set-aside rollback record was left behind"
 expect "users after the rollback" "$(users)" admin
 expect "HTTPS login after the rollback" "$(https_status "admin:$ADMIN_PW")" 200
 [ ! -e "$MM_HOME/shared/rollback.env" ] || fail "rollback record left behind"
-zcat "$MM_HOME"/shared/backups/*before-rollback-v"$V2".sql.gz | grep -q after-upgrade || fail "the pre-rollback dump lacks the discarded data"
+zcontains after-upgrade "$(ls "$MM_HOME"/shared/backups/*before-rollback-v"$V2".sql.gz)" || fail "the pre-rollback dump lacks the discarded data"
+has_dump "v$V1-rolled-back"
 
 step "Upgrade to $V2 again, from the installed images"
 bash "$B2/install.sh" --yes
 expect "running release" "$(current)" "$V2"
+expect "dumps after upgrading to $V2 twice" "$(dumps "v$V2")" 2
 
 step "A failed upgrade to $V3 rolls itself back to $V2"
 # $V3's bundle carries $V2's code, so /version answers $V2 and verification fails after deploying.
@@ -113,13 +145,35 @@ while read -r ref _ src; do
   docker tag "$(awk -v s="$src" '$3 == s { print $1 }' "$MM_HOME/releases/$V2/images.lock")" "$ref"
 done < <(tar -xzOf "$WORK/v3/mine-monitor-$V3.tar.gz" "mine-monitor-$V3/images.lock")
 new_user before-failed-upgrade
+# An earlier attempt at $V3 was cut off before switching; the rollback to $V1 must survive.
+cut_off_upgrade "$V2" "$V3"
 B3=$(unpack "$WORK/v3/mine-monitor-$V3.tar.gz")
 if bash "$B3/install.sh" --yes; then fail "the $V3 upgrade reported success"; fi
 expect "running release" "$(current)" "$V2"
 expect "users after the automatic rollback" "$(users)" "admin,before-failed-upgrade"
 expect "HTTPS login after the automatic rollback" "$(https_status "admin:$ADMIN_PW")" 200
 ls "$MM_HOME"/shared/logs/upgrade-"$V3"-failed-*.log >/dev/null || fail "no log of the failed release"
+expect "dumps of the failed release" "$(dumps "v$V3")" 0
+# The rollback to $V1 that existed before both attempts is still there, with its snapshot.
+expect "rollback target after the failed upgrade" "$(sed -n 's/^MM_ROLLBACK_FROM=//p' "$MM_HOME/shared/rollback.env")" "$V1"
+expect "rollback snapshot volumes" "$(rollback_volumes)" 1
+[ ! -e "$MM_HOME/shared/rollback.env.prev" ] || fail "a set-aside rollback record was left behind"
+if docker volume inspect "$stale" >/dev/null 2>&1; then fail "the cut-off attempt's snapshot was kept"; fi
 rm -rf "$B3"
+
+step "A deploy ends with a dump; a dump that cannot complete fails and leaves no file"
+"$MMCTL" deploy
+expect "dumps of $V2 after mmctl deploy" "$(dumps "v$V2")" 3
+"$MMCTL" compose stop db >/dev/null 2>&1
+if "$MMCTL" backup "$WORK/no-db.sql.gz"; then fail "a backup with the database stopped reported success"; fi
+expect "files left by the failed backup" "$(find "$WORK" -maxdepth 1 -name 'no-db.sql.gz*' | wc -l)" 0
+# Restore deletes the live database only once it has a dump of it.
+latest=$(find "$MM_HOME/shared/backups" -name "minemonitor_*_v$V2.sql.gz" | sort | tail -n 1)
+if "$MMCTL" restore "$latest" --yes; then fail "a restore went ahead without a dump of the current database"; fi
+docker volume inspect minemonitor_db_data >/dev/null || fail "the refused restore removed the database volume"
+"$MMCTL" deploy --no-backup
+expect "dumps of $V2 after mmctl deploy --no-backup" "$(dumps "v$V2")" 3
+expect "users after the refused restore" "$(users)" "admin,before-failed-upgrade"
 
 step "Backup and restore"
 "$MMCTL" backup "$WORK/dump.sql.gz"
@@ -129,12 +183,13 @@ expect "users after the restore" "$(users)" "admin,before-failed-upgrade"
 expect "HTTPS login after the restore" "$(https_status "admin:$ADMIN_PW")" 200
 
 step "Fresh install of $V2 from a dump on a clean box, without HTTPS"
-"$MMCTL" compose --profile '*' down --volumes >/dev/null 2>&1
-docker volume rm minemonitor_db_rollback >/dev/null 2>&1 || true
-rm -rf "$MM_HOME"
+# The images go too, as on a real clean box: with both releases' images still loaded, a CI
+# runner's disk is under the installer's 10 GB minimum.
+empty_host
 bash "$B2/install.sh" --yes --no-tls --restore "$WORK/dump.sql.gz"
 expect "running release" "$(current)" "$V2"
 expect "restored users" "$(users)" "admin,before-failed-upgrade"
+has_dump "v$V2-installed"
 [ ! -e "$MM_HOME/shared/initial-admin-password" ] || fail "an admin was generated over restored users"
 expect "API login with the restored admin" \
   "$("$MMCTL" compose exec -T api python -c "import base64, urllib.request as u
