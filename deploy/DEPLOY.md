@@ -29,7 +29,9 @@ git clone https://github.com/YellowCustard/mine-intelligence.git
 cd mine-intelligence
 ```
 
-(To update later: `git pull`, then re-run the deploy script. A box that ran the old `minio`
+(To update later: `git pull`, then re-run the deploy script. When the database image moves to a
+new TimescaleDB release, the script updates the extension itself; back up again afterwards, as
+[Operations §5](../docs/OPERATIONS.md#5-backup-and-restore) explains. A box that ran the old `minio`
 service also needs [Upgrading a deployment that ran MinIO](../docs/OBJECT_STORAGE.md#upgrading-a-deployment-that-ran-minio):
 its container keeps running, and any S3 evidence must be copied across.)
 
@@ -206,7 +208,7 @@ cp .env.example .env && $EDITOR .env  # set the same passwords as the source box
 bash deploy/restore.sh backups/minemonitor_<timestamp>.sql.gz
 ```
 `restore.sh` brings up `db`, waits for it to be healthy, loads the dump, then starts
-the rest of the stack. (Both scripts wrap `pg_dump`/`psql` and honour the
+the rest of the stack (writing the broker files first when broker auth is on). (Both scripts wrap `pg_dump`/`psql` and honour the
 `POSTGRES_*` values in `.env`.)
 
 ## Security checklist before any public exposure

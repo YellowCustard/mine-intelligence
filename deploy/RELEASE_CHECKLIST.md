@@ -52,7 +52,8 @@ Tick every box. A red box is a blocked release, not a note for later.
       firewall alone proves nothing.
 - [ ] **MQTT broker requires auth** — `MM_MQTT_USERNAME`/`PASSWORD` set, the broker
       runs `allow_anonymous false` (`docker/mosquitto.auth.conf`), and the password +
-      ACL files were generated from the devices table. No anonymous access to 1883.
+      ACL files were generated from the devices table. No anonymous access to 1883:
+      `deploy.sh` printed `Broker refuses anonymous clients.`
 - [ ] Security headers present (CSP, nosniff, frame-options, referrer-policy).
 - [ ] Retention job runs on schedule; per-class `MM_RETAIN_*_DAYS` reviewed for the
       site.

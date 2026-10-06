@@ -15,6 +15,7 @@ import getpass
 import shutil
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -83,6 +84,21 @@ def _connect(port: int, user: str, password: str, cid: str) -> tuple[mqtt.Client
     return client, got.get("rc", -1)
 
 
+def _subscribe(client: mqtt.Client, topic: str) -> list[int]:
+    """Subscribe at QoS 1 and wait for the broker's SUBACK; return its reason codes."""
+    got: list[int] = []
+    done = threading.Event()
+
+    def on_subscribe(c, u, mid, reason_codes, properties=None) -> None:
+        got.extend(int(rc.value) for rc in reason_codes)
+        done.set()
+
+    client.on_subscribe = on_subscribe
+    client.subscribe(topic, qos=1)
+    assert done.wait(timeout=5), f"no SUBACK for {topic}"
+    return got
+
+
 def test_real_broker_accepts_rendered_credentials_and_enforces_acl(
     db_session: Session, tmp_path: Path
 ) -> None:
@@ -125,6 +141,41 @@ def test_real_broker_accepts_rendered_credentials_and_enforces_acl(
         time.sleep(1.0)
         assert "mm/kn-zw-01/HT-102/position" in received
         assert "mm/kn-zw-01/OTHER/position" not in received
+    finally:
+        for c in clients:
+            c.loop_stop()
+            c.disconnect()
+        broker.terminate()
+        broker.wait(timeout=5)
+
+
+def test_service_account_publishes_positions_the_ingestor_receives(
+    db_session: Session, tmp_path: Path
+) -> None:
+    """The simulator and the Teltonika adapter publish as the service account the ingestor
+    subscribes with. A read-only ACL for it let them connect, then dropped every position."""
+    passwd = render_password_file(
+        db_session, service_user=_SVC_USER, service_hash=mosquitto_password_hash(_SVC_PASS)
+    )
+    acl = render_mosquitto_acl(db_session, ingest_user=_SVC_USER)
+    port = _free_port()
+    broker = _start_broker(tmp_path, port, passwd, acl)
+    clients: list[mqtt.Client] = []
+    try:
+        ingestor, rc = _connect(port, _SVC_USER, _SVC_PASS, "mm-ingestor")
+        clients.append(ingestor)
+        assert rc == 0
+        publisher, rc = _connect(port, _SVC_USER, _SVC_PASS, "mm-publisher")
+        clients.append(publisher)
+        assert rc == 0
+        received: list[str] = []
+        ingestor.on_message = lambda c, u, msg: received.append(msg.topic)
+        assert _subscribe(ingestor, "mm/+/+/position") == [1]  # granted QoS 1, not 0x80
+        publisher.publish("mm/kn-zw-01/HT-102/position", b"{}", qos=1).wait_for_publish(timeout=5)
+        deadline = time.monotonic() + 5
+        while not received and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert received == ["mm/kn-zw-01/HT-102/position"]
     finally:
         for c in clients:
             c.loop_stop()
