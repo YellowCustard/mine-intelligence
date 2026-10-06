@@ -46,6 +46,15 @@ empty_host() {  # a clean box: no containers, images or volumes, and no $MM_HOME
   rm -rf "$MM_HOME"
   expect "images on the host" "$(docker images -q | wc -l)" 0
 }
+cut_off_upgrade() {  # running version, version a cut-off attempt was upgrading to
+  # An upgrade cut off after its snapshot (a power cut) leaves its own record as rollback.env and
+  # the valid one set aside as rollback.env.prev. Sets $stale to the attempt's snapshot volume.
+  local rb="$MM_HOME/shared/rollback.env"
+  stale=minemonitor_db_rollback_cut_off
+  docker volume create --label com.minemonitor.role=rollback "$stale" >/dev/null
+  mv "$rb" "$rb.prev"
+  printf 'MM_ROLLBACK_FROM=%s\nMM_ROLLBACK_TO=%s\nMM_ROLLBACK_VOLUME=%s\n' "$1" "$2" "$stale" > "$rb"
+}
 https_status() { curl -sk -o /dev/null -w '%{http_code}' ${1:+-u "$1"} https://localhost/me; }
 new_user() {
   "$MMCTL" compose exec -T -e MM_NEW_USER_PASSWORD=test-user-password api \
@@ -112,8 +121,12 @@ has_dump "v$V2"
 step "Roll back $V2 -> $V1: data written after the upgrade goes"
 new_user after-upgrade
 expect "users before the rollback" "$(users)" "admin,after-upgrade"
+# An attempt at $V3 was cut off before switching releases; the rollback to $V1 still applies.
+cut_off_upgrade "$V2" "$V3"
 "$MMCTL" rollback --yes
 expect "running release" "$(current)" "$V1"
+expect "rollback snapshot volumes after the rollback" "$(rollback_volumes)" 0
+[ ! -e "$MM_HOME/shared/rollback.env.prev" ] || fail "a set-aside rollback record was left behind"
 expect "users after the rollback" "$(users)" admin
 expect "HTTPS login after the rollback" "$(https_status "admin:$ADMIN_PW")" 200
 [ ! -e "$MM_HOME/shared/rollback.env" ] || fail "rollback record left behind"
@@ -132,13 +145,8 @@ while read -r ref _ src; do
   docker tag "$(awk -v s="$src" '$3 == s { print $1 }' "$MM_HOME/releases/$V2/images.lock")" "$ref"
 done < <(tar -xzOf "$WORK/v3/mine-monitor-$V3.tar.gz" "mine-monitor-$V3/images.lock")
 new_user before-failed-upgrade
-# An earlier attempt at $V3 was cut off after its snapshot (a power cut): its record is current
-# and the rollback to $V1 is set aside. The rollback to $V1 must survive the next attempt.
-stale=minemonitor_db_rollback_cut_off
-docker volume create --label com.minemonitor.role=rollback "$stale" >/dev/null
-mv "$MM_HOME/shared/rollback.env" "$MM_HOME/shared/rollback.env.prev"
-printf 'MM_ROLLBACK_FROM=%s\nMM_ROLLBACK_TO=%s\nMM_ROLLBACK_VOLUME=%s\n' "$V2" "$V3" "$stale" \
-  > "$MM_HOME/shared/rollback.env"
+# An earlier attempt at $V3 was cut off before switching; the rollback to $V1 must survive.
+cut_off_upgrade "$V2" "$V3"
 B3=$(unpack "$WORK/v3/mine-monitor-$V3.tar.gz")
 if bash "$B3/install.sh" --yes; then fail "the $V3 upgrade reported success"; fi
 expect "running release" "$(current)" "$V2"

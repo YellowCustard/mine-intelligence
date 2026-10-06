@@ -326,7 +326,8 @@ copy_volume() {  # from to image
 #
 # The snapshot goes to a new volume, and the previous rollback (record and volume) stays usable
 # until the upgrade has verified: snapshot_db sets it aside, keep_rollback drops it once the new
-# release runs, and restore_previous_rollback puts it back when the upgrade fails.
+# release runs, and restore_previous_rollback puts it back when the upgrade fails. An upgrade cut
+# off part way (a power cut) can leave both records; reconcile_rollback settles them first.
 #
 # do_upgrade runs it as `if ! snapshot_db`, where errexit is off, so each step returns its own
 # failure: rollback.env must never record a snapshot that was not taken in full.
@@ -337,6 +338,7 @@ rollback_volume() {  # rollback.env file: the snapshot volume it names
 }
 snapshot_db() {  # old version, new version
   local vol img snap rb="$MMH/$ROLLBACK_ENV"
+  reconcile_rollback "$1" || return 1
   vol=$(db_volume)
   [ -n "$vol" ] || die "no database volume found for project $PROJECT"
   img=$(db_image "$MMH/releases/$1")
@@ -358,12 +360,6 @@ snapshot_db() {  # old version, new version
     docker volume rm "$snap" >/dev/null 2>&1 || true
     return 1
   fi
-  # An upgrade cut off part way (a power cut) leaves its record and the one it set aside. If it
-  # had switched to the running release ($1), the set-aside record is two upgrades old; if not,
-  # its own record is stale and the set-aside one still rolls back the running release.
-  if [ -f "$rb.prev" ] && [ -f "$rb" ]; then
-    if [ "$(env_get MM_ROLLBACK_TO "$rb")" = "$1" ]; then keep_rollback; else restore_previous_rollback; fi
-  fi
   if [ -f "$rb" ]; then mv -f "$rb" "$rb.prev" || return 1; fi
   if ! mv -f "$rb.new" "$rb"; then
     if [ -f "$rb.prev" ]; then mv -f "$rb.prev" "$rb"; fi
@@ -377,10 +373,27 @@ keep_rollback() {  # the upgrade verified: the previous rollback is superseded
     rm -f "$rb.prev"
   fi
 }
-restore_previous_rollback() {  # the upgrade failed, was undone or never ran: drop its snapshot
+restore_previous_rollback() {  # the upgrade failed and was undone: drop its snapshot
   local rb="$MMH/$ROLLBACK_ENV"
   docker volume rm "$(rollback_volume "$rb")" >/dev/null 2>&1 || true
   if [ -f "$rb.prev" ]; then mv -f "$rb.prev" "$rb"; else rm -f "$rb"; fi
+}
+
+# What an upgrade cut off part way leaves: rollback.env next to the record it set aside, or only
+# the set-aside record (cut between the two renames). Keep the one that rolls back the running
+# release: rollback.env if the upgrade had switched to it, otherwise the set-aside record, since
+# the cut-off upgrade's own snapshot predates what the running release has written since.
+reconcile_rollback() {  # running version
+  local rb="$MMH/$ROLLBACK_ENV"
+  [ -f "$rb.prev" ] || return 0
+  if [ -f "$rb" ] && [ "$(env_get MM_ROLLBACK_TO "$rb")" = "$1" ]; then
+    keep_rollback
+  elif [ "$(env_get MM_ROLLBACK_TO "$rb.prev")" = "$1" ]; then
+    if [ -f "$rb" ]; then docker volume rm "$(rollback_volume "$rb")" >/dev/null 2>&1 || true; fi
+    mv -f "$rb.prev" "$rb"
+  else
+    keep_rollback
+  fi
 }
 
 restore_snapshot() {  # version whose db image to use
@@ -883,6 +896,7 @@ cmd_rollback() {
   require_installed
   lock_or_die
   local rb="$MMH/shared/rollback.env" from to at cur since dir
+  reconcile_rollback "$(current_version)" || die "could not settle the rollback records left by an interrupted upgrade in $MMH/shared"
   [ -f "$rb" ] || die "no rollback is available: one exists only after an upgrade, until the next one"
   from=$(env_get MM_ROLLBACK_FROM "$rb")
   to=$(env_get MM_ROLLBACK_TO "$rb")

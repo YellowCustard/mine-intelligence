@@ -148,7 +148,8 @@ sudo mmctl rollback
 The previous release starts again with the database as it was just before the upgrade. Whatever
 was recorded after the upgrade is lost from the live database; it is dumped to
 `shared/backups/` first. Only the last successful upgrade can be rolled back, until the next
-one succeeds: an upgrade that fails, or rolls itself back, leaves the earlier rollback in place.
+one succeeds: an upgrade that fails, rolls itself back, or is cut off before it switches
+releases (a power cut) leaves the earlier rollback in place.
 
 **Back up.** The `backup` service dumps the database daily to `shared/backups/` and keeps 14
 days (`MM_BACKUP_INTERVAL_S`, `MM_BACKUP_KEEP_DAYS`). On top of that, every install, upgrade,
