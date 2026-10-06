@@ -24,6 +24,7 @@ ROLLBACK_VOLUME=${PROJECT}_db_rollback
 MIN_DOCKER=28.0
 MIN_COMPOSE=2.20.0
 NO_BACKUP=0
+NO_SAFETY_DUMP=0
 
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 BUNDLE=$(dirname "$(dirname "$SELF")")
@@ -320,21 +321,26 @@ copy_volume() {  # from to image
 # back by an older one, so rolling back means returning the database to its state before the
 # upgrade. The snapshot is a copy of the stopped database's volume: exact, and it restores onto
 # the previous release's database image whatever TimescaleDB version the new one moved to.
+#
+# do_upgrade runs it as `if ! snapshot_db`, where errexit is off, so each step returns its own
+# failure: rollback.env must never record a snapshot that was not taken in full.
 snapshot_db() {  # old version, new version
   local vol img
   vol=$(db_volume)
   [ -n "$vol" ] || die "no database volume found for project $PROJECT"
   img=$(db_image "$MMH/releases/$1")
+  [ -n "$img" ] || { warn "release $1's images.lock names no database image"; return 1; }
   say "Snapshotting the database for rollback ($vol -> $ROLLBACK_VOLUME)"
-  rm -f "$MMH/shared/rollback.env"
-  docker volume inspect "$ROLLBACK_VOLUME" >/dev/null 2>&1 ||
-    docker volume create --label "com.minemonitor.role=rollback" "$ROLLBACK_VOLUME" >/dev/null
-  copy_volume "$vol" "$ROLLBACK_VOLUME" "$img"
+  rm -f "$MMH/shared/rollback.env" || return 1
+  if ! docker volume inspect "$ROLLBACK_VOLUME" >/dev/null 2>&1; then
+    docker volume create --label "com.minemonitor.role=rollback" "$ROLLBACK_VOLUME" >/dev/null || return 1
+  fi
+  copy_volume "$vol" "$ROLLBACK_VOLUME" "$img" || return 1
   {
     echo "MM_ROLLBACK_FROM=$1"
     echo "MM_ROLLBACK_TO=$2"
     echo "MM_ROLLBACK_SNAPSHOT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  } > "$MMH/shared/rollback.env.new"
+  } > "$MMH/shared/rollback.env.new" || return 1
   mv -f "$MMH/shared/rollback.env.new" "$MMH/shared/rollback.env"
 }
 
@@ -344,17 +350,29 @@ restore_snapshot() {  # version whose db image to use
   [ -n "$vol" ] || die "no database volume found for project $PROJECT"
   docker volume inspect "$ROLLBACK_VOLUME" >/dev/null 2>&1 || die "the rollback snapshot ($ROLLBACK_VOLUME) is missing"
   say "Restoring the database from the pre-upgrade snapshot"
-  copy_volume "$ROLLBACK_VOLUME" "$vol" "$(db_image "$MMH/releases/$1")"
+  # The copy empties the live volume first, so a failure part way leaves it incomplete; the
+  # snapshot and rollback.env stay, and the rollback can be run again once the cause is fixed.
+  copy_volume "$ROLLBACK_VOLUME" "$vol" "$(db_image "$MMH/releases/$1")" ||
+    die "could not copy the pre-upgrade snapshot back into $vol. The snapshot is intact in $ROLLBACK_VOLUME; fix the cause (often disk space) and run: sudo mmctl rollback"
 }
 
-safety_dump() {  # dir label: best effort, before an operation that discards data
-  local out
+# Before a rollback or restore replaces the live database. Without the dump the data it holds
+# would be gone, so the caller stops unless the operator said --no-safety-dump.
+safety_dump() {  # dir label
+  local out err
   out="backups/minemonitor_$(date -u +%Y%m%d_%H%M%S)_$2.sql.gz"
   say "Dumping the current database to shared/$out first"
-  if ! (cd "$1" && bash deploy/backup.sh "$out" >/dev/null 2>&1); then
-    rm -f "$1/$out"
-    warn "could not dump the current database (is it running?); continuing without that copy"
+  if ! err=$(cd "$1" && bash deploy/backup.sh "$out" 2>&1); then
+    printf '%s\n' "$err" >&2
+    if [ "$NO_SAFETY_DUMP" = 1 ]; then
+      warn "could not dump the current database; continuing without that copy (--no-safety-dump)"
+      return 0
+    fi
+    return 1
   fi
+}
+no_safety_dump() {  # command
+  die "could not dump the current database (above), so it is left as it is. Start it (sudo mmctl compose up -d db) and run this again, or, to replace it without a copy and lose what it holds: sudo mmctl $1 --no-safety-dump"
 }
 
 run_deploy() {  # dir
@@ -381,11 +399,16 @@ backup_failed() {  # version
 # running without restarts otherwise; one-shot services exited 0. Two passes, 10 s apart, so a
 # crash-looping container is not caught between restarts.
 wait_containers() {  # dir timeout_s
-  local dir=$1 deadline=$((SECONDS + $2)) svc id line bad pending prev="" now=""
+  local dir=$1 deadline=$((SECONDS + $2)) svc id line bad pending prev="" now="" services
   local state code health restarts policy
+  # Runs where errexit is off (verify_release is called under if/||): an empty list would pass.
+  if ! services=$(dc "$dir" config --services) || [ -z "$services" ]; then
+    echo "    cannot list the release's services (docker compose config failed)"
+    return 1
+  fi
   while :; do
     bad="" pending="" now=""
-    for svc in $(dc "$dir" config --services); do
+    for svc in $services; do
       id=$(dc "$dir" ps -a -q "$svc" | head -n 1)
       if [ -z "$id" ]; then pending+=" $svc(not created)"; continue; fi
       line=$(docker inspect --format '{{.State.Status}} {{.State.ExitCode}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.RestartCount}} {{.HostConfig.RestartPolicy.Name}}' "$id")
@@ -810,7 +833,13 @@ cmd_install() {
 
 cmd_rollback() {
   YES=0
-  case "${1:-}" in --yes | -y) YES=1 ;; "") ;; *) die "usage: mmctl rollback [--yes]" ;; esac
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --yes | -y) YES=1; shift ;;
+      --no-safety-dump) NO_SAFETY_DUMP=1; shift ;;
+      *) die "usage: mmctl rollback [--yes] [--no-safety-dump]" ;;
+    esac
+  done
   require_installed
   lock_or_die
   local rb="$MMH/shared/rollback.env" from to at cur since dir
@@ -827,7 +856,7 @@ cmd_rollback() {
     docker image inspect "$ref" >/dev/null 2>&1 || die "image $ref of release $from is no longer on this host"
   done < <(lock_locals "$dir")
   confirm "Roll back from $to to $from? The database returns to its state at $at: whatever was recorded since is lost (it is dumped to shared/backups first)."
-  safety_dump "$(current_dir)" "before-rollback-v$to"
+  safety_dump "$(current_dir)" "before-rollback-v$to" || no_safety_dump rollback
   stop_stack
   restore_snapshot "$from"
   switch_current "$from"
@@ -848,17 +877,18 @@ cmd_restore() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --yes | -y) YES=1; shift ;;
-      -*) die "usage: mmctl restore <dump.sql.gz> [--yes]" ;;
+      --no-safety-dump) NO_SAFETY_DUMP=1; shift ;;
+      -*) die "usage: mmctl restore <dump.sql.gz> [--yes] [--no-safety-dump]" ;;
       *) dump=$(readlink -f "$1"); shift ;;
     esac
   done
-  if ! { [ -n "$dump" ] && [ -f "$dump" ]; }; then die "usage: mmctl restore <dump.sql.gz> [--yes]"; fi
+  if ! { [ -n "$dump" ] && [ -f "$dump" ]; }; then die "usage: mmctl restore <dump.sql.gz> [--yes] [--no-safety-dump]"; fi
   require_installed
   lock_or_die
   local dir vol since
   dir=$(current_dir)
   confirm "Replace the database with $dump? Whatever was recorded after that dump is lost (the current database is dumped to shared/backups first). The dump must come from TimescaleDB $(db_image "$dir" | sed 's/.*:\([0-9.]*\)-.*/\1/')."
-  safety_dump "$dir" "before-restore"
+  safety_dump "$dir" "before-restore" || no_safety_dump "restore $dump"
   stop_stack
   vol=$(db_volume)
   dc "$dir" rm -f -s db >/dev/null
@@ -914,8 +944,10 @@ Usage: sudo mmctl <command>
                       apply changes to shared/.env (re-runs deploy.sh), verify, and dump
                       the database
   backup [file]       dump the database (default shared/backups/minemonitor_<time>.sql.gz)
-  restore <dump>      replace the database with a dump
+  restore <dump>      replace the database with a dump (the current one is dumped first)
   rollback            undo the last upgrade (database back to its pre-upgrade state)
+                      Both stop if the current database cannot be dumped first, unless
+                      given --no-safety-dump.
   smoke               post-deploy smoke test (writes one position for asset SMOKE-TEST)
   ca-cert             print the HTTPS root certificate operators' browsers should trust
   doctor              check this host against the release's requirements

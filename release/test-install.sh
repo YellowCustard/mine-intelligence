@@ -142,8 +142,13 @@ expect "dumps of $V2 after mmctl deploy" "$(dumps "v$V2")" 3
 "$MMCTL" compose stop db >/dev/null 2>&1
 if "$MMCTL" backup "$WORK/no-db.sql.gz"; then fail "a backup with the database stopped reported success"; fi
 expect "files left by the failed backup" "$(find "$WORK" -maxdepth 1 -name 'no-db.sql.gz*' | wc -l)" 0
+# Restore deletes the live database only once it has a dump of it.
+latest=$(find "$MM_HOME/shared/backups" -name "minemonitor_*_v$V2.sql.gz" | sort | tail -n 1)
+if "$MMCTL" restore "$latest" --yes; then fail "a restore went ahead without a dump of the current database"; fi
+docker volume inspect minemonitor_db_data >/dev/null || fail "the refused restore removed the database volume"
 "$MMCTL" deploy --no-backup
 expect "dumps of $V2 after mmctl deploy --no-backup" "$(dumps "v$V2")" 3
+expect "users after the refused restore" "$(users)" "admin,before-failed-upgrade"
 
 step "Backup and restore"
 "$MMCTL" backup "$WORK/dump.sql.gz"

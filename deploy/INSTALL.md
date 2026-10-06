@@ -168,6 +168,11 @@ sudo mmctl restore /path/to/minemonitor_20261006_020000.sql.gz
 The dump must come from the TimescaleDB version this release runs (`sudo mmctl status`). The
 current database is dumped first.
 
+Rollback and restore both stop, changing nothing, when that first dump of the current database
+fails, for example because the database is not running: start it (`sudo mmctl compose up -d db`)
+and run the command again. Only when the current database cannot start and you accept losing
+what it holds, add `--no-safety-dump`.
+
 **Move to a new box**, or onto a release from a git-checkout deployment: take a dump on the old
 box (`sudo mmctl backup`, or `bash deploy/backup.sh` in the checkout), stop the old stack, and on
 the new box run `sudo ./install.sh --restore <dump>`. The new box generates new secrets; users,
