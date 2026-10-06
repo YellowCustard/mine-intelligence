@@ -234,6 +234,10 @@ services:
       # ports bypass ufw); set MM_TELTONIKA_BIND to the host address the trackers reach.
       - "${MM_TELTONIKA_BIND:-0.0.0.0}:${MM_TELTONIKA_PORT:-5027}:${MM_TELTONIKA_PORT:-5027}"
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.adapters.teltonika"]
+    # The image's healthcheck probes the API, which does not run here, so it would always
+    # report unhealthy. The listener has no probe of its own; restart: covers a crash.
+    healthcheck:
+      disable: true
 
   # Synthetic fleet. Enable with:  docker compose --profile sim up
   simulator:
@@ -249,6 +253,9 @@ services:
       MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.adapters.simulator"]
+    # As for teltonika: the image's API healthcheck cannot pass in this container.
+    healthcheck:
+      disable: true
 
   # First-party vision edge node (vision V5 — Stage C pilot). Opt-in, like the trackers:
   #   docker compose --profile vision up -d
@@ -309,8 +316,8 @@ services:
   # TLS reverse proxy. Enable with:  docker compose --profile tls up -d
   # Terminates HTTPS in front of the API so Basic credentials ride TLS, giving a safe
   # public/LAN URL instead of an SSH tunnel. Defaults to Caddy's internal CA for an
-  # on-prem host; for a public domain, set MM_SITE_DOMAIN and switch the Caddyfile's
-  # `tls internal` to `tls {$MM_TLS_EMAIL}` (Let's Encrypt). See deploy/DEPLOY.md.
+  # on-prem host; for a public domain, set MM_SITE_DOMAIN to it and MM_TLS_EMAIL to the
+  # ACME account email (Let's Encrypt). See deploy/DEPLOY.md.
   caddy:
     image: caddy:2
     profiles: ["tls"]
@@ -320,7 +327,8 @@ services:
         condition: service_started
     environment:
       MM_SITE_DOMAIN: ${MM_SITE_DOMAIN:-localhost}
-      MM_TLS_EMAIL: ${MM_TLS_EMAIL:-}
+      # The Caddyfile's `tls` argument: Caddy's internal CA, or the ACME email for Let's Encrypt.
+      MM_TLS_ISSUER: ${MM_TLS_EMAIL:-internal}
     ports:
       - "80:80"
       - "443:443"

@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The release workflow runs this first: a tag publishes nothing until CI passes on it.
+  workflow_call:
 
 jobs:
   test:
@@ -189,6 +191,38 @@ jobs:
       - name: Stack status and logs
         if: failure()
         run: docker compose --profile sim ps -a && docker compose --profile sim logs --no-color --tail 100
+
+  # The release installer, end to end on real Docker: bundles built from two versions of the core
+  # image, then a fresh offline install into an empty image store, upgrade, rollback, a failed
+  # upgrade that rolls itself back, backup/restore, and an install from a dump.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint the release scripts
+        run: shellcheck -x deploy/mmctl release/install.sh release/build-bundle.sh release/test-install.sh
+      - name: Build the core image at this version and the next
+        run: |
+          v1=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)
+          v2="${v1%.*}.$((${v1##*.} + 1))"
+          docker build -t mm-test:v1 .
+          sed -i "s/^__version__ = .*/__version__ = \"$v2\"/" src/minemonitor/__init__.py
+          sed -i "0,/^version = /s/^version = .*/version = \"$v2\"/" pyproject.toml
+          docker build -t mm-test:v2 .
+          git checkout -- src/minemonitor/__init__.py pyproject.toml
+          echo "V1=$v1" >> "$GITHUB_ENV"
+          echo "V2=$v2" >> "$GITHUB_ENV"
+      - name: Install, upgrade, roll back and restore
+        run: |
+          sudo mkdir -p /mnt/mm-release-test
+          sudo CORE_V1=mm-test:v1 CORE_V2=mm-test:v2 V1="$V1" V2="$V2" WORK=/mnt/mm-release-test \
+            bash release/test-install.sh
+      - name: Stack status and logs
+        if: failure()
+        run: |
+          sudo /opt/mine-monitor/current/deploy/mmctl compose ps -a || true
+          sudo /opt/mine-monitor/current/deploy/mmctl compose logs --no-color --tail 100 || true
+          sudo sh -c 'tail -n 100 /opt/mine-monitor/shared/logs/*' || true
 
   # Browser end-to-end: load the real dashboard in Chromium and acknowledge an alarm.
   dashboard:

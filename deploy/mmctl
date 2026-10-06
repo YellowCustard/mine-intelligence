@@ -1,0 +1,942 @@
+#!/usr/bin/env bash
+# mmctl: install, upgrade, roll back and operate a Mine Monitor release on one Docker host.
+#
+#   sudo ./install.sh [options]     from an unpacked release bundle: install, or upgrade to it
+#   sudo mmctl <command>            on an installed box (mmctl help lists the commands)
+#
+# Installed layout (deploy/INSTALL.md):
+#
+#   /opt/mine-monitor/current -> releases/<version>   the running release, switched atomically
+#   /opt/mine-monitor/releases/<version>/              a release bundle minus its image archive;
+#                                                      the previous release is kept for rollback
+#   /opt/mine-monitor/shared/                          survives upgrades: .env (settings and
+#                                                      secrets, 0600), backups/, mosquitto/ (broker
+#                                                      login files), var/ (vision weights), logs/
+#
+# Each release directory links .env, backups, var and docker/mosquitto into shared/, so
+# deploy.sh, backup.sh and restore.sh run inside it unchanged, exactly as from a git checkout.
+# The release's docker-compose.yml fixes the compose project name, so the database volume is the
+# same whichever release directory compose runs from.
+set -euo pipefail
+
+PROJECT=minemonitor
+ROLLBACK_VOLUME=${PROJECT}_db_rollback
+MIN_DOCKER=28.0
+MIN_COMPOSE=2.20.0
+
+SELF=$(readlink -f "${BASH_SOURCE[0]}")
+BUNDLE=$(dirname "$(dirname "$SELF")")
+
+say() { echo "==> $*"; }
+note() { echo "    $*"; }
+warn() { echo "WARNING: $*" >&2; }
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+# --- where things are -----------------------------------------------------------------------
+
+# The installation this copy belongs to: MM_HOME, else the home of an installed release
+# (<home>/releases/<version>), else the default.
+detect_home() {
+  if [ -n "${MM_HOME:-}" ]; then
+    printf '%s' "$MM_HOME"
+    return
+  fi
+  local parent
+  parent=$(dirname "$BUNDLE")
+  if [ "$(basename "$parent")" = releases ] && [ -d "$(dirname "$parent")/shared" ]; then
+    dirname "$parent"
+    return
+  fi
+  printf '/opt/mine-monitor'
+}
+MMH=$(detect_home)
+
+release_field() { sed -n "s/^$2=//p" "$1/RELEASE" 2>/dev/null | head -n 1; }
+# Written when a fresh install has verified; until then install.sh resumes the fresh install.
+is_installed() { [ -f "$MMH/shared/installed" ] && [ -L "$MMH/current" ] && [ -f "$MMH/current/RELEASE" ]; }
+current_dir() { readlink -f "$MMH/current"; }
+current_version() { release_field "$(current_dir)" MM_RELEASE_VERSION; }
+require_installed() { is_installed || die "Mine Monitor is not installed under $MMH (set MM_HOME if it lives elsewhere)"; }
+
+# docker compose, run from a release directory (where its .env and relative paths resolve).
+dc() {
+  local dir=$1
+  shift
+  (cd "$dir" && docker compose "$@")
+}
+
+# One SQL statement against the release's database, through deploy/common.sh.
+db_sql() {
+  local dir=$1
+  (cd "$dir" && . deploy/common.sh && mm_db_sql "$2")
+}
+
+lock_locals() { awk '!/^[[:space:]]*(#|$)/ && NF == 3 { print $1 }' "$1/images.lock"; }
+lock_local_for() { awk -v s="$2" '!/^[[:space:]]*#/ && NF == 3 && index($3, s) == 1 { print $1; exit }' "$1/images.lock"; }
+db_image() { lock_local_for "$1" timescale/timescaledb:; }
+
+ver_le() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1)" = "$1" ]; }
+ver_lt() { [ "$1" != "$2" ] && ver_le "$1" "$2"; }
+
+confirm() {
+  [ "${YES:-0}" = 1 ] && return 0
+  [ -t 0 ] || die "$1 Re-run with --yes to confirm."
+  local answer
+  read -r -p "$1 [y/N] " answer
+  [[ "$answer" =~ ^[Yy] ]] || die "cancelled"
+}
+
+gen_secret() {
+  local n=${1:-32} s=""
+  while [ "${#s}" -lt "$n" ]; do
+    s+=$(head -c 512 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9')
+  done
+  printf '%s' "${s:0:$n}"
+}
+
+# Set KEY=VALUE in an env file: replace the first active KEY= line, else append. 0600 throughout.
+env_set() {
+  local key=$1 value=$2 file=$3 tmp
+  tmp=$(mktemp "$file.XXXXXX")
+  KEY=$key VALUE=$value awk '
+    BEGIN { k = ENVIRON["KEY"]; v = ENVIRON["VALUE"]; done = 0 }
+    index($0, k "=") == 1 { if (!done) { print k "=" v; done = 1 } ; next }
+    { print }
+    END { if (!done) print k "=" v }' "$file" > "$tmp"
+  chmod 0600 "$tmp"
+  mv -f "$tmp" "$file"
+}
+env_get() { sed -n "s/^$1=//p" "$2" | head -n 1 | sed 's/[[:space:]]*#.*$//; s/^"\(.*\)"$/\1/'; }
+
+lock_or_die() {
+  mkdir -p "$MMH"
+  if command -v flock >/dev/null; then
+    exec 9>"$MMH/.mmctl.lock"
+    flock -n 9 || die "another mmctl is running on this box"
+  fi
+}
+
+# --- host checks ----------------------------------------------------------------------------
+
+check_host() {  # install|upgrade
+  local mode=$1 failed=0 v
+  say "Checking this host"
+  [ "$(uname -s)" = Linux ] || die "Mine Monitor installs on Linux only"
+  local arch
+  arch=$(release_field "$BUNDLE" MM_RELEASE_ARCH)
+  case "$(uname -m)" in
+    x86_64 | amd64) [ "$arch" = amd64 ] || die "this bundle is for $arch; this host is $(uname -m)" ;;
+    *) die "this bundle is for ${arch:-amd64} hosts; this host is $(uname -m)" ;;
+  esac
+  local t
+  for t in docker tar gzip sha256sum curl awk sed; do
+    command -v "$t" >/dev/null || { echo "    missing: $t"; failed=1; }
+  done
+  [ "$failed" = 0 ] || die "install the missing tools above (Docker: deploy/DEPLOY.md §1)"
+  docker info >/dev/null 2>&1 || die "cannot reach the Docker daemon: is it running, and are you root (sudo)?"
+  v=$(docker version --format '{{.Server.Version}}' 2>/dev/null)
+  ver_le "$MIN_DOCKER" "$v" || die "Docker Engine $v is too old; $MIN_DOCKER or later is required (older engines let other hosts on the LAN reach container ports)"
+  note "Docker Engine $v"
+  v=$(docker compose version --short 2>/dev/null) || die "the Docker Compose plugin is not installed"
+  v=${v#v}
+  ver_le "$MIN_COMPOSE" "$v" || die "Docker Compose $v is too old; $MIN_COMPOSE or later is required"
+  note "Docker Compose $v"
+
+  local mem_kb
+  mem_kb=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+  if [ "$mem_kb" -lt 1900000 ]; then
+    die "$((mem_kb / 1024)) MB of RAM; Mine Monitor needs at least 2 GB"
+  elif [ "$mem_kb" -lt 3800000 ]; then
+    warn "$((mem_kb / 1024)) MB of RAM: it runs, but 4 GB is comfortable"
+  fi
+
+  if command -v timedatectl >/dev/null; then
+    if [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" != yes ]; then
+      warn "the system clock is not NTP-synchronised. Positions are timestamped by the trackers and"
+      warn "checked against this clock (MM_MAX_FUTURE_SKEW_S), so a drifting clock rejects good data."
+    fi
+  fi
+
+  if [ "$mode" = install ]; then
+    local root avail_kb
+    root=$(docker info --format '{{.DockerRootDir}}')
+    avail_kb=$(df -Pk "$root" | awk 'NR == 2 { print $4 }')
+    [ "$avail_kb" -ge $((10 * 1024 * 1024)) ] ||
+      die "$((avail_kb / 1024 / 1024)) GB free under $root; the images and a first database need at least 10 GB"
+  fi
+}
+
+# Host ports a fresh install publishes, and what holds each one already.
+check_ports() {
+  command -v ss >/dev/null || { warn "ss not found; skipping the free-port check"; return 0; }
+  local p busy=0
+  for p in "$@"; do
+    if [ -n "$(ss -H -ltn "sport = :$p" 2>/dev/null)" ]; then
+      echo "    port $p is in use: $(ss -H -ltnp "sport = :$p" 2>/dev/null | awk '{ print $NF }' | head -n 1)"
+      busy=1
+    fi
+  done
+  [ "$busy" = 0 ] || die "free the ports above first. A Mine Monitor started from a git checkout holds them: back it up (bash deploy/backup.sh), stop it (docker compose down), then install with --restore <dump>"
+}
+
+verify_bundle() {
+  [ -f "$BUNDLE/RELEASE" ] && [ -f "$BUNDLE/images.lock" ] || die "$BUNDLE is not a Mine Monitor release bundle"
+  if [ -f "$BUNDLE/SHA256SUMS" ] && [ ! -L "$BUNDLE/.env" ]; then
+    say "Verifying the bundle's checksums"
+    (cd "$BUNDLE" && sha256sum --quiet -c SHA256SUMS) || die "the bundle is damaged or incomplete; copy it again"
+  fi
+}
+
+# --- images ---------------------------------------------------------------------------------
+
+load_images() {  # release dir (its images.lock); the archive comes from the bundle being run
+  local dir=$1 missing=0 ref pinned
+  while read -r ref; do
+    docker image inspect "$ref" >/dev/null 2>&1 || missing=1
+  done < <(lock_locals "$dir")
+  if [ "$missing" = 0 ]; then
+    note "All release images are already on this host."
+    return 0
+  fi
+  if [ -f "$BUNDLE/images.tar.gz" ]; then
+    say "Loading the release images from the bundle (no internet needed)"
+    docker load -i "$BUNDLE/images.tar.gz" | sed 's/^/    /'
+  else
+    say "Pulling the release images by their pinned digests"
+    while read -r ref pinned; do
+      docker image inspect "$ref" >/dev/null 2>&1 && continue
+      note "$pinned"
+      if ! docker pull -q "$pinned" >/dev/null; then
+        die "could not pull $pinned. The images are private: log in first with
+       docker login ghcr.io -u <github user>    (a token with read:packages)
+       or install from the offline bundle (mine-monitor-<version>-linux-amd64-offline.tar)."
+      fi
+      docker tag "$pinned" "$ref"
+    done < <(awk '!/^[[:space:]]*(#|$)/ && NF == 3 { print $1, $2 }' "$dir/images.lock")
+  fi
+  while read -r ref; do
+    docker image inspect "$ref" >/dev/null 2>&1 || die "image $ref is still missing after loading"
+  done < <(lock_locals "$dir")
+}
+
+# --- releases on disk -----------------------------------------------------------------------
+
+stage_release() {  # version
+  local v=$1 dst="$MMH/releases/$1"
+  if [ "$(readlink -f "$BUNDLE")" = "$(readlink -f "$dst" 2>/dev/null || true)" ]; then
+    return 0  # running from the installed copy
+  fi
+  say "Copying release $v to $dst"
+  mkdir -p "$MMH/releases"
+  rm -rf "$dst.new"
+  mkdir -p "$dst.new"
+  tar -C "$BUNDLE" --exclude=./images.tar.gz --exclude=./SHA256SUMS -cf - . | tar -C "$dst.new" --no-same-owner -xf -
+  ln -sfn ../../shared/.env "$dst.new/.env"
+  ln -sfn ../../shared/backups "$dst.new/backups"
+  ln -sfn ../../shared/var "$dst.new/var"
+  rm -rf "$dst.new/docker/mosquitto"
+  ln -sfn ../../../shared/mosquitto "$dst.new/docker/mosquitto"
+  rm -rf "$dst"
+  mv "$dst.new" "$dst"
+}
+
+switch_current() {
+  ln -sfn "releases/$1" "$MMH/current.new"
+  mv -Tf "$MMH/current.new" "$MMH/current"
+}
+
+init_shared() {
+  mkdir -p "$MMH/shared/backups" "$MMH/shared/mosquitto" "$MMH/shared/var/models" "$MMH/shared/logs"
+  chmod 0755 "$MMH" "$MMH/shared" "$MMH/shared/mosquitto" "$MMH/shared/var" "$MMH/shared/var/models"
+  # Dumps hold personal data (brief §4).
+  chmod 0700 "$MMH/shared/backups" "$MMH/shared/logs"
+}
+
+link_cli() {
+  if [ -w /usr/local/bin ] && [ "$MMH" = /opt/mine-monitor ]; then
+    ln -sfn "$MMH/current/deploy/mmctl" /usr/local/bin/mmctl
+  fi
+}
+
+# Keep the running release and the rollback target; delete older releases and the images only
+# they used.
+prune_releases() {
+  local keep=("$(current_version)") r k used old
+  if [ -f "$MMH/shared/rollback.env" ]; then keep+=("$(env_get MM_ROLLBACK_FROM "$MMH/shared/rollback.env")"); fi
+  for r in "$MMH"/releases/*/; do
+    r=$(basename "$r")
+    for k in "${keep[@]}"; do [ "$r" = "$k" ] && continue 2; done
+    old=""
+    [ -f "$MMH/releases/$r/images.lock" ] && old=$(lock_locals "$MMH/releases/$r")
+    rm -rf "${MMH:?}/releases/$r"
+    used=$(for k in "${keep[@]}"; do [ -f "$MMH/releases/$k/images.lock" ] && lock_locals "$MMH/releases/$k"; done)
+    for ref in $old; do
+      grep -qxF "$ref" <<<"$used" || docker image rm "$ref" >/dev/null 2>&1 || true
+    done
+    note "Removed release $r"
+  done
+}
+
+save_logs() {  # dir label
+  local out
+  out="$MMH/shared/logs/$2-$(date -u +%Y%m%dT%H%M%SZ).log"
+  { dc "$1" ps -a; dc "$1" logs --no-color --tail 300; } > "$out" 2>&1 || true
+  chmod 0600 "$out"
+  printf '%s' "$out"
+}
+
+# --- the stack and its database ---------------------------------------------------------------
+
+# Stop every container of the project, database last, so nothing writes during a snapshot.
+stop_stack() {
+  local id svc others=() dbs=()
+  while read -r id svc; do
+    [ -n "$id" ] || continue
+    if [ "$svc" = db ]; then dbs+=("$id"); else others+=("$id"); fi
+  done < <(docker ps -q --filter "label=com.docker.compose.project=$PROJECT" | xargs -r docker inspect --format '{{.Id}} {{index .Config.Labels "com.docker.compose.service"}}')
+  if [ "${#others[@]}" -gt 0 ]; then docker stop -t 30 "${others[@]}" >/dev/null; fi
+  # A large database can take a while to checkpoint; a killed one is still crash-consistent.
+  if [ "${#dbs[@]}" -gt 0 ]; then docker stop -t 180 "${dbs[@]}" >/dev/null; fi
+}
+
+db_volume() {
+  docker volume ls -q --filter "label=com.docker.compose.project=$PROJECT" --filter "label=com.docker.compose.volume=db_data"
+}
+
+volume_kb() {  # volume image
+  docker run --rm --network none --entrypoint /bin/sh -v "$1:/v:ro" "$2" -c 'du -sk /v | cut -f1'
+}
+
+# Replace the contents of volume $2 with a copy of volume $1. Postgres must be stopped.
+copy_volume() {  # from to image
+  docker run --rm --network none --entrypoint /bin/sh -v "$1:/from:ro" -v "$2:/to" "$3" \
+    -c 'rm -rf /to/* /to/.[!.]* /to/..?* && cp -a /from/. /to/ && sync'
+}
+
+# Data written by a release (and the TimescaleDB extension version it moved to) cannot be read
+# back by an older one, so rolling back means returning the database to its state before the
+# upgrade. The snapshot is a copy of the stopped database's volume: exact, and it restores onto
+# the previous release's database image whatever TimescaleDB version the new one moved to.
+snapshot_db() {  # old version, new version
+  local vol img
+  vol=$(db_volume)
+  [ -n "$vol" ] || die "no database volume found for project $PROJECT"
+  img=$(db_image "$MMH/releases/$1")
+  say "Snapshotting the database for rollback ($vol -> $ROLLBACK_VOLUME)"
+  rm -f "$MMH/shared/rollback.env"
+  docker volume inspect "$ROLLBACK_VOLUME" >/dev/null 2>&1 ||
+    docker volume create --label "com.minemonitor.role=rollback" "$ROLLBACK_VOLUME" >/dev/null
+  copy_volume "$vol" "$ROLLBACK_VOLUME" "$img"
+  {
+    echo "MM_ROLLBACK_FROM=$1"
+    echo "MM_ROLLBACK_TO=$2"
+    echo "MM_ROLLBACK_SNAPSHOT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$MMH/shared/rollback.env.new"
+  mv -f "$MMH/shared/rollback.env.new" "$MMH/shared/rollback.env"
+}
+
+restore_snapshot() {  # version whose db image to use
+  local vol
+  vol=$(db_volume)
+  [ -n "$vol" ] || die "no database volume found for project $PROJECT"
+  docker volume inspect "$ROLLBACK_VOLUME" >/dev/null 2>&1 || die "the rollback snapshot ($ROLLBACK_VOLUME) is missing"
+  say "Restoring the database from the pre-upgrade snapshot"
+  copy_volume "$ROLLBACK_VOLUME" "$vol" "$(db_image "$MMH/releases/$1")"
+}
+
+safety_dump() {  # dir label: best effort, before an operation that discards data
+  local out
+  out="backups/minemonitor_$(date -u +%Y%m%d_%H%M%S)_$2.sql.gz"
+  say "Dumping the current database to shared/$out first"
+  if ! (cd "$1" && bash deploy/backup.sh "$out" >/dev/null 2>&1); then
+    rm -f "$1/$out"
+    warn "could not dump the current database (is it running?); continuing without that copy"
+  fi
+}
+
+run_deploy() {  # dir
+  (cd "$1" && MM_INSTALLER=1 bash deploy/deploy.sh)
+}
+
+# Every service compose runs in this configuration is up: healthy where it has a healthcheck,
+# running without restarts otherwise; one-shot services exited 0. Two passes, 10 s apart, so a
+# crash-looping container is not caught between restarts.
+wait_containers() {  # dir timeout_s
+  local dir=$1 deadline=$((SECONDS + $2)) svc id line bad pending prev="" now=""
+  local state code health restarts policy
+  while :; do
+    bad="" pending="" now=""
+    for svc in $(dc "$dir" config --services); do
+      id=$(dc "$dir" ps -a -q "$svc" | head -n 1)
+      if [ -z "$id" ]; then pending+=" $svc(not created)"; continue; fi
+      line=$(docker inspect --format '{{.State.Status}} {{.State.ExitCode}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.RestartCount}} {{.HostConfig.RestartPolicy.Name}}' "$id")
+      read -r state code health restarts policy <<<"$line"
+      now+=" $svc:$restarts"
+      case "$state" in
+        running)
+          case "$health" in
+            healthy | none) ;;
+            starting) pending+=" $svc(starting)" ;;
+            *) bad+=" $svc($health)" ;;
+          esac ;;
+        exited) [ "$code" = 0 ] && [ "$policy" = no ] || bad+=" $svc(exited $code)" ;;
+        created) pending+=" $svc(created)" ;;
+        *) bad+=" $svc($state)" ;;
+      esac
+    done
+    if [ -z "$bad" ] && [ -z "$pending" ]; then
+      [ "$now" = "$prev" ] && return 0
+      prev=$now
+    else
+      prev=""
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "    not ready:${bad}${pending}"
+      return 1
+    fi
+    sleep 10
+  done
+}
+
+# Checks run inside the api container, so they hold whatever MM_API_BIND is.
+API_CHECKS=$(cat <<'PY'
+import base64, json, os, sys, urllib.error, urllib.request
+
+def get(path, auth=None):
+    req = urllib.request.Request("http://127.0.0.1:8000" + path)
+    if auth:
+        token = base64.b64encode(("%s:%s" % auth).encode()).decode()
+        req.add_header("Authorization", "Basic " + token)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
+    except OSError as e:
+        return 0, str(e)
+
+fails = []
+want = os.environ["MMV_VERSION"]
+st, body = get("/version")
+try:
+    got = json.loads(body).get("version")
+except ValueError:
+    got = None
+st_version, wrong_version = st, st != 200 or got != want
+if wrong_version:
+    fails.append("version: HTTP %s, %s (want %s)" % (st, got, want))
+st, body = get("/health")
+if st != 200:
+    fails.append("health: HTTP %s %s" % (st, body.strip()[:200]))
+user = os.environ.get("MMV_USER")
+if user:
+    auth = (user, os.environ.get("MMV_PASSWORD", ""))
+    st, body = get("/me", auth)
+    if st != 200:
+        fails.append("login as %s: HTTP %s" % (user, st))
+    st, body = get("/", auth)
+    if st != 200 or "mine monitor" not in body.lower():
+        fails.append("dashboard: HTTP %s" % st)
+for f in fails:
+    print("    " + f)
+# 2: a healthy API answering as another release is the wrong image, and waiting will not fix it.
+sys.exit((2 if st_version == 200 and got else 1) if wrong_version else (1 if fails else 0))
+PY
+)
+
+# The release is up and serving: every container ready, /version reports this release, /health
+# is green, and the ingestor has beaten since the deploy began (an old heartbeat is still fresh
+# for MM_HEARTBEAT_STALE_S, so freshness alone would pass a crashing new ingestor).
+verify_release() {  # dir version since_epoch [user]   (password in MMV_PASSWORD)
+  local dir=$1 version=$2 since=$3 user=${4:-} deadline beat out rc
+  say "Verifying release $version"
+  wait_containers "$dir" 300 || return 1
+  deadline=$((SECONDS + 240))
+  while :; do
+    beat=$(db_sql "$dir" "SELECT coalesce(max(extract(epoch FROM ts))::bigint, 0) FROM service_heartbeat WHERE service = 'ingestor'" 2>/dev/null || echo 0)
+    if [ "${beat:-0}" -ge $((since - 5)) ]; then
+      rc=0
+      out=$(MMV_VERSION=$version MMV_USER=$user dc "$dir" exec -T -e MMV_VERSION -e MMV_USER -e MMV_PASSWORD api python -c "$API_CHECKS" 2>&1) || rc=$?
+      if [ "$rc" -eq 0 ]; then
+        note "Containers ready, /health green, ingestor running, version $version${user:+, $user can log in}."
+        return 0
+      fi
+      [ "$rc" -eq 2 ] && { echo "$out"; return 1; }
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      [ "${beat:-0}" -ge $((since - 5)) ] || echo "    the ingestor has not reported since the deploy started"
+      [ -n "${out:-}" ] && echo "$out"
+      return 1
+    fi
+    sleep 5
+  done
+}
+
+# --- install / upgrade --------------------------------------------------------------------------
+
+usage_install() {
+  cat <<'EOF'
+Usage: sudo ./install.sh [options]
+
+Installs Mine Monitor from this bundle, or upgrades the installation to it. On a fresh box it
+writes shared/.env with generated secrets, starts the stack, creates the first admin and prints
+its password. On an installed box it snapshots the database, upgrades, verifies, and rolls back
+by itself if the new release does not come up.
+
+  --prefix DIR          install under DIR (default /opt/mine-monitor)
+  --hostname NAME       address operators type in the browser; repeat for several
+                        (default: this host's IP address and localhost)
+  --acme-email EMAIL    public DNS name in --hostname: get a Let's Encrypt certificate
+                        (default: Caddy's internal CA, for a box on the mine LAN)
+  --no-tls              no HTTPS proxy; reach the dashboard over an SSH tunnel
+  --trackers            start the Teltonika listener on port 5027
+  --demo                start the simulated fleet (demo data)
+  --admin-user NAME     first admin's username (default admin)
+  --restore DUMP        fresh install from a database dump (deploy/backup.sh) instead of
+                        an empty database
+  --no-backup           upgrade: skip the database dump taken after a successful upgrade
+  --yes                 do not prompt
+EOF
+}
+
+write_env() {  # file
+  local f=$1 pg mq hosts profiles
+  cp "$BUNDLE/.env.example" "$f.new"
+  chmod 0600 "$f.new"
+  pg=$(gen_secret 32)
+  mq=$(gen_secret 32)
+  env_set MM_ENV prod "$f.new"
+  env_set POSTGRES_PASSWORD "$pg" "$f.new"
+  env_set MM_DATABASE_URL "postgresql+psycopg://minemonitor:$pg@db:5432/minemonitor" "$f.new"
+  env_set MM_MQTT_USERNAME mm-service "$f.new"
+  env_set MM_MQTT_PASSWORD "$mq" "$f.new"
+  # Ready for `evidence` (docs/OBJECT_STORAGE.md); the profile itself stays off.
+  env_set MM_OBJECTSTORE_ADMIN_KEY mm-admin "$f.new"
+  env_set MM_OBJECTSTORE_ADMIN_SECRET "$(gen_secret 40)" "$f.new"
+  env_set MM_EDGE_S3_ACCESS_KEY mm-edge "$f.new"
+  env_set MM_EDGE_S3_SECRET_KEY "$(gen_secret 40)" "$f.new"
+  profiles=backup
+  if [ "$TLS" = 1 ]; then
+    profiles+=,tls
+    env_set MM_SITE_DOMAIN "\"$HOSTNAMES\"" "$f.new"
+    env_set MM_TLS_EMAIL "$ACME_EMAIL" "$f.new"
+  fi
+  [ "$TRACKERS" = 1 ] && profiles+=,trackers
+  [ "$DEMO" = 1 ] && profiles+=,sim
+  env_set COMPOSE_PROFILES "$profiles" "$f.new"
+  mv -f "$f.new" "$f"
+}
+
+default_hostnames() {
+  local ip=""
+  if command -v ip >/dev/null; then
+    ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n 1)
+  fi
+  [ -n "$ip" ] || ip=$(hostname -I 2>/dev/null | awk '{ print $1 }')
+  printf '%s' "${ip:+$ip, }localhost"
+}
+
+normalise_hostnames() {  # "a, b c,d" -> "a, b, c, d"; rejects anything but names and IPv4
+  local h out=""
+  for h in ${1//,/ }; do
+    [[ "$h" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,252})$ ]] || die "not a hostname or IPv4 address: $h"
+    out+="${out:+, }$h"
+  done
+  [ -n "$out" ] || die "no hostname given"
+  printf '%s' "$out"
+}
+
+ensure_admin() {  # dir
+  local dir=$1 n pwfile="$MMH/shared/initial-admin-password"
+  if [ -f "$pwfile" ]; then
+    # An earlier attempt generated it: verify with it, and show it, since that attempt never did.
+    ADMIN_USER=$(sed -n 's/^user: //p' "$pwfile")
+    ADMIN_PASSWORD=$(sed -n 's/^password: //p' "$pwfile")
+    [[ "$ADMIN_USER" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || die "unreadable $pwfile"
+  else
+    n=$(db_sql "$dir" "SELECT count(*) FROM users")
+    if [ "$n" != 0 ]; then
+      ADMIN_PASSWORD=""  # restored users: nothing to create
+      return 0
+    fi
+    ADMIN_PASSWORD=$(gen_secret 20)
+    (umask 077 && printf 'user: %s\npassword: %s\n' "$ADMIN_USER" "$ADMIN_PASSWORD" > "$pwfile")
+  fi
+  n=$(db_sql "$dir" "SELECT count(*) FROM users WHERE username = '$ADMIN_USER'")
+  [ "$n" = 0 ] || return 0
+  say "Creating the first admin ($ADMIN_USER)"
+  MM_NEW_USER_PASSWORD=$ADMIN_PASSWORD dc "$dir" exec -T -e MM_NEW_USER_PASSWORD api \
+    uv run python -m minemonitor.auth.cli "$ADMIN_USER" admin >/dev/null
+}
+
+print_access() {  # dir
+  local env="$MMH/shared/.env" profiles hosts first
+  profiles=$(env_get COMPOSE_PROFILES "$env")
+  echo
+  if [[ ",$profiles," == *,tls,* ]]; then
+    hosts=$(env_get MM_SITE_DOMAIN "$env")
+    first=${hosts%%,*}
+    echo "    Dashboard: https://$first/"
+    if [ -z "$(env_get MM_TLS_EMAIL "$env")" ]; then
+      echo "    The certificate comes from this box's own CA. Trust it once on each operator machine:"
+      echo "        sudo mmctl ca-cert > mine-monitor-ca.crt"
+    fi
+  else
+    echo "    Dashboard: no HTTPS proxy (--no-tls). From your laptop:"
+    echo "        ssh -L 8000:127.0.0.1:8000 <user>@<this host>    then open http://localhost:8000/"
+  fi
+}
+
+do_fresh_install() {
+  local v=$1 dir since resumed=0 out
+  if [ -f "$MMH/shared/.env" ]; then
+    resumed=1
+    say "Resuming an unfinished install: keeping the settings and secrets in $MMH/shared/.env"
+  else
+    [ -z "$(db_volume)" ] || die "a Mine Monitor database volume ($(db_volume)) already exists on this host, from an earlier install. Restore that install's shared/.env to $MMH/shared/.env to keep its data and re-run, or remove the volume (docker volume rm $(db_volume)) to start empty"
+    local ports=(5432 1883 8000)
+    [ "$TLS" = 1 ] && ports+=(80 443)
+    [ "$TRACKERS" = 1 ] && ports+=(5027)
+    check_ports "${ports[@]}"
+  fi
+  init_shared
+  if [ "$resumed" = 0 ]; then
+    say "Writing $MMH/shared/.env (generated secrets, MM_ENV=prod, broker login on)"
+    write_env "$MMH/shared/.env"
+  fi
+  stage_release "$v"
+  dir="$MMH/releases/$v"
+  load_images "$dir"
+  switch_current "$v"
+  link_cli
+  since=$(date +%s)
+  if [ -n "$RESTORE" ]; then
+    say "Restoring $RESTORE"
+    (cd "$dir" && bash deploy/restore.sh "$RESTORE") || {
+      out=$(save_logs "$dir" install-failed)
+      die "the restore failed; logs: $out. Fix the cause and run install.sh again: it resumes"
+    }
+  else
+    run_deploy "$dir" || {
+      out=$(save_logs "$dir" install-failed)
+      die "the stack did not start; logs: $out. Fix the cause and run install.sh again: it resumes"
+    }
+  fi
+  ensure_admin "$dir"
+  local vuser=""
+  [ -n "$ADMIN_PASSWORD" ] && vuser=$ADMIN_USER
+  MMV_PASSWORD=$ADMIN_PASSWORD verify_release "$dir" "$v" "$since" "$vuser" || {
+    out=$(save_logs "$dir" install-failed)
+    die "release $v is not healthy; logs: $out. Fix the cause and run install.sh again: it resumes"
+  }
+  printf 'MM_INSTALLED_VERSION=%s\nMM_INSTALLED_AT=%s\n' "$v" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$MMH/shared/installed"
+  say "Mine Monitor $v is installed under $MMH"
+  print_access "$dir"
+  if [ -n "$ADMIN_PASSWORD" ]; then
+    echo
+    echo "    First admin:  $ADMIN_USER"
+    echo "    Password:     $ADMIN_PASSWORD"
+    echo "    (also in $MMH/shared/initial-admin-password, readable by root only: delete it"
+    echo "    once you have logged in and created the real accounts, deploy/DEPLOY.md §4a)"
+  fi
+  echo
+  echo "    Next: sudo mmctl status · settings in $MMH/shared/.env, applied with sudo mmctl deploy"
+  echo "    Site commissioning (zones, devices, trackers): deploy/COMMISSIONING.md"
+}
+
+report_new_settings() {  # new dir
+  local k new=""
+  while read -r k; do
+    grep -qE "^#? ?$k=" "$MMH/shared/.env" || new+=" $k"
+  done < <(sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' "$1/.env.example")
+  if [ -n "$new" ]; then
+    note "New settings in this release (their defaults apply; see .env.example):$new"
+  fi
+}
+
+do_upgrade() {  # new version
+  local new=$1 old olddir newdir need_kb avail_kb vol since out
+  old=$(current_version)
+  olddir="$MMH/releases/$old"
+  newdir="$MMH/releases/$new"
+  if [ "$old" = "$new" ]; then
+    say "Release $new is already installed: re-applying it"
+    stage_release "$new"
+    load_images "$newdir"
+    since=$(date +%s)
+    if run_deploy "$newdir" && verify_release "$newdir" "$new" "$since"; then
+      say "Release $new re-applied"
+      print_access "$newdir"
+      return 0
+    fi
+    out=$(save_logs "$newdir" reapply-failed)
+    if [ -f "$MMH/shared/rollback.env" ] && [ "$(env_get MM_ROLLBACK_TO "$MMH/shared/rollback.env")" = "$new" ]; then
+      die "release $new is not healthy; logs: $out. To return to $(env_get MM_ROLLBACK_FROM "$MMH/shared/rollback.env"): sudo mmctl rollback"
+    fi
+    die "release $new is not healthy; logs: $out"
+  fi
+  ver_lt "$old" "$new" || die "this bundle ($new) is older than the installed release ($old). To go back to the release before an upgrade: sudo mmctl rollback"
+
+  say "Upgrading Mine Monitor $old -> $new"
+  [ -d "$olddir" ] || die "the installed release directory $olddir is missing"
+  vol=$(db_volume)
+  [ -n "$vol" ] || die "no database volume found for project $PROJECT"
+  need_kb=$(($(volume_kb "$vol" "$(db_image "$olddir")") + 1024 * 1024))
+  [ -f "$BUNDLE/images.tar.gz" ] && need_kb=$((need_kb + 5 * 1024 * 1024))
+  avail_kb=$(df -Pk "$(docker info --format '{{.DockerRootDir}}')" | awk 'NR == 2 { print $4 }')
+  [ "$avail_kb" -ge "$need_kb" ] ||
+    die "$((avail_kb / 1024)) MB free under Docker's data directory; the database snapshot and new images need $((need_kb / 1024)) MB"
+
+  stage_release "$new"
+  load_images "$newdir"
+  report_new_settings "$newdir"
+
+  say "Stopping $old for a consistent database snapshot (devices buffer meanwhile)"
+  stop_stack
+  if ! snapshot_db "$old" "$new"; then
+    warn "the snapshot failed; restarting $old unchanged"
+    run_deploy "$olddir" || true
+    die "upgrade aborted before any change: the database snapshot failed"
+  fi
+
+  switch_current "$new"
+  since=$(date +%s)
+  if run_deploy "$newdir" && verify_release "$newdir" "$new" "$since"; then
+    say "Mine Monitor $new is running"
+    if [ "$NO_BACKUP" = 0 ]; then
+      # A dump restores only onto the TimescaleDB version it was taken on, so the dumps from
+      # before an upgrade that moved it cannot restore onto this release (OPERATIONS.md §5).
+      say "Dumping the upgraded database (the baseline for restores on this release)"
+      (cd "$newdir" && bash deploy/backup.sh "backups/minemonitor_$(date -u +%Y%m%d_%H%M%S)_v$new.sql.gz") ||
+        warn "the post-upgrade dump failed; take one with: sudo mmctl backup"
+    fi
+    link_cli
+    prune_releases
+    note "Rollback to $old stays available until the next upgrade (sudo mmctl rollback);"
+    note "it returns the database to its state before this upgrade."
+    return 0
+  fi
+
+  out=$(save_logs "$newdir" "upgrade-$new-failed")
+  warn "release $new did not come up (logs: $out); rolling back to $old"
+  stop_stack
+  restore_snapshot "$old"
+  switch_current "$old"
+  since=$(date +%s)
+  if run_deploy "$olddir" && verify_release "$olddir" "$old" "$since"; then
+    rm -f "$MMH/shared/rollback.env"
+    docker volume rm "$ROLLBACK_VOLUME" >/dev/null 2>&1 || true
+    link_cli
+    die "upgrade to $new failed and was rolled back: $old is running with its data as before. Logs of the failed release: $out"
+  fi
+  die "upgrade to $new failed, and $old did not come back after rolling back either. Logs: $out and $(save_logs "$olddir" "rollback-$old-failed")"
+}
+
+cmd_install() {
+  PREFIX="" HOSTNAMES="" ACME_EMAIL="" TLS=1 TRACKERS=0 DEMO=0 RESTORE="" NO_BACKUP=0 YES=0
+  ADMIN_USER=admin ADMIN_PASSWORD=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --prefix) PREFIX=$2; shift 2 ;;
+      --hostname) HOSTNAMES+="${HOSTNAMES:+, }$2"; shift 2 ;;
+      --acme-email) ACME_EMAIL=$2; shift 2 ;;
+      --no-tls) TLS=0; shift ;;
+      --trackers) TRACKERS=1; shift ;;
+      --demo) DEMO=1; shift ;;
+      --admin-user) ADMIN_USER=$2; shift 2 ;;
+      --restore) RESTORE=$(readlink -f "$2"); shift 2 ;;
+      --no-backup) NO_BACKUP=1; shift ;;
+      --yes | -y) YES=1; shift ;;
+      -h | --help) usage_install; exit 0 ;;
+      *) usage_install >&2; die "unknown option: $1" ;;
+    esac
+  done
+  if [ -n "$PREFIX" ]; then MMH=$(readlink -m "$PREFIX"); fi
+  [ -z "$RESTORE" ] || [ -f "$RESTORE" ] || die "dump not found: $RESTORE"
+  [[ "$ADMIN_USER" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || die "bad admin username: $ADMIN_USER"
+  [ -z "$ACME_EMAIL" ] || [[ "$ACME_EMAIL" =~ ^[^[:space:]@\"]+@[^[:space:]@\"]+$ ]] || die "bad email: $ACME_EMAIL"
+
+  verify_bundle
+  local v
+  v=$(release_field "$BUNDLE" MM_RELEASE_VERSION)
+  [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "bundle has no valid release version"
+  mkdir -p "$MMH" 2>/dev/null && [ -w "$MMH" ] || die "cannot write to $MMH: run as root (sudo)"
+  lock_or_die
+
+  if is_installed; then
+    [ -z "$RESTORE" ] || die "--restore is for a fresh install; on an installed box use: sudo mmctl restore <dump>"
+    check_host upgrade
+    do_upgrade "$v"
+    return
+  fi
+
+  check_host install
+  if [ "$TLS" = 1 ] && [ ! -f "$MMH/shared/.env" ]; then
+    if [ -z "$HOSTNAMES" ]; then
+      [ -z "$ACME_EMAIL" ] || die "--acme-email needs the public DNS name: --hostname mine.example.com"
+      HOSTNAMES=$(default_hostnames)
+      if [ "$YES" = 0 ] && [ -t 0 ]; then
+        local answer
+        read -r -p "    Addresses operators will use for the dashboard [$HOSTNAMES]: " answer
+        HOSTNAMES=${answer:-$HOSTNAMES}
+      fi
+    fi
+    HOSTNAMES=$(normalise_hostnames "$HOSTNAMES")
+    note "HTTPS on: $HOSTNAMES ($([ -n "$ACME_EMAIL" ] && echo "Let's Encrypt, $ACME_EMAIL" || echo "this box's own CA"))"
+  fi
+  do_fresh_install "$v"
+}
+
+# --- day-2 commands -----------------------------------------------------------------------------
+
+cmd_rollback() {
+  YES=0
+  case "${1:-}" in --yes | -y) YES=1 ;; "") ;; *) die "usage: mmctl rollback [--yes]" ;; esac
+  require_installed
+  lock_or_die
+  local rb="$MMH/shared/rollback.env" from to at cur since dir
+  [ -f "$rb" ] || die "no rollback is available: one exists only after an upgrade, until the next one"
+  from=$(env_get MM_ROLLBACK_FROM "$rb")
+  to=$(env_get MM_ROLLBACK_TO "$rb")
+  at=$(env_get MM_ROLLBACK_SNAPSHOT_AT "$rb")
+  cur=$(current_version)
+  [ "$cur" = "$to" ] || die "the rollback snapshot was taken upgrading $from -> $to, but $cur is running"
+  dir="$MMH/releases/$from"
+  [ -d "$dir" ] || die "release $from is no longer on this host"
+  local ref
+  while read -r ref; do
+    docker image inspect "$ref" >/dev/null 2>&1 || die "image $ref of release $from is no longer on this host"
+  done < <(lock_locals "$dir")
+  confirm "Roll back from $to to $from? The database returns to its state at $at: whatever was recorded since is lost (it is dumped to shared/backups first)."
+  safety_dump "$(current_dir)" "before-rollback-v$to"
+  stop_stack
+  restore_snapshot "$from"
+  switch_current "$from"
+  since=$(date +%s)
+  if ! { run_deploy "$dir" && verify_release "$dir" "$from" "$since"; }; then
+    die "release $from did not come up after the rollback; logs: $(save_logs "$dir" "rollback-$from-failed")"
+  fi
+  rm -f "$rb"
+  docker volume rm "$ROLLBACK_VOLUME" >/dev/null 2>&1 || true
+  link_cli
+  say "Rolled back: Mine Monitor $from is running"
+}
+
+cmd_restore() {
+  YES=0
+  local dump=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --yes | -y) YES=1; shift ;;
+      -*) die "usage: mmctl restore <dump.sql.gz> [--yes]" ;;
+      *) dump=$(readlink -f "$1"); shift ;;
+    esac
+  done
+  [ -n "$dump" ] && [ -f "$dump" ] || die "usage: mmctl restore <dump.sql.gz> [--yes]"
+  require_installed
+  lock_or_die
+  local dir vol since
+  dir=$(current_dir)
+  confirm "Replace the database with $dump? Whatever was recorded after that dump is lost (the current database is dumped to shared/backups first). The dump must come from TimescaleDB $(db_image "$dir" | sed 's/.*:\([0-9.]*\)-.*/\1/')."
+  safety_dump "$dir" "before-restore"
+  stop_stack
+  vol=$(db_volume)
+  dc "$dir" rm -f -s db >/dev/null
+  [ -z "$vol" ] || docker volume rm "$vol" >/dev/null
+  since=$(date +%s)
+  if ! { (cd "$dir" && bash deploy/restore.sh "$dump") && verify_release "$dir" "$(current_version)" "$since"; }; then
+    die "the restore did not come up; logs: $(save_logs "$dir" restore-failed)"
+  fi
+  say "Restored $dump"
+}
+
+cmd_status() {
+  require_installed
+  local dir rb="$MMH/shared/rollback.env"
+  dir=$(current_dir)
+  echo "Mine Monitor $(current_version) under $MMH (commit $(release_field "$dir" MM_RELEASE_COMMIT), built $(release_field "$dir" MM_RELEASE_DATE))"
+  if [ -f "$rb" ]; then
+    echo "Rollback available to $(env_get MM_ROLLBACK_FROM "$rb") (database as of $(env_get MM_ROLLBACK_SNAPSHOT_AT "$rb"))"
+  fi
+  echo
+  dc "$dir" ps
+  echo
+  printf 'API /health: '
+  dc "$dir" exec -T api python -c "import urllib.request, urllib.error
+try:
+    print(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=10).read().decode())
+except urllib.error.HTTPError as e:
+    print(e.code, e.read().decode())" 2>&1 || echo "unreachable"
+}
+
+cmd_doctor() {
+  check_host install
+  say "This host can run Mine Monitor $(release_field "$BUNDLE" MM_RELEASE_VERSION)"
+}
+
+cmd_smoke() {
+  require_installed
+  local site
+  site=$(env_get MM_DEFAULT_SITE_ID "$MMH/shared/.env")
+  if [ -z "${MM_SMOKE_USER:-}" ]; then read -r -p "Admin username: " MM_SMOKE_USER; fi
+  if [ -z "${MM_SMOKE_PASSWORD:-}" ]; then read -r -s -p "Password: " MM_SMOKE_PASSWORD; echo; fi
+  export MM_SMOKE_USER MM_SMOKE_PASSWORD MM_SMOKE_SITE=${site:-kn-zw-01}
+  dc "$(current_dir)" exec -T -e MM_SMOKE_USER -e MM_SMOKE_PASSWORD -e MM_SMOKE_SITE api uv run python -m minemonitor.smoke
+}
+
+usage() {
+  cat <<'EOF'
+Usage: sudo mmctl <command>
+
+  status              release, containers and /health
+  logs [service...]   follow the logs (api, ingestor, mqtt, db, caddy, ...)
+  deploy              apply changes to shared/.env (re-runs deploy.sh) and verify
+  backup [file]       dump the database (default shared/backups/minemonitor_<time>.sql.gz)
+  restore <dump>      replace the database with a dump
+  rollback            undo the last upgrade (database back to its pre-upgrade state)
+  smoke               post-deploy smoke test (writes one position for asset SMOKE-TEST)
+  ca-cert             print the HTTPS root certificate operators' browsers should trust
+  doctor              check this host against the release's requirements
+  compose <args>      docker compose, in the running release's directory
+  version             the installed release
+
+Install or upgrade: sudo ./install.sh from an unpacked release bundle (install.sh --help).
+EOF
+}
+
+main() {
+  local cmd=${1:-help}
+  [ $# -gt 0 ] && shift
+  case "$cmd" in
+    install) cmd_install "$@" ;;
+    rollback) cmd_rollback "$@" ;;
+    restore) cmd_restore "$@" ;;
+    status) cmd_status ;;
+    doctor) cmd_doctor ;;
+    smoke) cmd_smoke ;;
+    version) require_installed; current_version; echo ;;
+    deploy)
+      require_installed
+      lock_or_die
+      local dir since
+      dir=$(current_dir)
+      since=$(date +%s)
+      if ! { run_deploy "$dir" && verify_release "$dir" "$(current_version)" "$since"; }; then
+        die "the stack is not healthy; logs: $(save_logs "$dir" deploy-failed)"
+      fi
+      ;;
+    backup)
+      require_installed
+      local out=()
+      [ $# -gt 0 ] && out=("$(readlink -m "$1")")
+      (cd "$(current_dir)" && bash deploy/backup.sh "${out[@]}")
+      ;;
+    logs) require_installed; dc "$(current_dir)" logs -f --tail 200 "$@" ;;
+    ca-cert) require_installed; dc "$(current_dir)" exec -T caddy cat /data/caddy/pki/authorities/local/root.crt ;;
+    compose) require_installed; dc "$(current_dir)" "$@" ;;
+    help | -h | --help) usage ;;
+    *) usage >&2; exit 2 ;;
+  esac
+}
+
+main "$@"

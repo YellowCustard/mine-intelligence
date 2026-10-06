@@ -5,6 +5,11 @@ whole stack (PostgreSQL/TimescaleDB, Mosquitto, the API and the ingestor, plus t
 simulator for demo data until real trackers are on site). So it runs on a
 **Docker-capable server**, not xneelo *shared* hosting.
 
+> **Installing at a mine?** Use a release instead: one file, one command, no internet needed on
+> the box, with upgrade and rollback built in — [`INSTALL.md`](./INSTALL.md). This file is the
+> git-checkout path, which builds the images on the box: development, demos, and a VPS with
+> internet.
+
 > **On xneelo:** use a **Cloud/VPS** instance (an Ubuntu server you get root on),
 > not the shared "Web Hosting" product. Shared hosting cannot run Docker.
 
@@ -118,9 +123,9 @@ login (HTTP Basic with roles), so there is no second auth layer. The bundled
   internal CA issues a self-signed cert (`tls internal`); trust that CA once on the
   operator machines, or accept the browser prompt.
 - **Public domain:** point DNS at the box, set `MM_SITE_DOMAIN=mine.example.com` and
-  `MM_TLS_EMAIL=ops@example.com` in `.env`, and change the Caddyfile's `tls internal`
-  to `tls {$MM_TLS_EMAIL}` — Caddy then provisions and renews a Let's Encrypt
-  certificate automatically. Open ports 80 and 443.
+  `MM_TLS_EMAIL=ops@example.com` in `.env`. With an email set, the Caddyfile's
+  `tls {$MM_TLS_ISSUER}` becomes `tls ops@example.com`, and Caddy provisions and renews a
+  Let's Encrypt certificate automatically. Open ports 80 and 443.
 
 **c) Bring your own nginx** (if you already run one): terminate Let's Encrypt TLS and
 `proxy_pass` to `127.0.0.1:8000`. The application handles login, so nginx only

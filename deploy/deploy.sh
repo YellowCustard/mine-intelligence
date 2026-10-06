@@ -68,6 +68,9 @@ for i in $(seq 1 30); do
   [ "$i" = "30" ] && { echo "    API did not become healthy in time — check: docker compose logs api"; exit 1; }
 done
 
+# deploy/mmctl (the release installer) runs this script and prints its own next steps.
+[ -n "${MM_INSTALLER:-}" ] && exit 0
+
 echo
 echo "==> Up. The dashboard is served by the API on port 8000 (localhost on the VPS)."
 echo "    The API has HTTP Basic auth (M6). If you did not set MM_BOOTSTRAP_ADMIN_* in"

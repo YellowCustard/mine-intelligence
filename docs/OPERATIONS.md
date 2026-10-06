@@ -33,7 +33,13 @@ tunnel (`ssh -L 8000:127.0.0.1:8000 <user>@<host>`) or a TLS reverse proxy.
 
 ## 2. Bring it up
 
-On the server, from the repo root:
+**Installed from a release** ([`deploy/INSTALL.md`](../deploy/INSTALL.md)): `sudo ./install.sh`
+from the bundle installs or upgrades, and `sudo mmctl` does the rest (`status`, `deploy`,
+`backup`, `restore`, `rollback`, `logs`). Every `docker compose ...` command in this manual is
+`sudo mmctl compose ...` there, and `bash deploy/backup.sh` / `restore.sh` are `sudo mmctl backup`
+/ `restore`.
+
+**From a git checkout**, on the server, from the repo root:
 
 ```bash
 bash deploy/deploy.sh          # core stack

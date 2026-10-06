@@ -58,6 +58,20 @@ payload — queue time at the face), and a live operations dashboard. See
   `--profile evidence` adds the S3 object store for vision evidence. The dashboard
   is at `http://localhost:8000/` and now prompts for credentials.
 
+## Install at a site
+
+Each tagged release ships an offline bundle (every image inside, pinned by digest) and an
+installer that sets up a box with generated secrets, HTTPS and daily backups, and upgrades it
+later with a database snapshot and automatic rollback:
+
+```bash
+tar xf mine-monitor-0.2.0-linux-amd64-offline.tar
+sudo ./mine-monitor-0.2.0/install.sh
+```
+
+Guide: [`deploy/INSTALL.md`](./deploy/INSTALL.md). Cutting a release:
+[`deploy/RELEASING.md`](./deploy/RELEASING.md).
+
 ## Quickstart
 
 ```bash

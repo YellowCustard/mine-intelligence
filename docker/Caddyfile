@@ -6,7 +6,11 @@
 # Default is the ON-PREM case: a private hostname with Caddy's internal CA
 # (`tls internal`, a self-signed cert). Reach it over the mine LAN/VPN and trust the
 # CA once, or accept the browser prompt. For a PUBLIC domain with a real certificate,
-# replace `tls internal` with `tls {$MM_TLS_EMAIL}` so Caddy provisions Let's Encrypt.
+# set MM_TLS_EMAIL in .env: compose passes it here as MM_TLS_ISSUER, and `tls <email>`
+# makes Caddy provision Let's Encrypt. Neither needs this file edited, so an upgrade,
+# which replaces it, keeps the choice.
+#
+# MM_SITE_DOMAIN may list several addresses, comma-separated: "10.20.0.5, minebox".
 #
 # Caddy connects to the API over the compose network (service name `api`), so the
 # API's own published port can stay bound to localhost — only Caddy faces the world.
@@ -17,5 +21,5 @@
 	reverse_proxy api:8000 {
 		flush_interval -1
 	}
-	tls internal
+	tls {$MM_TLS_ISSUER:internal}
 }
