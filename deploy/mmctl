@@ -358,8 +358,12 @@ snapshot_db() {  # old version, new version
     docker volume rm "$snap" >/dev/null 2>&1 || true
     return 1
   fi
-  # A record set aside by an upgrade that never finished (a power cut) is two upgrades old now.
-  keep_rollback
+  # An upgrade cut off part way (a power cut) leaves its record and the one it set aside. If it
+  # had switched to the running release ($1), the set-aside record is two upgrades old; if not,
+  # its own record is stale and the set-aside one still rolls back the running release.
+  if [ -f "$rb.prev" ] && [ -f "$rb" ]; then
+    if [ "$(env_get MM_ROLLBACK_TO "$rb")" = "$1" ]; then keep_rollback; else restore_previous_rollback; fi
+  fi
   if [ -f "$rb" ]; then mv -f "$rb" "$rb.prev" || return 1; fi
   if ! mv -f "$rb.new" "$rb"; then
     if [ -f "$rb.prev" ]; then mv -f "$rb.prev" "$rb"; fi
@@ -373,7 +377,7 @@ keep_rollback() {  # the upgrade verified: the previous rollback is superseded
     rm -f "$rb.prev"
   fi
 }
-restore_previous_rollback() {  # the upgrade failed and was undone: drop its snapshot
+restore_previous_rollback() {  # the upgrade failed, was undone or never ran: drop its snapshot
   local rb="$MMH/$ROLLBACK_ENV"
   docker volume rm "$(rollback_volume "$rb")" >/dev/null 2>&1 || true
   if [ -f "$rb.prev" ]; then mv -f "$rb.prev" "$rb"; else rm -f "$rb"; fi

@@ -132,6 +132,13 @@ while read -r ref _ src; do
   docker tag "$(awk -v s="$src" '$3 == s { print $1 }' "$MM_HOME/releases/$V2/images.lock")" "$ref"
 done < <(tar -xzOf "$WORK/v3/mine-monitor-$V3.tar.gz" "mine-monitor-$V3/images.lock")
 new_user before-failed-upgrade
+# An earlier attempt at $V3 was cut off after its snapshot (a power cut): its record is current
+# and the rollback to $V1 is set aside. The rollback to $V1 must survive the next attempt.
+stale=minemonitor_db_rollback_cut_off
+docker volume create --label com.minemonitor.role=rollback "$stale" >/dev/null
+mv "$MM_HOME/shared/rollback.env" "$MM_HOME/shared/rollback.env.prev"
+printf 'MM_ROLLBACK_FROM=%s\nMM_ROLLBACK_TO=%s\nMM_ROLLBACK_VOLUME=%s\n' "$V2" "$V3" "$stale" \
+  > "$MM_HOME/shared/rollback.env"
 B3=$(unpack "$WORK/v3/mine-monitor-$V3.tar.gz")
 if bash "$B3/install.sh" --yes; then fail "the $V3 upgrade reported success"; fi
 expect "running release" "$(current)" "$V2"
@@ -139,9 +146,11 @@ expect "users after the automatic rollback" "$(users)" "admin,before-failed-upgr
 expect "HTTPS login after the automatic rollback" "$(https_status "admin:$ADMIN_PW")" 200
 ls "$MM_HOME"/shared/logs/upgrade-"$V3"-failed-*.log >/dev/null || fail "no log of the failed release"
 expect "dumps of the failed release" "$(dumps "v$V3")" 0
-# The rollback to $V1 that existed before the failed upgrade is still there, with its snapshot.
+# The rollback to $V1 that existed before both attempts is still there, with its snapshot.
 expect "rollback target after the failed upgrade" "$(sed -n 's/^MM_ROLLBACK_FROM=//p' "$MM_HOME/shared/rollback.env")" "$V1"
 expect "rollback snapshot volumes" "$(rollback_volumes)" 1
+[ ! -e "$MM_HOME/shared/rollback.env.prev" ] || fail "a set-aside rollback record was left behind"
+if docker volume inspect "$stale" >/dev/null 2>&1; then fail "the cut-off attempt's snapshot was kept"; fi
 rm -rf "$B3"
 
 step "A deploy ends with a dump; a dump that cannot complete fails and leaves no file"
