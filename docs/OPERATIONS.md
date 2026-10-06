@@ -245,8 +245,10 @@ bash deploy/backup.sh                       # -> backups/minemonitor_<timestamp>
 bash deploy/backup.sh /path/to/out.sql.gz   # explicit path
 ```
 
-`backup.sh` writes to `<file>.partial` and renames it only once `pg_dump` has finished, so a file
-under a dump's name is always a whole dump; a failed dump exits non-zero and leaves nothing. It
+`backup.sh` writes to a `<file>.partial.*` file and renames it only once `pg_dump` has finished, so
+a file under a dump's name is always a whole dump; a failed dump exits non-zero and leaves
+nothing. Dumps hold personal data: they are written readable by their owner only, and
+`backups/` is kept at 0700 (so restoring a dump the root-run backup service wrote needs `sudo`). It
 refuses to start when the disk could not take another dump the size of the largest one already
 in the directory, plus a fifth, with 1 GB left free for the database: copy old dumps off the box.
 

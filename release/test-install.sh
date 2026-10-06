@@ -27,6 +27,7 @@ expect() {  # description actual wanted
 sql() { docker exec "$(docker ps -q --filter label=com.docker.compose.project=minemonitor --filter label=com.docker.compose.service=db)" psql -U minemonitor -d minemonitor -tAc "$1"; }
 users() { sql "select string_agg(username, ',' order by username) from users"; }
 current() { basename "$(readlink -f "$MM_HOME/current")"; }
+rollback_volumes() { docker volume ls -q --filter label=com.minemonitor.role=rollback | wc -l; }
 dumps() { find "$MM_HOME/shared/backups" -name "minemonitor_*_$1.sql.gz" | wc -l; }
 # grep -c reads to the end: grep -q would stop early and, under pipefail, fail zcat with SIGPIPE.
 zcontains() { [ "$(zcat "$2" | grep -c -- "$1")" -gt 0 ]; }  # pattern file.gz
@@ -100,6 +101,7 @@ before=$(sql 'select count(*) from positions')
 bash "$B2/install.sh" --yes
 expect "running release" "$(current)" "$V2"
 expect "rollback target" "$(sed -n 's/^MM_ROLLBACK_FROM=//p' "$MM_HOME/shared/rollback.env")" "$V1"
+[ ! -e "$MM_HOME/shared/rollback.env.prev" ] || fail "a superseded rollback record was left behind"
 expect "HTTPS login after the upgrade" "$(https_status "admin:$ADMIN_PW")" 200
 [ "$(sql 'select count(*) from positions')" -ge "$before" ] || fail "positions lost in the upgrade"
 has_dump "v$V2"
@@ -134,6 +136,9 @@ expect "users after the automatic rollback" "$(users)" "admin,before-failed-upgr
 expect "HTTPS login after the automatic rollback" "$(https_status "admin:$ADMIN_PW")" 200
 ls "$MM_HOME"/shared/logs/upgrade-"$V3"-failed-*.log >/dev/null || fail "no log of the failed release"
 expect "dumps of the failed release" "$(dumps "v$V3")" 0
+# The rollback to $V1 that existed before the failed upgrade is still there, with its snapshot.
+expect "rollback target after the failed upgrade" "$(sed -n 's/^MM_ROLLBACK_FROM=//p' "$MM_HOME/shared/rollback.env")" "$V1"
+expect "rollback snapshot volumes" "$(rollback_volumes)" 1
 rm -rf "$B3"
 
 step "A deploy ends with a dump; a dump that cannot complete fails and leaves no file"
@@ -159,7 +164,7 @@ expect "HTTPS login after the restore" "$(https_status "admin:$ADMIN_PW")" 200
 
 step "Fresh install of $V2 from a dump on a clean box, without HTTPS"
 "$MMCTL" compose --profile '*' down --volumes >/dev/null 2>&1
-docker volume rm minemonitor_db_rollback >/dev/null 2>&1 || true
+docker volume ls -q --filter label=com.minemonitor.role=rollback | xargs -r docker volume rm >/dev/null
 rm -rf "$MM_HOME"
 bash "$B2/install.sh" --yes --no-tls --restore "$WORK/dump.sql.gz"
 expect "running release" "$(current)" "$V2"

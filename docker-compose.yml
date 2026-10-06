@@ -340,7 +340,8 @@ services:
   # Scheduled database backup. Enable with:  docker compose --profile backup up -d
   # Dumps to ./backups on an interval and prunes old dumps. Restore with
   # deploy/restore.sh (see deploy/DEPLOY.md). pipefail: a pg_dump that fails part way must not
-  # leave a truncated file under a dump's name (gzip alone would exit 0).
+  # leave a truncated file under a dump's name (gzip alone would exit 0). umask 077: the dumps
+  # hold personal data, so only their owner (root) reads them.
   backup:
     image: timescale/timescaledb:2.30.2-pg16
     profiles: ["backup"]
@@ -360,6 +361,7 @@ services:
     command:
       - |
         set -o pipefail
+        umask 077
         while true; do
           ts=$$(date +%Y%m%d_%H%M%S)
           if pg_dump -h db -U "$$POSTGRES_USER" "$$POSTGRES_DB" | gzip > "/backups/minemonitor_$$ts.sql.gz.partial"; then

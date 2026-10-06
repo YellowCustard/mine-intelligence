@@ -14,6 +14,7 @@ import gzip
 import os
 import re
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -241,6 +242,9 @@ def test_deploy_ends_with_a_dump(tmp_path: Path) -> None:
     (dump,) = _dumps(tmp_path)
     assert re.fullmatch(r"minemonitor_\d{8}_\d{6}_after-deploy\.sql\.gz", dump.name)
     assert gzip.decompress(dump.read_bytes()) == b"-- dump\n"
+    # Personal data: the owner alone can read the dump or list the directory.
+    assert stat.S_IMODE(dump.stat().st_mode) == 0o600
+    assert stat.S_IMODE(dump.parent.stat().st_mode) == 0o700
 
 
 def test_deploy_fails_loudly_when_its_dump_fails_and_leaves_no_file(tmp_path: Path) -> None:
@@ -277,7 +281,8 @@ def test_deploy_rejects_an_unknown_argument(tmp_path: Path) -> None:
 def test_backup_refuses_to_fill_the_disk(tmp_path: Path) -> None:
     backups = tmp_path / "repo" / "backups"
     backups.mkdir(parents=True)
-    (backups / "minemonitor_20261001_020000.sql.gz").write_bytes(b"x" * 300 * 1024)
+    # Named by hand (bash deploy/backup.sh <file>): it still counts towards the estimate.
+    (backups / "before-migration.sql.gz").write_bytes(b"x" * 300 * 1024)
     df = (
         "#!/bin/sh\n"
         "echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'\n"
@@ -287,7 +292,7 @@ def test_backup_refuses_to_fill_the_disk(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "976 MB free" in result.stdout and "needs 1024 MB" in result.stdout, result.stdout
     assert DUMP not in calls
-    assert _dumps(tmp_path) == [backups / "minemonitor_20261001_020000.sql.gz"]
+    assert _dumps(tmp_path) == [backups / "before-migration.sql.gz"]
 
 
 def _backup_service_script(backups: Path) -> str:
@@ -324,6 +329,7 @@ def test_backup_service_never_leaves_a_truncated_dump(tmp_path: Path, pg_dump: s
         assert "backup written" in result.stdout
         (name,) = files
         assert name.endswith(".sql.gz")
+        assert stat.S_IMODE((backups / name).stat().st_mode) == 0o600
     else:
         assert "backup FAILED" in result.stdout
         assert files == []

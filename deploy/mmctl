@@ -20,7 +20,9 @@
 set -euo pipefail
 
 PROJECT=minemonitor
+# Prefix of the snapshot volumes; rollback.env names the one a rollback uses.
 ROLLBACK_VOLUME=${PROJECT}_db_rollback
+ROLLBACK_ENV=shared/rollback.env
 MIN_DOCKER=28.0
 MIN_COMPOSE=2.20.0
 NO_BACKUP=0
@@ -322,38 +324,72 @@ copy_volume() {  # from to image
 # upgrade. The snapshot is a copy of the stopped database's volume: exact, and it restores onto
 # the previous release's database image whatever TimescaleDB version the new one moved to.
 #
+# The snapshot goes to a new volume, and the previous rollback (record and volume) stays usable
+# until the upgrade has verified: snapshot_db sets it aside, keep_rollback drops it once the new
+# release runs, and restore_previous_rollback puts it back when the upgrade fails.
+#
 # do_upgrade runs it as `if ! snapshot_db`, where errexit is off, so each step returns its own
 # failure: rollback.env must never record a snapshot that was not taken in full.
+rollback_volume() {  # rollback.env file: the snapshot volume it names
+  local v
+  v=$(env_get MM_ROLLBACK_VOLUME "$1")
+  printf '%s' "${v:-$ROLLBACK_VOLUME}"
+}
 snapshot_db() {  # old version, new version
-  local vol img
+  local vol img snap rb="$MMH/$ROLLBACK_ENV"
   vol=$(db_volume)
   [ -n "$vol" ] || die "no database volume found for project $PROJECT"
   img=$(db_image "$MMH/releases/$1")
   [ -n "$img" ] || { warn "release $1's images.lock names no database image"; return 1; }
-  say "Snapshotting the database for rollback ($vol -> $ROLLBACK_VOLUME)"
-  rm -f "$MMH/shared/rollback.env" || return 1
-  if ! docker volume inspect "$ROLLBACK_VOLUME" >/dev/null 2>&1; then
-    docker volume create --label "com.minemonitor.role=rollback" "$ROLLBACK_VOLUME" >/dev/null || return 1
+  snap="${ROLLBACK_VOLUME}_$(date -u +%Y%m%d%H%M%S)"
+  say "Snapshotting the database for rollback ($vol -> $snap)"
+  docker volume create --label "com.minemonitor.role=rollback" "$snap" >/dev/null || return 1
+  if ! copy_volume "$vol" "$snap" "$img"; then
+    docker volume rm "$snap" >/dev/null 2>&1 || true
+    return 1
   fi
-  copy_volume "$vol" "$ROLLBACK_VOLUME" "$img" || return 1
-  {
+  if ! {
     echo "MM_ROLLBACK_FROM=$1"
     echo "MM_ROLLBACK_TO=$2"
     echo "MM_ROLLBACK_SNAPSHOT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  } > "$MMH/shared/rollback.env.new" || return 1
-  mv -f "$MMH/shared/rollback.env.new" "$MMH/shared/rollback.env"
+    echo "MM_ROLLBACK_VOLUME=$snap"
+  } > "$rb.new"; then
+    rm -f "$rb.new"
+    docker volume rm "$snap" >/dev/null 2>&1 || true
+    return 1
+  fi
+  # A record set aside by an upgrade that never finished (a power cut) is two upgrades old now.
+  keep_rollback
+  if [ -f "$rb" ]; then mv -f "$rb" "$rb.prev" || return 1; fi
+  if ! mv -f "$rb.new" "$rb"; then
+    if [ -f "$rb.prev" ]; then mv -f "$rb.prev" "$rb"; fi
+    return 1
+  fi
+}
+keep_rollback() {  # the upgrade verified: the previous rollback is superseded
+  local rb="$MMH/$ROLLBACK_ENV"
+  if [ -f "$rb.prev" ]; then
+    docker volume rm "$(rollback_volume "$rb.prev")" >/dev/null 2>&1 || true
+    rm -f "$rb.prev"
+  fi
+}
+restore_previous_rollback() {  # the upgrade failed and was undone: drop its snapshot
+  local rb="$MMH/$ROLLBACK_ENV"
+  docker volume rm "$(rollback_volume "$rb")" >/dev/null 2>&1 || true
+  if [ -f "$rb.prev" ]; then mv -f "$rb.prev" "$rb"; else rm -f "$rb"; fi
 }
 
 restore_snapshot() {  # version whose db image to use
-  local vol
+  local vol snap
   vol=$(db_volume)
   [ -n "$vol" ] || die "no database volume found for project $PROJECT"
-  docker volume inspect "$ROLLBACK_VOLUME" >/dev/null 2>&1 || die "the rollback snapshot ($ROLLBACK_VOLUME) is missing"
-  say "Restoring the database from the pre-upgrade snapshot"
+  snap=$(rollback_volume "$MMH/$ROLLBACK_ENV")
+  docker volume inspect "$snap" >/dev/null 2>&1 || die "the rollback snapshot ($snap) is missing"
+  say "Restoring the database from the pre-upgrade snapshot ($snap)"
   # The copy empties the live volume first, so a failure part way leaves it incomplete; the
   # snapshot and rollback.env stay, and the rollback can be run again once the cause is fixed.
-  copy_volume "$ROLLBACK_VOLUME" "$vol" "$(db_image "$MMH/releases/$1")" ||
-    die "could not copy the pre-upgrade snapshot back into $vol. The snapshot is intact in $ROLLBACK_VOLUME; fix the cause (often disk space) and run: sudo mmctl rollback"
+  copy_volume "$snap" "$vol" "$(db_image "$MMH/releases/$1")" ||
+    die "could not copy the pre-upgrade snapshot back into $vol. The snapshot is intact in $snap; fix the cause (often disk space) and run: sudo mmctl rollback"
 }
 
 # Before a rollback or restore replaces the live database. Without the dump the data it holds
@@ -751,6 +787,7 @@ do_upgrade() {  # new version
     say "Mine Monitor $new is running"
     local dumped=1
     backup_after_deploy "$newdir" "v$new" || dumped=0
+    keep_rollback
     link_cli
     prune_releases
     note "Rollback to $old stays available until the next upgrade (sudo mmctl rollback);"
@@ -766,8 +803,7 @@ do_upgrade() {  # new version
   switch_current "$old"
   since=$(date +%s)
   if run_deploy "$olddir" && verify_release "$olddir" "$old" "$since"; then
-    rm -f "$MMH/shared/rollback.env"
-    docker volume rm "$ROLLBACK_VOLUME" >/dev/null 2>&1 || true
+    restore_previous_rollback
     link_cli
     die "upgrade to $new failed and was rolled back: $old is running with its data as before. Logs of the failed release: $out"
   fi
@@ -864,8 +900,8 @@ cmd_rollback() {
   if ! { run_deploy "$dir" && verify_release "$dir" "$from" "$since"; }; then
     die "release $from did not come up after the rollback; logs: $(save_logs "$dir" "rollback-$from-failed")"
   fi
+  docker volume rm "$(rollback_volume "$rb")" >/dev/null 2>&1 || true
   rm -f "$rb"
-  docker volume rm "$ROLLBACK_VOLUME" >/dev/null 2>&1 || true
   link_cli
   say "Rolled back: Mine Monitor $from is running"
   backup_after_deploy "$dir" "v$from-rolled-back" || backup_failed "$from"
