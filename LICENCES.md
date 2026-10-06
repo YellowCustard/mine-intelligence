@@ -74,7 +74,17 @@ need them. Selection and the full per-model audit: `docs/VISION_MODEL_LICENSES.m
 | timescale/timescaledb (2.30.2-pg16) | Apache-2.0 (Timescale Community for some features) | https://github.com/timescale/timescaledb |
 | eclipse-mosquitto (2.0.22) | EPL-2.0 / EDL-1.0 | https://github.com/eclipse/mosquitto |
 | chrislusf/seaweedfs (4.48, opt-in `evidence` profile) | Apache-2.0 (the open-source edition; the separate SeaweedFS Enterprise edition is not used) | https://github.com/seaweedfs/seaweedfs |
+| caddy (2.x, `tls` profile; each release pins the digest it ships) | Apache-2.0 | https://github.com/caddyserver/caddy |
 | python (base image) | PSF | https://hub.docker.com/_/python |
+
+> **Release bundles redistribute these images.** The offline bundle (`deploy/INSTALL.md`)
+> carries every image above plus the Mine Monitor images built on `python:3.11-slim`, so
+> eigenstate, not the mine, is the distributor. Besides the licences listed, the images' OS
+> layers (Debian in the python base, Alpine in the others) include GPL and LGPL packages such
+> as bash, coreutils, BusyBox and glibc/musl, used unmodified. Distributing GPL binaries carries
+> an obligation to offer the corresponding source; confirm with counsel how the bundle meets it
+> (for example a written offer, or the upstream source packages on request) before the first
+> bundle leaves eigenstate.
 
 > **MinIO was removed (2026-10).** It is AGPL-3.0 and its community images are
 > no longer published, so a clean `docker compose up` could not pull it. The

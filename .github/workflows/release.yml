@@ -1,0 +1,121 @@
+name: Release
+
+# Push a tag vMAJOR.MINOR.PATCH (matching pyproject.toml and minemonitor.__version__) to publish a
+# release: CI must pass, then the two Mine Monitor images are pushed to ghcr.io, every image is
+# pinned by digest into the release bundles, the online bundle is installed on a clean runner from
+# the registry, and a GitHub release carries both bundles. deploy/RELEASING.md has the procedure.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release
+      packages: write # push the images to ghcr.io
+    env:
+      CORE_REPO: ghcr.io/yellowcustard/mine-monitor
+      VISION_REPO: ghcr.io/yellowcustard/mine-monitor-vision-edge
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag matches the version in the code
+        run: |
+          version=${TAG#v}
+          py=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)
+          init=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/minemonitor/__init__.py)
+          echo "tag $version · pyproject.toml $py · minemonitor.__version__ $init"
+          [ "$py" = "$version" ] && [ "$init" = "$version" ]
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists; delete it first to rebuild"; exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Log in to ghcr.io
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build and push the Mine Monitor images
+        run: |
+          build() {  # dockerfile repo -> exports <NAME>_DIGEST
+            docker buildx build --platform linux/amd64 --pull -f "$1" -t "$2:$VERSION" \
+              --label "org.opencontainers.image.title=$(basename "$2")" \
+              --label "org.opencontainers.image.version=$VERSION" \
+              --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+              --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+              --push .
+            docker buildx imagetools inspect "$2:$VERSION" --format '{{json .Manifest}}' | jq -r .digest
+          }
+          core=$(build Dockerfile "$CORE_REPO")
+          vision=$(build Dockerfile.vision "$VISION_REPO")
+          echo "core $core · vision $vision"
+          [[ "$core" =~ ^sha256:[0-9a-f]{64}$ ]] && [[ "$vision" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "CORE_IMAGE=$CORE_REPO@$core" >> "$GITHUB_ENV"
+          echo "VISION_IMAGE=$VISION_REPO@$vision" >> "$GITHUB_ENV"
+
+      - name: Pull every image by its registry digest
+        run: |
+          docker pull -q "$CORE_IMAGE"
+          docker pull -q "$VISION_IMAGE"
+          python3 release/render_compose.py sources docker-compose.yml | grep -v '^build:' |
+            xargs -n 1 docker pull -q --platform linux/amd64
+
+      - name: Build the bundles
+        run: |
+          bash release/build-bundle.sh --version "$VERSION" \
+            --core-image "$CORE_IMAGE" --vision-image "$VISION_IMAGE" --out dist
+          tar -xzOf "dist/mine-monitor-$VERSION.tar.gz" "mine-monitor-$VERSION/images.lock"
+
+      - name: Install the online bundle on a clean runner, pulling from the registries
+        run: |
+          docker ps -aq | xargs -r docker rm -f
+          docker system prune -af --volumes >/dev/null
+          mkdir -p "$RUNNER_TEMP/online" && tar -C "$RUNNER_TEMP/online" -xzf "dist/mine-monitor-$VERSION.tar.gz"
+          sudo DOCKER_CONFIG="$HOME/.docker" bash "$RUNNER_TEMP/online/mine-monitor-$VERSION/install.sh" \
+            --yes --demo --hostname localhost
+          pw=$(sudo sed -n 's/^password: //p' /opt/mine-monitor/shared/initial-admin-password)
+          [ "$(curl -sk -o /dev/null -w '%{http_code}' -u "admin:$pw" https://localhost/me)" = 200 ]
+          sudo mmctl status
+
+      - name: Stack status and logs
+        if: failure()
+        run: sudo mmctl compose ps -a; sudo mmctl compose logs --no-color --tail 100; sudo cat /opt/mine-monitor/shared/logs/* || true
+
+      - name: Publish the GitHub release
+        run: |
+          {
+            echo "Mine Monitor $VERSION ($GITHUB_SHA)."
+            echo
+            echo "- \`mine-monitor-$VERSION-linux-amd64-offline.tar\`: everything, images included. Installs with no internet."
+            echo "- \`mine-monitor-$VERSION.tar.gz\`: the same without the images, which it pulls by digest (needs \`docker login ghcr.io\`)."
+            echo
+            echo "Check the download with \`sha256sum -c SHA256SUMS\`, unpack it with \`tar xf\`, then run \`sudo ./mine-monitor-$VERSION/install.sh\`."
+            echo "It installs on a fresh box, or upgrades an installed one (with a database snapshot and automatic rollback). Full guide: README.md inside the bundle."
+            echo
+            echo "Images (local tag, pinned digest, source):"
+            echo
+            echo '```'
+            tar -xzOf "dist/mine-monitor-$VERSION.tar.gz" "mine-monitor-$VERSION/images.lock" | grep -v '^#'
+            echo '```'
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --verify-tag --title "Mine Monitor $VERSION" --notes-file "$RUNNER_TEMP/notes.md" \
+            "dist/mine-monitor-$VERSION-linux-amd64-offline.tar" "dist/mine-monitor-$VERSION.tar.gz" dist/SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}

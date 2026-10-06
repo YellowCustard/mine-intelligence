@@ -43,8 +43,8 @@ Tick every box. A red box is a blocked release, not a note for later.
       or a weak bootstrap password.
 - [ ] API bound to localhost; public exposure is only via TLS (the bundled Caddy
       `--profile tls`, or your own reverse proxy) or an SSH tunnel — Basic auth must
-      ride TLS. For a public domain, the Caddyfile uses `tls {$MM_TLS_EMAIL}`
-      (Let's Encrypt); on-prem uses Caddy's internal CA.
+      ride TLS. For a public domain, `MM_TLS_EMAIL` is set (Let's Encrypt); on-prem
+      leaves it blank (Caddy's internal CA).
 - [ ] Database and broker published on localhost only (`MM_DB_BIND`, `MM_MQTT_BIND`
       default `127.0.0.1`). The one exception: when a device on another box publishes
       over MQTT, `MM_MQTT_BIND` is the device-VLAN address and broker auth is on.
@@ -113,8 +113,12 @@ Tick every box. A red box is a blocked release, not a note for later.
 - [ ] Open questions for the site surfaced, not guessed (fleet list, onboard weighing,
       connectivity, on-prem requirement, real zone polygons — placeholders clearly
       marked as such).
-- [ ] Rollback plan: previous image/tag and last-good database dump identified.
-- [ ] Release tagged; `docs/` and `.env.example` reflect what actually shipped.
+- [ ] Rollback plan: on an installed box `sudo mmctl rollback` returns to the previous
+      release and the pre-upgrade database (`deploy/INSTALL.md` §7); the last-good dump is
+      identified for anything older.
+- [ ] Version set in `pyproject.toml` and `minemonitor.__version__`, then tagged
+      ([`RELEASING.md`](./RELEASING.md)); the release workflow is green and the GitHub release
+      carries both bundles. `docs/` and `.env.example` reflect what actually shipped.
 
 ---
 

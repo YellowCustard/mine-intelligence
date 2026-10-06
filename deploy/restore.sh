@@ -31,15 +31,9 @@ docker compose version >/dev/null 2>&1 || { echo "ERROR: the Docker Compose plug
 echo "==> Starting the database only"
 docker compose up -d db
 
-echo "==> Waiting for the database to become healthy"
-for i in $(seq 1 30); do
-  if docker compose exec -T db pg_isready -U "$PGUSER" >/dev/null 2>&1; then
-    echo "    Database ready."
-    break
-  fi
-  sleep 2
-  [ "$i" = "30" ] && { echo "    Database did not become ready — check: docker compose logs db"; exit 1; }
-done
+# Over TCP (mm_wait_for_db): on a clean box the image first initialises the database with a
+# socket-only server and then restarts it, and a dump loaded into that first server is cut off.
+mm_wait_for_db || exit 1
 
 echo "==> Loading $DUMP into '$PGDB'"
 case "$DUMP" in
