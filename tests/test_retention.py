@@ -247,3 +247,29 @@ def test_annotations_zero_days_keeps_forever(session: Session) -> None:
     assert deleted["incidents"] == 0
     assert deleted["delay_classifications"] == 0
     assert deleted["shift_handovers"] == 0
+
+
+def test_access_quarantine_follows_events_window(session: Session) -> None:
+    from minemonitor.storage.models import AccessQuarantine, Site
+
+    session.add(Site(site_id="kn-zw-01", name="T", timezone="Africa/Harare"))
+    for qid, days_ago in (("old", 400), ("new", 5)):
+        seen = _NOW - timedelta(days=days_ago)
+        session.add(
+            AccessQuarantine(
+                id=qid,
+                site_id="kn-zw-01",
+                source_system="dahua_gate",
+                source_event_id=qid,
+                gate_id="main-gate",
+                decision="granted",
+                claimed_ts=seen + timedelta(days=365),
+                skew_s=365 * 86400.0,
+                first_seen_at=seen,
+            )
+        )
+    session.commit()
+    deleted = run_retention(session, now=_NOW, positions_days=90, metrics_days=365, events_days=365)
+    assert deleted["access_quarantine"] == 1
+    left = session.execute(select(AccessQuarantine.id)).scalars().all()
+    assert left == ["new"]

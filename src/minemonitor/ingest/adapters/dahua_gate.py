@@ -13,6 +13,11 @@ source, not held in memory, so a restart resumes with no state; ingest is idempo
 deterministic access id), so refetch overlap never double-records; a fetch failure is caught and
 retried next tick (the mine link fails). **No biometric data crosses**: ``_to_raw`` carries only
 opaque event fields, and the normaliser refuses a biometric payload regardless (brief §4).
+
+Gate clocks (plan G1): a terminal whose clock jumped ahead (e.g. reset after a reboot) dates its
+events in the future. Such an event is quarantined and alarmed, never stored, and the cursor is
+also bounded by server time, so neither a bad clock nor a small permitted lead can hide the
+events other gates record afterwards.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from minemonitor import net
 from minemonitor.access import service
 from minemonitor.contracts import EventV1
 from minemonitor.ingest.adapters.access_sim import normalise_access_event
+from minemonitor.ingest.service import FutureTimestampError
 from minemonitor.storage.models import AccessEvent
 
 log = logging.getLogger("minemonitor.ingest.access_gate")
@@ -129,19 +135,30 @@ class SimulatedGateSource:
         return out
 
 
+def _aware(dt: datetime) -> datetime:
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
 def _since_cursor(
     session: Session, site_id: str, source_system: str, overlap_s: int
 ) -> datetime | None:
-    """The latest stored event time for this source, minus an overlap — or None if none yet."""
-    last = session.execute(
-        select(func.max(AccessEvent.ts)).where(
+    """Where the next poll resumes, minus an overlap; None if nothing is stored yet.
+
+    The latest stored event time, but never later than the latest time we *stored* one
+    (``created_at`` is server time at ingest). Device time alone is not safe: a gate whose clock
+    runs ahead, even within the permitted skew, would put the cursor past events that other
+    gates record afterwards, and one future-dated row would hide everything until the wall
+    clock caught up. With correct clocks an event is stored after it happens, so this equals
+    the latest event time and the overlap behaves as before.
+    """
+    last_ts, last_stored = session.execute(
+        select(func.max(AccessEvent.ts), func.max(AccessEvent.created_at)).where(
             AccessEvent.site_id == site_id, AccessEvent.source_system == source_system
         )
-    ).scalar_one_or_none()
-    if last is None:
+    ).one()
+    if last_ts is None or last_stored is None:
         return None
-    last = last if last.tzinfo else last.replace(tzinfo=UTC)
-    return last - timedelta(seconds=overlap_s)
+    return min(_aware(last_ts), _aware(last_stored)) - timedelta(seconds=overlap_s)
 
 
 def poll_once(
@@ -157,7 +174,9 @@ def poll_once(
 
     A fetch failure is swallowed (logged) so a gate-API outage never crashes the caller — the
     next poll resumes from the DB cursor. Each event is normalised and ingested independently, so
-    one malformed/biometric event is skipped (logged), never blocking the rest of the batch.
+    one malformed/biometric event is skipped (logged), never blocking the rest of the batch. An
+    event dated too far ahead of ``now`` is quarantined (with at most one ``source_clock_skew``
+    alarm per gate while it is unacknowledged), not stored.
     """
     now = now or datetime.now(UTC)
     since = _since_cursor(session, site_id, source_system, overlap_s)
@@ -171,7 +190,34 @@ def poll_once(
     for raw in raws:
         try:
             kwargs = normalise_access_event(raw)
+        except ValueError as exc:
+            log.warning("gate event rejected", extra={"site_id": site_id, "error": str(exc)})
+            continue
+        try:
             row, created, alarm = service.ingest_access_event(session, site_id, now=now, **kwargs)
+        except FutureTimestampError as exc:
+            log.warning(
+                "gate event quarantined: device clock ahead",
+                extra={
+                    "site_id": site_id,
+                    "gate_id": kwargs["gate_id"],
+                    "source_event_id": kwargs["source_event_id"],
+                    "error": str(exc),
+                },
+            )
+            skew_alarm = service.quarantine_future_event(
+                session,
+                site_id,
+                source_system=kwargs["source_system"],
+                source_event_id=kwargs["source_event_id"],
+                gate_id=kwargs["gate_id"],
+                decision=kwargs["decision"],
+                ts=kwargs["ts"],
+                now=now,
+            )
+            if skew_alarm is not None:
+                alarms.append(skew_alarm)
+            continue
         except ValueError as exc:
             log.warning("gate event rejected", extra={"site_id": site_id, "error": str(exc)})
             continue

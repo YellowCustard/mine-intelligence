@@ -842,6 +842,30 @@ class AccessEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class AccessQuarantine(Base):
+    """A gate event refused at ingest because its device clock is too far ahead (plan G1).
+
+    Not an access record: the passage's true time is unknown, so it is never stored in
+    ``access_events`` (where it would move the poll cursor into the future and hide every later
+    event). Keyed on the same deterministic id as the access event, so a vendor that re-presents
+    the same event every poll is recognised and never re-alarms. Holds **no personal data**
+    (no operator or credential reference); ``source_event_id`` finds the record on the gate
+    appliance, which keeps it.
+    """
+
+    __tablename__ = "access_quarantine"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False, index=True)
+    source_system: Mapped[str] = mapped_column(String, nullable=False)
+    source_event_id: Mapped[str] = mapped_column(String, nullable=False)
+    gate_id: Mapped[str] = mapped_column(String, nullable=False)
+    decision: Mapped[str] = mapped_column(String, nullable=False)
+    claimed_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    skew_s: Mapped[float] = mapped_column(Float, nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class GeneratorReading(Base):
     """A **measured** DSE genset controller reading (generator domain, FP-11).
 

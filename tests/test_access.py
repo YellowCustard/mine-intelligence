@@ -355,3 +355,30 @@ def test_metal_alarm_dedups_when_event_already_recorded(db_session: Session) -> 
     )
     db_session.commit()
     assert alarm is None and row is not None and row.metal_detected is True
+
+
+# -- a gate clock running ahead is refused, never recorded (plan G1) ------------------
+
+
+def test_service_refuses_future_dated_access_event(db_session: Session) -> None:
+    from datetime import timedelta
+
+    from minemonitor.ingest.service import FutureTimestampError
+
+    kwargs = normalise_access_event(_raw(time=(_NOW + timedelta(hours=1)).isoformat()))
+    with pytest.raises(FutureTimestampError):
+        service.ingest_access_event(db_session, SITE, now=_NOW, **kwargs)
+    # Inside the allowance is accepted (gate clocks drift a little).
+    ok = normalise_access_event(_raw(id="g-2", time=(_NOW + timedelta(seconds=60)).isoformat()))
+    _row, created, _ = service.ingest_access_event(db_session, SITE, now=_NOW, **ok)
+    assert created
+
+
+def test_api_rejects_future_dated_access_event(db_session: Session) -> None:
+    from datetime import timedelta
+
+    sup = make_client(db_session, SUPERVISOR)
+    future = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    res = sup.post(f"/sites/{SITE}/access/events", json=_raw(id="api-f", time=future))
+    assert res.status_code == 400 and "ahead of server time" in res.json()["detail"]
+    assert service.list_access_events(db_session, SITE) == []

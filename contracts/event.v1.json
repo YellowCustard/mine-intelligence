@@ -44,7 +44,8 @@
         "generator_fault",
         "generator_unexpected_run",
         "camera_obstructed",
-        "camera_offline"
+        "camera_offline",
+        "source_clock_skew"
       ]
     },
     "severity": {

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime, timedelta
+from typing import Final
 
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -24,8 +25,9 @@ from sqlalchemy.orm import Session
 from minemonitor.config import get_settings
 from minemonitor.contracts import EventV1
 from minemonitor.events.repository import new_event_id, persist_event
+from minemonitor.ingest.service import FutureTimestampError
 from minemonitor.operations.shifts import resolve_shift
-from minemonitor.storage.models import AccessEvent, Event, Operator
+from minemonitor.storage.models import AccessEvent, AccessQuarantine, Event, Operator
 
 _VALID_DECISIONS = {"granted", "denied"}
 SOURCE = "access_gate"
@@ -83,7 +85,7 @@ def record_access_event(
     row = AccessEvent(
         id=access_id,
         site_id=site_id,
-        ts=ts,
+        ts=ts.astimezone(UTC),  # store UTC (brief §12); a gate's local offset is not kept
         source_system=source_system,
         gate_id=gate_id,
         credential_ref=credential_ref,
@@ -123,6 +125,14 @@ def authorize(
     return "granted", None
 
 
+def _reject_if_future(ts: datetime, now: datetime) -> None:
+    skew_s = (ts - now).total_seconds()
+    if skew_s > get_settings().max_future_skew_s:
+        raise FutureTimestampError(
+            f"gate event ts {ts.isoformat()} is {skew_s:.0f}s ahead of server time"
+        )
+
+
 def ingest_access_event(
     session: Session,
     site_id: str,
@@ -151,8 +161,14 @@ def ingest_access_event(
     **random-search generator** may select it deterministically at the configured rate
     (``search_rate_percent``, default from settings) — recorded on the passage for the
     missed-search audit trail.
+
+    A passage dated more than ``max_future_skew_s`` after ``now`` raises
+    :class:`FutureTimestampError` and is not recorded: its true time is unknown (a terminal
+    whose clock reset), and stored it would sit in the future of every list and of the gate
+    poller's cursor. The poller quarantines it (:func:`quarantine_future_event`).
     """
     now = now or datetime.now(UTC)
+    _reject_if_future(ts, now)
     rate = (
         search_rate_percent
         if search_rate_percent is not None
@@ -203,6 +219,102 @@ def ingest_access_event(
         )
         persist_event(session, alarm)
     return row, created, alarm
+
+
+CLOCK_SKEW: Final = "source_clock_skew"
+
+
+def quarantine_future_event(
+    session: Session,
+    site_id: str,
+    *,
+    source_system: str,
+    source_event_id: str,
+    gate_id: str,
+    decision: str,
+    ts: datetime,
+    now: datetime,
+) -> EventV1 | None:
+    """Quarantine a gate event refused for a future device time; maybe alarm. No commit.
+
+    The event goes to ``access_quarantine``, never ``access_events``. A ``source_clock_skew``
+    ``event.v1`` (warning) tells the control room the gate's passages are not being recorded.
+    Dedup, so a bad clock is one alarm rather than a storm:
+
+    - an event already quarantined (the appliance re-presents it on every poll, because its
+      time is always "newer" than the cursor) never alarms again;
+    - a newly quarantined event alarms only if this gate has no *open* (unacknowledged)
+      clock-skew alarm. After an acknowledgement, a fresh bad-clock passage alarms again,
+      because the clock is still wrong.
+
+    The alarm and the quarantine row carry no operator or credential reference.
+    """
+    qid = _access_id(site_id, source_system, source_event_id)
+    if session.get(AccessQuarantine, qid) is not None:
+        return None
+    skew_s = (ts - now).total_seconds()
+    session.add(
+        AccessQuarantine(
+            id=qid,
+            site_id=site_id,
+            source_system=source_system,
+            source_event_id=source_event_id,
+            gate_id=gate_id,
+            decision=decision,
+            claimed_ts=ts.astimezone(UTC),
+            skew_s=skew_s,
+            first_seen_at=now,
+        )
+    )
+    source = f"{SOURCE}:{gate_id}"
+    open_alarm = session.execute(
+        select(Event.event_id)
+        .where(
+            Event.site_id == site_id,
+            Event.type == CLOCK_SKEW,
+            Event.source == source,
+            Event.state == "open",
+        )
+        .limit(1)
+    ).first()
+    if open_alarm is not None:
+        return None
+    alarm = EventV1(
+        schema="event.v1",
+        event_id=new_event_id(),
+        site_id=site_id,
+        ts=now,
+        type=CLOCK_SKEW,
+        severity="warning",
+        asset_id=None,
+        zone_id=None,
+        source=source,
+        summary=(
+            f"Gate {gate_id} clock is {_human_s(skew_s)} ahead: its passages are not being "
+            "recorded until the terminal's time is corrected"
+        ),
+        detail={
+            "gate_id": gate_id,
+            "source_system": source_system,
+            "source_event_id": source_event_id,
+            "claimed_ts": ts.isoformat(),
+            "skew_s": skew_s,
+            "max_future_skew_s": get_settings().max_future_skew_s,
+            "provenance": "inferred",
+        },
+        evidence={"access_quarantine_id": qid},
+        advisory=True,
+        state="open",
+    )
+    persist_event(session, alarm)
+    return alarm
+
+
+def _human_s(seconds: float) -> str:
+    for unit, size in (("d", 86400), ("h", 3600), ("min", 60)):
+        if seconds >= size:
+            return f"{seconds / size:.0f} {unit}"
+    return f"{seconds:.0f} s"
 
 
 def set_operator_access_status(

@@ -193,6 +193,15 @@ poll the Dahua gate API each tick and ingest new access events automatically; bl
 link outage (the cursor is the last stored event; ingest is idempotent). **Verify the vendor
 response mapping against the real backdoor-API spec before relying on it in production.**
 
+*Gate clock ahead.* A gate event dated more than `MM_MAX_FUTURE_SKEW_S` (default 120 s) after
+server time is refused: a terminal whose clock reset would otherwise hide every later event.
+The poller moves it to the `access_quarantine` table (no operator or card reference) and raises
+one `source_clock_skew` warning per gate; another arrives only after that one is acknowledged
+and the gate still sends future-dated passages. Those passages are **not** in the access record:
+correct the terminal's time (NTP) and reconcile them on the appliance by `source_event_id`. The
+HTTP ingest endpoint rejects such an event with 400. Quarantine rows follow
+`MM_RETAIN_EVENTS_DAYS`.
+
 **Laboratory data (FP-08).** Assay results are ingested directly from the lab instrument
 (the client's Agilent 2000-series AA spectrometer via SpectrAA) so a result is never retyped:
 either one at a time (`POST /api/v1/sites/{id}/laboratory/results`) or a whole SpectrAA CSV
@@ -299,7 +308,7 @@ The mine is the data controller; eigenstate is the processor. Retention is
 |---|---|---|
 | Raw positions | `MM_RETAIN_POSITIONS_DAYS` | 90 |
 | Derived metrics + cycles | `MM_RETAIN_METRICS_DAYS` | 365 |
-| Events | `MM_RETAIN_EVENTS_DAYS` | 365 |
+| Events (and quarantined gate events) | `MM_RETAIN_EVENTS_DAYS` | 365 |
 | Operational annotations | `MM_RETAIN_ANNOTATIONS_DAYS` | 365 |
 | Audit trail | `MM_RETAIN_AUDIT_DAYS` | 730 |
 
