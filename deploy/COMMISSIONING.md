@@ -63,6 +63,8 @@ that 5027 answers on the tracker network.
 
 ## Stage C — First tracker: provisioning & installation
 
+Complete the Stage K firmware and isolation rows for each device before connecting it.
+
 | # | Action | How | Expected | Result |
 |---|---|---|---|---|
 | C1 | Physical install | on the machine | power, ground, ignition sense wired; GNSS + cellular antennas mounted with sky view | |
@@ -158,11 +160,32 @@ Sample hourly and watch for drift/leaks:
 **Pass:** flat resource curves, no unbounded growth, `/health` green throughout,
 `/sites/{id}/system-health` and `/data-quality` clean.
 
+## Stage K — Field-device firmware & isolation
+
+Run before a gate terminal, generator gateway or tracker is connected, alongside Stage C. A
+row marked *(if used)* applies only when that device is on site. Each floor comes from a vendor
+advisory; a device below it is updated, or replaced, before it is connected. Use the A8 `probe`
+function for the reachability checks.
+
+| # | Action | How | Expected | Result |
+|---|---|---|---|---|
+| K1 | Dahua gate terminal (ASI) firmware | read the build date on each terminal's version/system-info page | build dated **2026-03-26 or later**. Older builds have CVE-2026-29116 (Dahua DHCC-SA-202606-001): one unauthenticated request to `/RPC2` knocks the terminal over, and models without a watchdog stay down until someone recovers them on site | |
+| K2 | Dahua NVR and IP cameras *(if used)* | as K1, per device | NVR built **2026-03-26 or later** (CVE-2026-29116); IP cameras built **2026-04-15 or later** (CVE-2026-29114, same advisory) | |
+| K3 | Gate network isolation | gate terminals on their own VLAN; from the Mine Monitor box, then from another LAN machine: `probe <terminal> <API port>` (the host and port in `MM_ACCESS_GATE_URL`) | `OPEN` from the Mine Monitor box only; `closed` from every other host. Nothing but the poller can reach a terminal's API | |
+| K4 | Gate terminal clock | NTP configured on each terminal; compare its clock with the server's | within 2 minutes of the server (`MM_MAX_FUTURE_SKEW_S`, 120 s). A terminal clock that runs ahead stops its gate events being recorded | |
+| K5 | DSE855 generator gateway *(if used)* | own VLAN; from the Mine Monitor box `probe <DSE855> 502 80 443`, then `probe <DSE855> 80 443` from another LAN machine | only TCP 502 (Modbus) from the Mine Monitor box is `OPEN`; 80 and 443 are `closed` from every host, the Mine Monitor box included. Firmware is the latest from the vendor (1.2.3 as of Oct 2026) and at least 1.2.0 (CVE-2024-5947). Firmware alone is **not** enough: CVE-2024-5948 and CVE-2024-5950 (unauthenticated code execution from the same network) and CVE-2025-29270 have no fixed version, so isolation is the control | |
+| K6 | Teltonika FMB trackers | read the firmware version (Configurator, or the `getver` SMS/GPRS command) | **04.00.00.Rev.13 or later**, the current factory firmware; 04.00.00 cannot be downgraded | |
+| K7 | Teltonika RUT/TSW routers *(if used for backhaul)* | read the firmware version in the router's or switch's web UI | RutOS **7.24.2 or later** (CVE-2026-18368, CVE-2026-16455); TSW switches TSWOS **1.10.1 or later** (CVE-2026-16455) | |
+
+Re-check K1, K2 and K5 against the vendors' advisory pages when a device is added or replaced.
+FIRST lists Dahua's PSIRT as suspended, so read Dahua's advisory index directly rather than
+waiting for a notice.
+
 ---
 
 ## Acceptance sign-off
 
-Production acceptance = **A–I all pass** and **J shows no degradation**. Record the
+Production acceptance = **A–I and K all pass** and **J shows no degradation**. Record the
 operator, date, tracker IMEI/asset, and any deviations. File the completed tables with
 the release record and the [Release Readiness report](../docs/) alongside
 `RELEASE_CHECKLIST.md`.
