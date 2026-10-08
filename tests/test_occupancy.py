@@ -150,3 +150,25 @@ def test_api_viewer_cannot_set_capacity(db_session: Session) -> None:
     viewer = make_client(db_session, VIEWER)
     r = viewer.put(f"/api/v1/sites/{SITE}/zones/sector-a/occupancy", json={"max_occupancy": 1})
     assert r.status_code in (401, 403)
+
+
+def test_breach_rearms_after_occupancy_drops_back(db_session: Session) -> None:
+    from datetime import timedelta
+
+    from minemonitor.events.repository import acknowledge_event
+
+    _zone(db_session, rules={"max_occupancy": 2})
+    _occupy(db_session, "sector-a", 3)
+    first = detect_zone_occupancy(db_session, SITE, now=_NOW)
+    assert len(first) == 1
+    acknowledge_event(db_session, SITE, first[0].event_id, "sup")
+    one = db_session.get(AssetZoneState, (SITE, "IN-0", "sector-a"))
+    assert one is not None
+    one.inside = False  # back at capacity: the episode ends
+    db_session.commit()
+    assert detect_zone_occupancy(db_session, SITE, now=_NOW + timedelta(minutes=1)) == []
+    one.inside = True  # over again: a new episode, a new alarm
+    db_session.commit()
+    again = detect_zone_occupancy(db_session, SITE, now=_NOW + timedelta(minutes=2))
+    assert len(again) == 1
+    assert detect_zone_occupancy(db_session, SITE, now=_NOW + timedelta(minutes=3)) == []

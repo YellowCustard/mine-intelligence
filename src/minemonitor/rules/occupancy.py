@@ -7,8 +7,10 @@ approach (restrict and account for who is where).
 
 This is **cross-asset**: it counts confirmed membership across all assets in a zone, so it
 runs on the maintenance tick against ``asset_zone_state`` (post-debounce ``inside`` flags),
-not per position. Deduped like ``asset_offline``: one open alarm per zone while the
-condition persists (an operator acknowledges it). Advisory only — it warns a person.
+not per position. Deduped per episode: one alarm while the zone stays over its cap; when a tick
+finds it back at or under the cap, that alarm is marked ``cleared_at`` and the next breach raises
+a new one (an acknowledgement alone never mutes a later breach). Advisory only — it warns a
+person.
 
 The count is source-agnostic: any source that maintains zone membership (GNSS today, vision
 tracks later via the same ``asset_zone_state`` shape) feeds it without change here.
@@ -31,23 +33,25 @@ from minemonitor.zones.occupancy import cap_severity, current_occupancy, parse_c
 SOURCE = "gnss_occupancy"
 
 
-def _has_open_occupancy(session: Session, site_id: str, zone_id: str) -> bool:
-    """True if an unresolved zone_occupancy alarm already exists for this zone.
-
-    Zone-scoped (``asset_id`` is null on these events), so we cannot reuse the
-    asset-keyed ``has_open_event`` helper.
-    """
-    stmt = (
-        select(Event.event_id)
-        .where(
-            Event.site_id == site_id,
-            Event.zone_id == zone_id,
-            Event.type == "zone_occupancy",
-            Event.state != "resolved",
+def _current_breach(session: Session, site_id: str, zone_id: str) -> Event | None:
+    """This zone's latest ``zone_occupancy`` alarm if its episode has not been cleared yet."""
+    latest = (
+        session.execute(
+            select(Event)
+            .where(
+                Event.site_id == site_id,
+                Event.zone_id == zone_id,
+                Event.type == "zone_occupancy",
+            )
+            .order_by(Event.ts.desc())
+            .limit(1)
         )
-        .limit(1)
+        .scalars()
+        .first()
     )
-    return session.execute(stmt).first() is not None
+    if latest is None or "cleared_at" in (latest.detail or {}):
+        return None
+    return latest
 
 
 def detect_zone_occupancy(
@@ -67,9 +71,12 @@ def detect_zone_occupancy(
         if cap is None:
             continue  # not opted in, or a malformed cap → ignore, never guess
         count = current_occupancy(session, site_id, z.zone_id)
+        breach = _current_breach(session, site_id, z.zone_id)
         if count <= cap:
+            if breach is not None:  # the episode ended: the next breach is a new alarm
+                breach.detail = {**(breach.detail or {}), "cleared_at": now.isoformat()}
             continue
-        if _has_open_occupancy(session, site_id, z.zone_id):
+        if breach is not None:
             continue
         severity = cast(Severity, cap_severity(z.rules))
         events.append(

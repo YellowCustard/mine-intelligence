@@ -49,24 +49,30 @@ def persist_event(session: Session, event: EventV1) -> Event:
     return row
 
 
-def has_open_event(
-    session: Session, site_id: str, asset_id: str, type_: str, zone_id: str | None
+def alarmed_since(
+    session: Session,
+    site_id: str,
+    type_: str,
+    since: datetime,
+    *,
+    asset_id: str | None = None,
+    source: str | None = None,
 ) -> bool:
-    """True if an unresolved event of this (asset, type, zone) already exists.
+    """True if an event of this type (for this asset or source) was raised at or after ``since``.
 
-    Used to dedupe state-based events (e.g. asset_offline) so an ongoing
-    condition raises one alarm, not one per check.
+    Dedupes condition-based alarms (``asset_offline``, ``camera_offline``) **per episode**:
+    ``since`` is when the current condition began (the last fix, the last health report), so an
+    ongoing condition raises one alarm while a new episode after a recovery raises a new one.
+    Keying on "not resolved" instead muted every later episode, because nothing resolves events;
+    an acknowledgement must not silence the next outage.
     """
     stmt = select(Event.event_id).where(
-        Event.site_id == site_id,
-        Event.asset_id == asset_id,
-        Event.type == type_,
-        Event.state != "resolved",
+        Event.site_id == site_id, Event.type == type_, Event.ts >= since
     )
-    if zone_id is None:
-        stmt = stmt.where(Event.zone_id.is_(None))
-    else:
-        stmt = stmt.where(Event.zone_id == zone_id)
+    if asset_id is not None:
+        stmt = stmt.where(Event.asset_id == asset_id)
+    if source is not None:
+        stmt = stmt.where(Event.source == source)
     return session.execute(stmt.limit(1)).first() is not None
 
 

@@ -38,7 +38,7 @@ from minemonitor.contracts.vision import (
     VisionRuleVersionV1,
     VisionZoneRollupV1,
 )
-from minemonitor.events.repository import new_event_id, persist_event
+from minemonitor.events.repository import alarmed_since, new_event_id, persist_event
 from minemonitor.storage.models import (
     Camera,
     Event,
@@ -772,20 +772,6 @@ def recompute(
 # ---------------------------------------------------------------------------------------------
 
 
-def _has_open_camera_offline(session: Session, site_id: str, camera_id: str) -> bool:
-    stmt = (
-        select(Event.event_id)
-        .where(
-            Event.site_id == site_id,
-            Event.type == "camera_offline",
-            Event.source == f"{SOURCE_PREFIX}:{camera_id}",
-            Event.state != "resolved",
-        )
-        .limit(1)
-    )
-    return session.execute(stmt).first() is not None
-
-
 def _streamless() -> Any:
     """A health row saying *no frames are arriving*: ``no_signal`` with no ``last_frame_at``.
 
@@ -816,7 +802,8 @@ def detect_camera_offline(
     """Raise ``camera_offline`` for commissioned cameras whose health went silent. Commits.
 
     Only cameras that have reported at least once are considered (a camera never commissioned is
-    not "offline"). One open alarm per camera while the condition persists.
+    not "offline"). One alarm per blind window; a camera that recovers and goes dark again raises
+    a new one.
     """
     now = now or _now()
     cutoff = now - timedelta(seconds=stale_s)
@@ -845,16 +832,21 @@ def detect_camera_offline(
             continue
         last = _aware(latest.ts)
         reason = "silent"
+        streamless = latest.state == "no_signal" and latest.last_frame_at is None
+        down_since = _no_signal_since(session, scope) if streamless else None
         if last >= cutoff:
             # Health is fresh — but a node reporting that no frames arrive is just as blind as a
             # silent one. Offline once the stream has been down for the whole staleness window.
-            if latest.state != "no_signal" or latest.last_frame_at is not None:
-                continue
-            down_since = _no_signal_since(session, scope)
             if down_since is None or down_since >= cutoff:
                 continue
             last, reason = down_since, "no_signal"
-        if _has_open_camera_offline(session, site_id, cam.id):
+        # One alarm per blind window: it began when the stream died or, if frames were still
+        # arriving, at the last health report. A no-signal camera whose node then goes silent is
+        # the same window; a camera that recovered and went dark again is a new one.
+        blind_since = down_since if down_since is not None else last
+        if alarmed_since(
+            session, site_id, "camera_offline", blind_since, source=f"{SOURCE_PREFIX}:{cam.id}"
+        ):
             continue
         silent_s = int((now - last).total_seconds())
         ev = EventV1(
