@@ -234,6 +234,37 @@ class HaulCycle(Base):
     return_s: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class RecomputeCursor(Base):
+    """Per-asset progress of the incremental cycle/metric recompute (audit H3).
+
+    The maintenance tick rebuilds each asset only from ``cycles_from`` (the entry of the
+    cycle still in progress) and ``metrics_from`` (the bucket before the newest fix), not
+    from the start of history. ``through_ts`` is the newest fix that run saw. Ingest lowers
+    ``dirty_from`` to the device time of any fix stored *behind* ``through_ts`` (late or out
+    of order), in the same transaction as the position, so the next run widens its window
+    to cover it. Like positions, keyed by site without a foreign key: derived bookkeeping,
+    no personal data.
+    """
+
+    __tablename__ = "recompute_cursors"
+    __table_args__ = (PrimaryKeyConstraint("site_id", "asset_id", name="pk_recompute_cursors"),)
+
+    site_id: Mapped[str] = mapped_column(String, nullable=False)
+    asset_id: Mapped[str] = mapped_column(String, nullable=False)
+    cycles_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    entry_known: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # The newest fix was still inside the load visit at ``cycles_from``: while later fixes
+    # stay in the load zone the run only rewrites buckets (a digger at the face all shift).
+    in_open_visit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    metrics_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    through_ts: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dirty_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Load/dump zone geometry the cursor was computed against; an edit invalidates
+    # ``entry_known`` (the entry may not be an entry under the new polygon).
+    zones_sig: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class AssetMetrics(Base):
     """Per-asset rollup over a fixed bucket (asset.metrics.v1). Hypertable on bucket_start."""
 

@@ -298,7 +298,7 @@ The mine is the data controller; eigenstate is the processor. Retention is
 | Class | Variable | Default |
 |---|---|---|
 | Raw positions | `MM_RETAIN_POSITIONS_DAYS` | 90 |
-| Derived metrics + cycles | `MM_RETAIN_METRICS_DAYS` | 365 |
+| Derived metrics + cycles | `MM_RETAIN_METRICS_DAYS` | 365 (kept after their raw positions are deleted) |
 | Events | `MM_RETAIN_EVENTS_DAYS` | 365 |
 | Operational annotations | `MM_RETAIN_ANNOTATIONS_DAYS` | 365 |
 | Audit trail | `MM_RETAIN_AUDIT_DAYS` | 730 |
@@ -418,7 +418,9 @@ either to `POST /api/v1/ingest/vision` (one record or a batch of up to 500) or o
 | API won't start under `MM_ENV=prod` | The production guard rejected sample DB credentials or a weak bootstrap password. Set real secrets in `.env`. The log line names the offending value. |
 | Alarm storm on a boundary-hugging asset | Debounce/hysteresis too tight for local GNSS quality. Widen the per-zone enter-fix count / exit buffer (defaults: 2 fixes in, 15 m out). |
 | Positions stop arriving | Broker or link down — devices spool locally and backfill on recovery; nothing is lost. Confirm with the device spool and `received_at` vs `ts` gaps. |
-| Late/out-of-order data changed a cycle | Expected and handled — cycles are recomputable. Re-run cycle recompute; the state machine is deterministic from stored positions. |
+| Late/out-of-order data changed a cycle | Expected and handled automatically. Ingest marks a fix that lands behind the last recompute, and the next maintenance tick rebuilds that asset's cycles and buckets from far enough back to cover it (at most `MM_CYCLE_MAX_S` plus a few minutes). The result is identical to a full rebuild. |
+| Zone edited, or the cycle logic fixed, and history should reflect it | The tick applies a zone edit from the next run onwards. To rewrite history, `POST /sites/{id}/recompute` (admin), optionally with `?since=`; it rebuilds everything stored positions still back, and keeps older cycles and buckets as they are. It works through history in 12-hour slices, so live ingest and alarms carry on while it runs. |
+| A very long "cycle" is missing from the chart | A load-to-load span longer than `MM_CYCLE_MAX_S` (default 4 h) is a breakdown or an overnight park, not haulage, and is not reported. Raise it if real hauls at the site take longer. |
 | Duplicate-looking positions | Ingest is idempotent; a replay does not double-store or double-count. If counts still look off, check `received_at`. |
 | "No space left on device" | Free space (old dumps in `backups/`, container logs); deletes succeed while writes fail. Then prune with `MM_BACKUP_KEEP_DAYS`. |
 | Dashboard shows nothing live | SSE connection — confirm `GET /sites/{id}/stream` reachable through the proxy/tunnel and auth is valid. |

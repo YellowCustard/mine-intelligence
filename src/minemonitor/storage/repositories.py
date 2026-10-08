@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from minemonitor.contracts import AssetPositionV1
-from minemonitor.storage.models import Position
+from minemonitor.storage.models import Position, RecomputeCursor
 
 # Idempotency key: replaying a position with the same (site, asset, ts) is a no-op.
 _CONFLICT_KEYS = ["site_id", "asset_id", "ts"]
@@ -53,9 +53,45 @@ def insert_position(session: Session, pos: AssetPositionV1, *, commit: bool = Tr
         .returning(Position.ts)
     )
     inserted = session.execute(stmt).first() is not None
+    if inserted:
+        _mark_recompute_dirty(session, pos)
     if commit:
         session.commit()
     return inserted
+
+
+def _mark_recompute_dirty(session: Session, pos: AssetPositionV1) -> None:
+    """Tell the incremental recompute about a fix it would otherwise never look at.
+
+    A fix newer than the cursor's ``through_ts`` falls inside the next window anyway, so
+    the common in-order case writes nothing. A fix behind it (late, backfilled, out of
+    order) lowers ``dirty_from`` so the next run widens its window back to it. A first
+    fix for an asset creates the cursor. Same transaction as the position: a crash
+    cannot store the fix and lose the mark.
+
+    The upsert locks the cursor row even when it changes nothing, so it waits for a
+    rebuild that is moving the cursor (the tick, or the newest slice of an on-demand
+    recompute) and then compares against the ``through_ts`` it wrote: a fix can never
+    slip in between a run's read of positions and its cursor update.
+    """
+    insert = pg_insert if session.bind.dialect.name == "postgresql" else sqlite_insert
+    stmt = insert(RecomputeCursor).values(
+        site_id=pos.site_id,
+        asset_id=pos.asset_id,
+        dirty_from=pos.ts.astimezone(UTC),
+        entry_known=False,
+    )
+    cur = RecomputeCursor.__table__.c
+    session.execute(
+        stmt.on_conflict_do_update(
+            index_elements=["site_id", "asset_id"],
+            set_={"dirty_from": stmt.excluded.dirty_from},
+            where=(
+                or_(cur.through_ts.is_(None), stmt.excluded.dirty_from < cur.through_ts)
+                & or_(cur.dirty_from.is_(None), stmt.excluded.dirty_from < cur.dirty_from)
+            ),
+        )
+    )
 
 
 def list_positions(

@@ -35,7 +35,8 @@ payload — queue time at the face), and a live operations dashboard. See
   moving/idle, speeds, zone dwell, loads) and a per-shift summary (cycle count,
   mean cycle time, segment breakdown incl. queue %). No target is ever hardcoded —
   we report this mine's observed numbers. API: cycles, shift-summary, metrics, and
-  an idempotent recompute.
+  an idempotent recompute. The ingestor keeps them current incrementally: each tick
+  rebuilds an asset only from its open cycle and any late data, never the whole history.
 - **Live operations dashboard** — the existing `web/mine.html` wired to the real
   API (not rewritten): the site plan, geofences, asset markers, fleet and alarm
   tables and cycle chart are driven by a `fetch()` of current state plus a

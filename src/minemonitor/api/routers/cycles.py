@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -152,8 +152,19 @@ def trigger_recompute(
     db: Session = Depends(get_db),
     user: User = Depends(require_admin),
 ) -> dict[str, int]:
-    """Rebuild cycles and metrics from stored positions (idempotent)."""
-    result = recompute(db, site_id, start=since, end=until)
+    """Rebuild cycles and metrics from stored positions (idempotent).
+
+    ``since`` limits the rebuild to cycles and buckets from shortly before it onwards;
+    omitted, everything still backed by stored positions is rebuilt. A rebuild always
+    runs to the newest data: ``until`` is refused rather than ignored, because cutting a
+    window short would split the cycle crossing its end.
+    """
+    if until is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "until is not supported: a recompute runs from since to the newest data",
+        )
+    result = recompute(db, site_id, start=since)
     audit.record(
         db,
         actor=user.username,

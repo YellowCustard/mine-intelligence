@@ -406,7 +406,7 @@ class MqttIngestor:
         from minemonitor import heartbeat
         from minemonitor.access.service import detect_missed_searches
         from minemonitor.config import get_settings
-        from minemonitor.cycles.recompute import recompute
+        from minemonitor.cycles.recompute import refresh
         from minemonitor.ingest.adapters.dahua_gate import DahuaHttpGateSource, poll_once
         from minemonitor.notifications.dispatch import UrllibSmtpSender, dispatch_pending
         from minemonitor.retention import run_from_config
@@ -470,7 +470,8 @@ class MqttIngestor:
                         source_system=settings.access_gate_source_system,
                         overlap_s=settings.access_gate_overlap_s,
                     )
-                recompute(session, self._site_id)
+                # Incremental: each asset from its cursor, not the whole history (H3).
+                refresh(session, self._site_id)
                 # Drain the notification outbox (store-and-forward alerts, brief §3).
                 # No-op unless notifications are configured and rows are due.
                 outcome = dispatch_pending(session, sender=notify_sender)

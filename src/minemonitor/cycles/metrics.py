@@ -40,8 +40,9 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
-def _floor_bucket(ts: datetime, bucket_s: int) -> datetime:
-    epoch = int(ts.timestamp())
+def floor_bucket(ts: datetime, bucket_s: int) -> datetime:
+    """Start (UTC) of the ``bucket_s`` bucket holding ``ts``."""
+    epoch = int(_aware(ts).timestamp())
     return datetime.fromtimestamp(epoch - (epoch % bucket_s), tz=UTC)
 
 
@@ -62,7 +63,7 @@ def compute_metrics(
     buckets: dict[datetime, MetricsBucket] = {}
 
     def bucket_for(ts: datetime) -> MetricsBucket:
-        start = _floor_bucket(ts, bucket_s)
+        start = floor_bucket(ts, bucket_s)
         b = buckets.get(start)
         if b is None:
             b = MetricsBucket(
@@ -95,7 +96,7 @@ def compute_metrics(
                         b.zone_dwell_s[zone_id] = b.zone_dwell_s.get(zone_id, 0.0) + dt
 
     for cyc in cycles or []:
-        buckets_key = _floor_bucket(_aware(cyc.end_ts), bucket_s)
+        buckets_key = floor_bucket(_aware(cyc.end_ts), bucket_s)
         b = buckets.get(buckets_key)
         if b is not None:
             b.loads_completed += 1
