@@ -134,9 +134,10 @@ The network and power **will** fail; the whole ingest side is designed around it
   side buffers fixes crash-safely and backfills on reconnect. Accepts out-of-order
   and late-arriving data without corrupting derived analytics.
 - **Idempotent ingest:** replaying the same position must not duplicate it or
-  double-count a cycle. The ingestor withholds MQTT acknowledgement until a fix is
-  durably stored, so a **database restart loses nothing and duplicates nothing** (M2
-  acceptance).
+  double-count a cycle. The ingestor acks MQTT messages manually, only once a fix is
+  durably stored or rejected for good, so a **database restart loses nothing and
+  duplicates nothing** (M2 acceptance), and neither does stopping the ingestor during a
+  database outage: the unstored fix stays unacked and the broker redelivers it.
 - **MQTT broker auth** (`ingest/authz.py` + `devices/`): the broker is the transport
   authority. Internal publishers (ingestor, simulator, Teltonika adapter) authenticate
   as one **service account** (`MM_MQTT_USERNAME`/`PASSWORD`); each native-MQTT tracker

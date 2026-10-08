@@ -12,9 +12,13 @@ from minemonitor.ingest.mqtt import MqttIngestor
 
 
 class _Msg:
+    """The fields of a paho ``MQTTMessage`` the ingestor reads."""
+
     def __init__(self, topic: str, payload: dict[str, object]) -> None:
         self.topic = topic
         self.payload = json.dumps(payload).encode()
+        self.mid = 1
+        self.qos = 1
 
 
 _BASE = {

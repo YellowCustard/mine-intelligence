@@ -88,9 +88,13 @@ def test_http_rejects_future_fix_and_breach_still_fires(magazine: Session) -> No
 
 
 class _Msg:
+    """The fields of a paho ``MQTTMessage`` the ingestor reads."""
+
     def __init__(self, topic: str, payload: dict[str, object]) -> None:
         self.topic = topic
         self.payload = json.dumps(payload).encode()
+        self.mid = 1
+        self.qos = 1
 
 
 def test_mqtt_rejects_future_fix(magazine: Session, monkeypatch: pytest.MonkeyPatch) -> None:

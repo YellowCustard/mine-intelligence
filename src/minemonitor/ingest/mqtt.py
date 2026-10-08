@@ -19,6 +19,7 @@ import json
 import logging
 import threading
 import time
+from typing import Literal
 
 import paho.mqtt.client as mqtt
 from pydantic import ValidationError
@@ -39,6 +40,8 @@ from minemonitor.ingest.service import (
 from minemonitor.ingest.spool import Spool
 from minemonitor.platform.metrics import metrics
 from minemonitor.storage.db import get_session_factory, is_transient_db_error
+
+_Outcome = Literal["stored", "dropped", "stopped"]
 
 log = logging.getLogger("minemonitor.mqtt")
 
@@ -171,10 +174,13 @@ class MqttIngestor:
         self._session_factory = get_session_factory()
         # Persistent session (clean_session=False + fixed id): the broker keeps
         # unacknowledged QoS-1 messages for us across a consumer restart.
+        # Manual acks (audit M4): PUBACK goes out only once a message's outcome is final,
+        # never merely because the callback returned (see _on_message).
         self._client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
             client_id=client_id or s.mqtt_ingest_client_id,
             clean_session=False,
+            manual_ack=True,
         )
         if s.mqtt_username:
             self._client.username_pw_set(s.mqtt_username, s.mqtt_password)
@@ -200,9 +206,23 @@ class MqttIngestor:
         log.info("ingestor subscribed", extra={"topic": topic, "vision_topic": vision_topic})
 
     def _on_message(self, client, userdata, msg: mqtt.MQTTMessage) -> None:
+        # Ack once the outcome is final: stored, or rejected for good. A message the
+        # ingestor stopped before storing (a graceful stop during a database outage)
+        # stays unacked, and the broker redelivers it to this persistent session on the
+        # next connect instead of discarding a fix that was never stored.
+        if self._handle(msg):
+            self._ack(msg)
+
+    def _ack(self, msg: mqtt.MQTTMessage) -> None:
+        rc = self._client.ack(msg.mid, msg.qos)
+        if rc != mqtt.MQTTErrorCode.MQTT_ERR_SUCCESS:
+            # The broker redelivers it, and idempotent ingest drops the duplicate.
+            log.warning("ack not sent", extra={"topic": msg.topic, "rc": int(rc)})
+
+    def _handle(self, msg: mqtt.MQTTMessage) -> bool:
+        """Process one message. Returns whether its outcome is final (ack it)."""
         if parse_vision_topic(self.prefix, msg.topic) is not None:
-            self._on_vision_message(msg)
-            return
+            return self._on_vision_message(msg)
         try:
             payload = PositionIngest.model_validate_json(msg.payload)
         except ValueError:
@@ -210,7 +230,7 @@ class MqttIngestor:
             # withholding the ack — a bad message will never become good.
             log.error("rejected malformed position", extra={"topic": msg.topic})
             self.rejected_count += 1
-            return
+            return True
         # Anti-spoof (brief §10): the topic names the asset; a device confined by the
         # broker ACL to its own topic cannot claim another asset in the body.
         if not topic_matches_payload(self.prefix, msg.topic, payload.site_id, payload.asset_id):
@@ -223,7 +243,7 @@ class MqttIngestor:
                 },
             )
             self.rejected_count += 1
-            return
+            return True
         try:
             reject_if_future(payload)
         except FutureTimestampError as exc:
@@ -234,25 +254,27 @@ class MqttIngestor:
                 extra={"site_id": payload.site_id, "asset_id": payload.asset_id, "error": str(exc)},
             )
             self.rejected_count += 1
-            return
+            return True
         if self._require_registered_device and not self._is_registered(payload):
             log.error(
                 "rejected unregistered device",
                 extra={"site_id": payload.site_id, "asset_id": payload.asset_id},
             )
             self.rejected_count += 1
-            return
-        # Withhold the ack (by not returning) until the write succeeds, so the
-        # broker redelivers rather than the consumer dropping on a DB outage.
-        if self._store_with_retry(payload):
+            return True
+        # The store retries while the database is down, holding the ack back.
+        outcome = self._store_with_retry(payload)
+        if outcome == "stored":
             self.stored_count += 1
+        return outcome != "stopped"
 
-    def _on_vision_message(self, msg: mqtt.MQTTMessage) -> None:
+    def _on_vision_message(self, msg: mqtt.MQTTMessage) -> bool:
         """Validate and store one edge vision record (``vision.*.v1``).
 
         Same discipline as positions: malformed or topic-spoofed payloads are rejected loudly
         and acked (they will never become good); a refused record (unknown camera or rule) is
-        logged and dropped; a DB outage withholds the ack so the broker redelivers.
+        logged and dropped; a DB outage withholds the ack so the broker redelivers. Returns
+        whether the outcome is final (False only when the ingestor stopped first).
         """
         from minemonitor.vision import service as vision
 
@@ -263,11 +285,11 @@ class MqttIngestor:
                 "rejected malformed vision record", extra={"topic": msg.topic, "error": str(exc)}
             )
             self.rejected_count += 1
-            return
+            return True
         if not vision_topic_matches_payload(self.prefix, msg.topic, record):
             log.error("rejected vision topic/payload mismatch", extra={"topic": msg.topic})
             self.rejected_count += 1
-            return
+            return True
         while not self._stop.is_set():
             session = self._session_factory()
             try:
@@ -285,12 +307,12 @@ class MqttIngestor:
                     },
                 )
                 self.stored_count += 1
-                return
+                return True
             except vision.VisionIngestError as exc:
                 session.rollback()
                 log.error("refused vision record", extra={"topic": msg.topic, "error": str(exc)})
                 self.rejected_count += 1
-                return
+                return True
             except Exception as exc:  # noqa: BLE001 - classified below
                 session.rollback()
                 if not is_transient_db_error(exc):
@@ -301,11 +323,12 @@ class MqttIngestor:
                         extra={"topic": msg.topic},
                     )
                     self.rejected_count += 1
-                    return
+                    return True
                 log.warning("vision store failed, will retry", extra={"error": str(exc)})
                 time.sleep(self.write_retry_s)
             finally:
                 session.close()
+        return False
 
     def _is_registered(self, payload: PositionIngest) -> bool:
         """Strict mode: accept only assets with an enabled provisioned device."""
@@ -317,7 +340,7 @@ class MqttIngestor:
         finally:
             session.close()
 
-    def _store_with_retry(self, payload: PositionIngest) -> bool:
+    def _store_with_retry(self, payload: PositionIngest) -> _Outcome:
         """Store and process a position, retrying only while the database is unreachable.
 
         Retrying is correct for a transient fault (the broker keeps the message unacked
@@ -326,7 +349,8 @@ class MqttIngestor:
         failure in zone/rule processing falls back to storing the raw fix alone (it stays
         recomputable; live rules miss this one fix, loudly logged), and only if even the
         raw insert fails deterministically is the message dropped, with an error log.
-        Returns whether the fix was stored (False if dropped or the ingestor stopped).
+        Returns whether the fix was stored, dropped, or not yet stored when the ingestor
+        stopped.
         """
         while not self._stop.is_set():
             session = self._session_factory()
@@ -342,7 +366,7 @@ class MqttIngestor:
                         "events": len(events),
                     },
                 )
-                return True
+                return "stored"
             except Exception as exc:  # noqa: BLE001 - classified below
                 session.rollback()
                 if is_transient_db_error(exc):
@@ -361,15 +385,15 @@ class MqttIngestor:
                 return self._store_raw_with_retry(payload)
             finally:
                 session.close()
-        return False
+        return "stopped"
 
-    def _store_raw_with_retry(self, payload: PositionIngest) -> bool:
+    def _store_raw_with_retry(self, payload: PositionIngest) -> _Outcome:
         """Insert the raw fix only (no zone/rule processing); same transient-only retry."""
         while not self._stop.is_set():
             session = self._session_factory()
             try:
                 store_position(session, payload)
-                return True
+                return "stored"
             except Exception as exc:  # noqa: BLE001 - classified below
                 session.rollback()
                 if is_transient_db_error(exc):
@@ -391,10 +415,10 @@ class MqttIngestor:
                     },
                 )
                 self.rejected_count += 1
-                return False
+                return "dropped"
             finally:
                 session.close()
-        return False
+        return "stopped"
 
     def _offline_loop(self) -> None:
         """Periodic maintenance: offline detection and cycle/metric recompute.

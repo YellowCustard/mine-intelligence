@@ -86,9 +86,13 @@ def test_http_ingest_rejects_hostile_site_id(db_session: Session) -> None:
 
 
 class _Msg:
+    """The fields of a paho ``MQTTMessage`` the ingestor reads."""
+
     def __init__(self, topic: str, payload: dict[str, object]) -> None:
         self.topic = topic
         self.payload = json.dumps(payload).encode()
+        self.mid = 1
+        self.qos = 1
 
 
 def test_mqtt_ingest_rejects_hostile_asset_id(
