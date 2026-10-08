@@ -866,6 +866,23 @@ class AccessQuarantine(Base):
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class SourceStatus(Base):
+    """Reachability of a polled external feed (plan G2), e.g. the Dahua gate API.
+
+    Persisted so an outage keeps its start time across an ingestor restart or a power cut
+    (brief §3). ``failing_since`` is the first failed poll of the current outage and is cleared
+    by the next successful one; ``source_offline`` is raised once per outage from it.
+    """
+
+    __tablename__ = "source_status"
+
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), primary_key=True)
+    source: Mapped[str] = mapped_column(String, primary_key=True)
+    last_ok_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failing_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
 class GeneratorReading(Base):
     """A **measured** DSE genset controller reading (generator domain, FP-11).
 

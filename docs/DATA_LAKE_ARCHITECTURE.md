@@ -85,7 +85,7 @@ implemented and tested in this repo today; **specified** = designed, lands when 
 | GNSS trackers | TCP/MQTT | `asset.position.v1` | **built** | `zone_breach·overspeed·zone_dwell·zone_occupancy·asset_offline·geofence_exit` |
 | Cameras (Dahua **DSS/NVR** AI) | DSS/NVR poller | `vision.vendor_event.v1` | **built** (sim-first) | `zone_breach·zone_dwell` (`source: nvr:<cam>`, `provenance: vendor_inferred`) |
 | Cameras (first-party perception) | vision edge service | `vision.observation.v1` / `vision.operational_event.v1` | specified (STOP-gated) | `proximity·restricted_area·…` |
-| Gate / turnstile + metal detector | HTTP / gate poller | `access.event.v1` | **built** | `access_denied·metal_detected·search_missed·source_clock_skew` |
+| Gate / turnstile + metal detector | HTTP / gate poller | `access.event.v1` | **built** | `access_denied·metal_detected·search_missed·source_clock_skew·source_offline` |
 | **UWB tags (RTLS)** | RTLS bridge | `uwb.position.v1` *(propose)* | **specified** | feeds occupancy + count reconciliation; `zone_breach·restricted_area·tag_lost` |
 | **Baggage X-ray** | vendor export/API | `xray.scan.v1` *(propose)* | **specified** | `xray_alert` (item flagged in bag) |
 | **Drones (DJI)** | drone bridge | `drone.event.v1` *(propose)* / reuse `event.v1` | **specified** | intrusion snippet + advisory deploy recommendation |

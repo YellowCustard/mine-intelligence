@@ -193,6 +193,14 @@ poll the Dahua gate API each tick and ingest new access events automatically; bl
 link outage (the cursor is the last stored event; ingest is idempotent). **Verify the vendor
 response mapping against the real backdoor-API spec before relying on it in production.**
 
+*Gate feed down.* When polls of the gate API keep failing (unreachable, HTTP error, unreadable
+response) for `MM_ACCESS_GATE_OFFLINE_S` (default 600 s), one `source_offline` warning is raised
+(source `access_feed:<source_system>`), with when the outage began and the last error. That is
+the difference between "no one came through" and "we cannot see the gate". The outage start is
+stored in `source_status`, so a restart mid-outage neither loses it nor alarms twice. When polls
+succeed again the alarm is marked restored (it stays in the queue until acknowledged, since the
+outage was a blind window), and the next outage raises a new alarm.
+
 *Gate clock ahead.* A gate event dated more than `MM_MAX_FUTURE_SKEW_S` (default 120 s) after
 server time is refused: a terminal whose clock reset would otherwise hide every later event.
 The poller moves it to the `access_quarantine` table (no operator or card reference) and raises
