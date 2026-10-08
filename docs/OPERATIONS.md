@@ -415,6 +415,8 @@ either to `POST /api/v1/ingest/vision` (one record or a batch of up to 500) or o
 | Symptom | Likely cause / action |
 |---|---|
 | `/health` degraded, `/healthz` OK | Ingestor heartbeat stale or MQTT unreachable. `docker compose logs ingestor mqtt`; check `MM_HEARTBEAT_STALE_S`. |
+| System health lists `failing_steps` | The ingestor is up but one maintenance step (for example `cycles`, `offline`, `retention`) failed on its latest run; the others still ran. `docker compose logs ingestor` and search for `maintenance step failed`: each line names the step, the site and the error. The step is retried every tick and drops off the list once it succeeds. |
+| A second site gets no alarms or cycles | The ingestor serves every site in the `sites` table plus `MM_DEFAULT_SITE_ID`. There is no API to add a site yet: insert its row (`INSERT INTO sites (site_id, name, timezone) VALUES (...)`) before its devices report. The one gate feed (`MM_ACCESS_GATE_URL`) belongs to `MM_DEFAULT_SITE_ID`. |
 | API won't start under `MM_ENV=prod` | The production guard rejected sample DB credentials or a weak bootstrap password. Set real secrets in `.env`. The log line names the offending value. |
 | Alarm storm on a boundary-hugging asset | Debounce/hysteresis too tight for local GNSS quality. Widen the per-zone enter-fix count / exit buffer (defaults: 2 fixes in, 15 m out). |
 | Positions stop arriving | Broker or link down — devices spool locally and backfill on recovery; nothing is lost. Confirm with the device spool and `received_at` vs `ts` gaps. |

@@ -10,7 +10,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from minemonitor.contracts import AssetPositionV1
-from minemonitor.storage.models import Position, RecomputeCursor
+from minemonitor.storage.models import Position, RecomputeCursor, Site
 
 # Idempotency key: replaying a position with the same (site, asset, ts) is a no-op.
 _CONFLICT_KEYS = ["site_id", "asset_id", "ts"]
@@ -92,6 +92,12 @@ def _mark_recompute_dirty(session: Session, pos: AssetPositionV1) -> None:
             ),
         )
     )
+
+
+def served_site_ids(session: Session, default_site_id: str) -> list[str]:
+    """Every site background jobs serve: the ``sites`` table plus the configured default
+    (which may have positions before anyone creates its ``sites`` row)."""
+    return sorted(set(session.execute(select(Site.site_id)).scalars()) | {default_site_id})
 
 
 def list_positions(

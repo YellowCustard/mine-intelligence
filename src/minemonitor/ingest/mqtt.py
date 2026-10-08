@@ -183,11 +183,9 @@ class MqttIngestor:
         self._stop = threading.Event()
         self.stored_count = 0
         self._offline_thread: threading.Thread | None = None
-        self._offline_threshold_s = s.offline_threshold_s
         self._offline_interval_s = s.offline_check_interval_s
-        self._site_id = s.default_site_id
         self._retention_interval_s = s.retention_interval_s
-        self._last_retention = 0.0
+        self._last_retention: float | None = None  # due on the first tick
         self._require_registered_device = s.mqtt_require_registered_device
         self.rejected_count = 0
         self.processing_failed_count = 0
@@ -397,22 +395,18 @@ class MqttIngestor:
         return False
 
     def _offline_loop(self) -> None:
-        """Periodic maintenance: offline detection and cycle/metric recompute.
+        """Periodic maintenance: alarms, cycle/metric refresh and housekeeping.
 
         Cycles are recomputed from stored positions (not in the ingest hot path,
         brief §9), so the dashboard's cycle chart stays fresh without coupling
-        analytics to ingest.
+        analytics to ingest. Every site is served and each step is isolated
+        (``ingest/tick.py``).
         """
         from minemonitor import heartbeat
-        from minemonitor.access.service import detect_missed_searches
         from minemonitor.config import get_settings
-        from minemonitor.cycles.recompute import refresh
-        from minemonitor.ingest.adapters.dahua_gate import DahuaHttpGateSource, poll_once
-        from minemonitor.notifications.dispatch import UrllibSmtpSender, dispatch_pending
-        from minemonitor.retention import run_from_config
-        from minemonitor.rules.occupancy import detect_zone_occupancy
-        from minemonitor.rules.offline import detect_offline
-        from minemonitor.vision.service import detect_camera_offline
+        from minemonitor.ingest import tick
+        from minemonitor.ingest.adapters.dahua_gate import DahuaHttpGateSource
+        from minemonitor.notifications.dispatch import UrllibSmtpSender
 
         settings = get_settings()
         notify_sender = UrllibSmtpSender(settings)
@@ -431,59 +425,27 @@ class MqttIngestor:
         while not self._stop.wait(self._offline_interval_s):
             session = self._session_factory()
             try:
-                # Liveness first, so a later step failing still records we ran.
+                # Liveness first, so a failing step still records that we ran.
                 heartbeat.beat(session, heartbeat.INGESTOR)
                 session.commit()
-                events = detect_offline(
-                    session, self._site_id, threshold_s=self._offline_threshold_s
+                # Retention runs on the first tick after a start, then about daily: a box
+                # that loses power more often than daily must still delete on schedule.
+                started = time.monotonic()
+                retention_due = (
+                    self._last_retention is None
+                    or started - self._last_retention >= self._retention_interval_s
                 )
-                for ev in events:
-                    log.info(
-                        "asset offline",
-                        extra={"site_id": ev.site_id, "asset_id": ev.asset_id},
-                    )
-                occ = detect_zone_occupancy(session, self._site_id)
-                for ev in occ:
-                    log.info(
-                        "zone occupancy breach",
-                        extra={"site_id": ev.site_id, "zone_id": ev.zone_id},
-                    )
-                cam_off = detect_camera_offline(
-                    session, self._site_id, stale_s=settings.vision_camera_stale_s
+                steps = tick.plan(
+                    session,
+                    settings,
+                    gate_source=gate_source,
+                    notify_sender=notify_sender,
+                    retention_due=retention_due,
                 )
-                for ev in cam_off:
-                    log.info(
-                        "camera offline",
-                        extra={"site_id": ev.site_id, "detail": ev.detail},
-                    )
-                missed = detect_missed_searches(session, self._site_id)
-                for ev in missed:
-                    log.info(
-                        "search missed",
-                        extra={"site_id": ev.site_id, "detail": ev.detail},
-                    )
-                if gate_source is not None:
-                    poll_once(
-                        session,
-                        self._site_id,
-                        gate_source,
-                        source_system=settings.access_gate_source_system,
-                        overlap_s=settings.access_gate_overlap_s,
-                    )
-                # Incremental: each asset from its cursor, not the whole history (H3).
-                refresh(session, self._site_id)
-                # Drain the notification outbox (store-and-forward alerts, brief §3).
-                # No-op unless notifications are configured and rows are due.
-                outcome = dispatch_pending(session, sender=notify_sender)
-                if outcome["sent"] or outcome["failed"]:
-                    log.info("notifications dispatched", extra=outcome)
-                # Run the retention deletion job roughly daily (brief §4).
-                now = time.monotonic()
-                if now - self._last_retention >= self._retention_interval_s:
-                    deleted = run_from_config(session)
-                    self._last_retention = now
-                    log.info("retention run", extra={"deleted": deleted})
-            except Exception as exc:  # noqa: BLE001 - transient DB errors; retry next tick
+                outcomes = tick.run(session, steps)
+                if any(o.name == "retention" and o.ok for o in outcomes):
+                    self._last_retention = started
+            except Exception as exc:  # noqa: BLE001 - DB down; retry next tick
                 session.rollback()
                 log.warning("maintenance tick failed", extra={"error": str(exc)})
             finally:
