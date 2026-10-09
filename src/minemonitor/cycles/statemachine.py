@@ -227,14 +227,27 @@ def analyse_cycles(
     last = times[-1]
     resume = Resume(ts=last, entry_known=False)
     openers = [v for v in load_visits if _can_open(v)]
-    if openers and (
-        max_cycle_s is None or (last - openers[-1].enter_ts).total_seconds() < max_cycle_s
-    ):
+    # A load visit under way at the last fix that is still too short to count.
+    pending = load_runs[-1] if in_load[-1] and not _long_enough(load_runs[-1]) else None
+
+    def _may_still_close(opener: _Visit) -> bool:
+        if max_cycle_s is None:
+            return True
+        if (last - opener.enter_ts).total_seconds() < max_cycle_s:
+            return True  # the next visit has not begun, and there is time for it to
+        # The cap has passed, but a visit that began within it may yet count and close
+        # the cycle at its entry.
+        return (
+            pending is not None
+            and (pending.enter_ts - opener.enter_ts).total_seconds() <= max_cycle_s
+        )
+
+    if openers and _may_still_close(openers[-1]):
         # The cycle this visit opens is still in progress (its end is the next visit,
-        # not yet seen) and can still finish within the cap: rebuild from its entry.
+        # not yet counted) and can still finish within the cap: rebuild from its entry.
         # Everything before it is final, including the cycle that ends at this entry.
         resume = Resume(ts=openers[-1].enter_ts, entry_known=True)
-    elif in_load[-1] and not _long_enough(load_runs[-1]) and _can_open(load_runs[-1]):
+    elif pending is not None and _can_open(pending):
         # A load visit has just begun and is not yet long enough to count: once it is,
         # it may open a cycle, so rebuild from its entry.
         resume = Resume(ts=load_runs[-1].enter_ts, entry_known=True)

@@ -415,6 +415,35 @@ def test_cycle_longer_than_the_cap_is_not_reported() -> None:
     assert [round(c[3]) for c in cycles] == [sum(x[2] for x in _cycle_legs())]
 
 
+def test_cycle_closing_just_inside_the_cap_survives_a_tick_mid_visit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The next load visit enters 595 s after the opener (cap 600 s), and a tick lands
+    # 10 s into it: the cap has passed, but that visit is not yet long enough to count.
+    # Once it is, it closes a 595 s cycle, so the tick must keep the opener in view.
+    monkeypatch.setenv("MM_CYCLE_MAX_S", "600")
+    get_settings.cache_clear()
+    s = _session()
+    legs: list[Leg] = [
+        (_OUT, 30.0, 60),
+        (FACE, 0.0, 10),  # opener: queue, spot, load (30 s in the zone)
+        (FACE, 8.0, 5),
+        (FACE, 0.0, 15),
+        (_OUT, 30.0, 200),  # haul
+        (ROM, 0.0, 40),  # dump
+        (_OUT, 30.0, 595 - 30 - 200 - 40),  # return
+        (FACE, 0.0, 11),  # the closing visit, 10 s old at the tick
+    ]
+    fixes, t = _track("HT-204", T0, legs)
+    _seed(s, fixes)
+    refresh(s, SITE)
+    more, _ = _track("HT-204", t, [(FACE, 0.0, 60), (_OUT, 30.0, 30)])
+    _store(s, more)
+    refresh(s, SITE)
+    cycles, _ = _assert_matches_full_rebuild(s)
+    assert [round(c[3]) for c in cycles] == [595]
+
+
 # --- H4: derived history outlives raw positions ----------------------------------------
 
 
