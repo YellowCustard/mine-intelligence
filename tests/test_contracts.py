@@ -8,12 +8,14 @@ that exercises it fails on the side that is behind — catching silent drift.
 from __future__ import annotations
 
 import json
+from typing import get_args
 
 import jsonschema
 import pytest
 from jsonschema import Draft202012Validator
 
 from minemonitor.contracts import AssetMetricsV1, AssetPositionV1, EventV1
+from minemonitor.contracts.event import EventType
 from tests.conftest import CONTRACTS_DIR
 
 
@@ -91,6 +93,12 @@ def test_event_valid_instance_passes_both() -> None:
     }
     Draft202012Validator(_load_schema("event.v1.json")).validate(instance)
     EventV1.model_validate(instance)
+
+
+def test_event_types_match_the_published_schema() -> None:
+    # A type added to one list and not the other would be refused on one side only.
+    enum = _load_schema("event.v1.json")["properties"]["type"]["enum"]
+    assert sorted(get_args(EventType)) == sorted(enum)
 
 
 def test_event_advisory_must_be_true() -> None:

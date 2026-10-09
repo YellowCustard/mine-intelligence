@@ -274,7 +274,9 @@ Route surface (roles: `viewer < supervisor < admin`, plus `device` for ingest on
   is a foreign key, never a name in an event payload; the `operators` table is the
   single PII home, supporting export and tombstone erasure. Retention is configurable
   per data class with a scheduled deletion job that actually runs. Audit log on access
-  to personal data and on rule/zone changes.
+  to personal data and on rule/zone changes. A per-site breach register fixes the
+  regulator and individual notice deadlines when a breach is recorded and raises
+  `breach_notice_due` alarms as they approach and pass (`breaches/`).
 
 ---
 

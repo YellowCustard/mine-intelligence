@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -99,6 +100,19 @@ class Settings(BaseSettings):
     retain_vision_observations_days: int = 30
     retain_vision_health_days: int = 30
     retention_interval_s: int = 86_400  # the ingestor runs retention ~daily
+
+    # Personal-data breach notices (CDPA, SI 155 of 2024). The reported obligation is 24 h to
+    # the regulator and 72 h to the people affected; these are settings because the legal
+    # position is still being confirmed, so a different answer is a configuration change. A
+    # breach's deadlines are fixed when it is recorded; changing these moves only later ones.
+    breach_regulator_name: str = "POTRAZ"
+    breach_regulator_notice_h: int = Field(default=24, ge=1)
+    breach_individuals_notice_h: int = Field(default=72, ge=1)
+    # Warn this many hours before a notice is due (0 = only the overdue alarm).
+    breach_warn_before_h: int = Field(default=6, ge=0)
+    # Count deadlines from when the breach was discovered, or from when it occurred (falling
+    # back to discovery when the occurrence time is unknown).
+    breach_deadline_from: Literal["discovered", "occurred"] = "discovered"
 
     # Bootstrap admin — created on start ONLY if the users table is empty, so a
     # fresh box is usable. Leave blank in production and create users via the CLI.
