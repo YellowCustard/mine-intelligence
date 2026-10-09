@@ -394,3 +394,68 @@ def test_feed_outage_is_per_site(db_session: Session) -> None:
         )
     alarms = _feed_alarms(db_session)
     assert [a.site_id for a in alarms] == [SITE]
+
+
+# -- one poll batch under the production session settings (autoflush off) ---------------
+
+
+def _prod_session(db: Session) -> Session:
+    """A session configured like ``storage.db.get_session_factory`` (autoflush off), so
+    rows added earlier in a batch are invisible to later queries unless flushed."""
+    from sqlalchemy.orm import sessionmaker
+
+    return sessionmaker(bind=db.bind, autoflush=False, expire_on_commit=False, future=True)()
+
+
+def test_several_bad_clock_passages_in_one_batch_raise_one_alarm(db_session: Session) -> None:
+    from datetime import timedelta
+
+    _operator(db_session)
+    ahead = _NOW + timedelta(days=365)
+    src = _FakeSource(
+        [
+            _graw(id="f1", time=_iso(ahead)),
+            _graw(id="f2", time=_iso(ahead + timedelta(minutes=1))),
+            _graw(id="f3", time=_iso(ahead + timedelta(minutes=2))),
+        ]
+    )
+    with _prod_session(db_session) as s:
+        _, alarms = poll_once(s, SITE, src, source_system="dahua_gate", now=_NOW)
+    assert len(alarms) == 1
+    assert len(_clock_alarms(db_session)) == 1
+
+
+def test_an_event_repeated_within_one_batch_does_not_wedge_the_poller(
+    db_session: Session,
+) -> None:
+    # The appliance can hand the same record back twice in one fetch (paged results while
+    # new passages arrive). The batch commits as one transaction, so a duplicate row used to
+    # fail the commit, roll back every good passage with it, and recur on every poll from
+    # the unchanged cursor.
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from minemonitor.storage.models import AccessEvent, AccessQuarantine
+
+    _operator(db_session)
+    ahead = _iso(_NOW + timedelta(days=365))
+    src = _FakeSource(
+        [
+            _graw(id="ok-1"),
+            _graw(id="ok-1"),
+            _graw(id="future", time=ahead),
+            _graw(id="future", time=ahead),
+            _graw(id="ok-2", time="2026-09-12T10:00:09+02:00"),
+        ]
+    )
+    with _prod_session(db_session) as s:
+        new, alarms = poll_once(s, SITE, src, source_system="dahua_gate", now=_NOW)
+    assert sorted(r.id.removeprefix(f"access-{SITE}-dahua_gate-") for r in new) == [
+        "ok-1",
+        "ok-2",
+    ]
+    assert len(alarms) == 1
+    db_session.expire_all()
+    assert len(db_session.execute(select(AccessEvent)).scalars().all()) == 2
+    assert len(db_session.execute(select(AccessQuarantine)).scalars().all()) == 1
