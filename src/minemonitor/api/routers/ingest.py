@@ -8,9 +8,9 @@ ingest service so HTTP and MQTT behave identically.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import AwareDatetime
 from sqlalchemy.orm import Session
 
 from minemonitor.auth.deps import require_device, require_viewer
@@ -84,8 +84,8 @@ def read_positions(
     site_id: str,
     asset_id: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
-    since: datetime | None = Query(default=None),
-    until: datetime | None = Query(default=None),
+    since: AwareDatetime | None = Query(default=None),
+    until: AwareDatetime | None = Query(default=None),
     order: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: Session = Depends(get_db),
 ) -> list[dict[str, object]]:

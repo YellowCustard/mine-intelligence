@@ -6,10 +6,11 @@ No target or benchmark is ever returned — only this mine's observed numbers
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import AwareDatetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -42,8 +43,8 @@ def _cycle_dict(c: HaulCycle) -> dict[str, Any]:
 def get_cycles(
     site_id: str,
     asset_id: str,
-    since: datetime | None = Query(default=None),
-    until: datetime | None = Query(default=None),
+    since: AwareDatetime | None = Query(default=None),
+    until: AwareDatetime | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=2000),
     db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
@@ -112,8 +113,8 @@ def shift_summary(
 def get_metrics(
     site_id: str,
     asset_id: str | None = Query(default=None),
-    since: datetime | None = Query(default=None),
-    until: datetime | None = Query(default=None),
+    since: AwareDatetime | None = Query(default=None),
+    until: AwareDatetime | None = Query(default=None),
     limit: int = Query(default=500, ge=1, le=5000),
     db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
@@ -147,8 +148,8 @@ def get_metrics(
 @router.post("/sites/{site_id}/recompute")
 def trigger_recompute(
     site_id: str,
-    since: datetime | None = Query(default=None),
-    until: datetime | None = Query(default=None),
+    since: AwareDatetime | None = Query(default=None),
+    until: AwareDatetime | None = Query(default=None),
     db: Session = Depends(get_db),
     user: User = Depends(require_admin),
 ) -> dict[str, int]:

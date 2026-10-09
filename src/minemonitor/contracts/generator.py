@@ -10,10 +10,9 @@ is ``null``, never invented.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 class GeneratorReadingV1(BaseModel):
@@ -26,7 +25,7 @@ class GeneratorReadingV1(BaseModel):
     site_id: str = Field(min_length=1)
     asset_id: str = Field(min_length=1)
     source: str = Field(default="dse_sim", min_length=1)
-    ts: datetime
+    ts: AwareDatetime
     engine_hours: float | None = Field(default=None, ge=0)
     running: bool
     fuel_level_pct: float | None = Field(default=None, ge=0, le=100)
