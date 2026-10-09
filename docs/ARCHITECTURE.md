@@ -194,6 +194,12 @@ dashboard (`web/mine.html`) is framework-free: a `fetch()` of current state on l
 plus an `EventSource` subscription. It is **extended, not rewritten** — the inline-SVG
 site plan and alarm table are the UI contract.
 
+An open stream holds no worker thread: it waits between frames on the event loop, and
+every stream for a site shares one snapshot, rebuilt at most twice a second. So the number
+of open dashboards does not limit other requests, and ten dashboards cost the database
+what one does. The latest-fix-per-asset query behind the snapshot walks the positions
+primary key, so its cost does not grow with stored history.
+
 **API versioning.** Every domain router is served both at its historical unprefixed
 path (the dashboard and existing clients) and under **`/api/v1`** (new clients —
 mobile, integrations). The unprefixed paths are the compatibility surface and are
