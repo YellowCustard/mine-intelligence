@@ -97,6 +97,9 @@ def record_access_event(
         created_at=now,
     )
     session.add(row)
+    # Flush so a repeat of this event later in the same batch finds it (the production
+    # session does not autoflush) instead of failing the batch's commit on a duplicate key.
+    session.flush()
     return row, True
 
 
@@ -266,6 +269,10 @@ def quarantine_future_event(
             first_seen_at=now,
         )
     )
+    # Flush (the production session does not autoflush) so a repeat of this event later in
+    # the batch is recognised above, and so the open-alarm check below sees an alarm raised
+    # earlier in the same batch.
+    session.flush()
     source = f"{SOURCE}:{gate_id}"
     open_alarm = session.execute(
         select(Event.event_id)
