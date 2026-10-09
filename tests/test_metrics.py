@@ -57,6 +57,27 @@ def test_zone_dwell_accumulates() -> None:
     assert b.zone_dwell_s["z1"] >= 58
 
 
+def test_fixes_without_speed_are_neither_moving_nor_idle() -> None:
+    """A source without speed must not show up as an idle machine (audit M10)."""
+    fixes = [_Fix(_T0 + timedelta(seconds=i), -17.8, 31.0, None) for i in range(60)]
+    fixes += [_Fix(_T0 + timedelta(seconds=60 + i), -17.8, 31.0, 0.0) for i in range(11)]
+    b = compute_metrics("s", "a", fixes)[0]
+    assert b.moving_time_s == 0.0
+    assert b.idle_time_s == 10.0  # only the intervals that start at a known 0 kph
+    assert b.mean_speed_kph == 0.0 and b.max_speed_kph == 0.0
+
+
+def test_mean_speed_ignores_fixes_without_speed() -> None:
+    fixes = [
+        _Fix(_T0, -17.8, 31.0, 20.0),
+        _Fix(_T0 + timedelta(seconds=1), -17.8, 31.0, None),
+        _Fix(_T0 + timedelta(seconds=2), -17.8, 31.0, 40.0),
+    ]
+    b = compute_metrics("s", "a", fixes)[0]
+    assert b.mean_speed_kph == 30.0
+    assert b.max_speed_kph == 40.0
+
+
 def test_shift_bounds_day_and_night_cross_midnight() -> None:
     d = date(2026, 9, 5)
     day_start, day_end = shift_bounds(d, "day")  # 06:00–18:00 Harare (UTC+2)
