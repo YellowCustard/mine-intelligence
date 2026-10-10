@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from minemonitor.rules.config import RuleConfig
+from minemonitor.rules.config import RuleConfig, parse_rules
 from minemonitor.storage.models import AssetZoneState
 from minemonitor.zones import engine
 
@@ -78,3 +78,69 @@ def test_boundary_hugging_never_enters() -> None:
             entries += 1
     assert entries == 0
     assert st.inside is False
+
+
+# --- Time, not just fix count (audit M11) -------------------------------------------
+
+
+def _feed(state, inside, dist, i, cfg=CFG, max_gap_s=None):
+    """One fix through the engine, then the watermark the pipeline keeps."""
+    t = engine.step(
+        state, inside_raw=inside, dist_outside_m=dist, ts=_ts(i), cfg=cfg, max_gap_s=max_gap_s
+    )
+    state.last_ts = _ts(i)
+    return t
+
+
+def test_a_zone_can_require_time_inside_before_entry() -> None:
+    cfg = RuleConfig(min_entry_dwell_s=5)
+    st = _state()
+    seen = [_feed(st, True, 0, i, cfg) for i in range(7)]
+    # Two fixes are not enough on their own: entry waits until 5 s after the first.
+    assert seen == [None, None, None, None, None, "entry", None]
+    assert st.entered_at == _ts(0)  # when it went in, not when that was confirmed
+
+
+def test_leaving_restarts_the_entry_clock() -> None:
+    cfg = RuleConfig(min_entry_dwell_s=5)
+    st = _state()
+    seen = [_feed(st, True, 0, i, cfg) for i in range(3)]
+    seen.append(_feed(st, False, 40, 3, cfg))  # out before 5 s
+    seen += [_feed(st, True, 0, i, cfg) for i in range(4, 10)]
+    assert seen.index("entry") == 9  # 5 s after the second run began at 4 s
+    assert st.entered_at == _ts(4)
+
+
+def test_min_entry_dwell_is_zone_data() -> None:
+    assert parse_rules("restricted", {"min_entry_dwell_s": 4}).min_entry_dwell_s == 4.0
+    assert parse_rules("restricted", {}).min_entry_dwell_s == 0.0  # the fix count alone
+
+
+def test_fixes_either_side_of_an_outage_are_not_consecutive() -> None:
+    st = _state()
+    assert _feed(st, True, 0, 0, max_gap_s=600) is None
+    # Silent for 10 min 1 s: two lone fixes that far apart do not confirm anything.
+    assert _feed(st, True, 0, 601, max_gap_s=600) is None
+    assert _feed(st, True, 0, 602, max_gap_s=600) == "entry"
+
+
+def test_an_outage_does_not_count_toward_an_exit() -> None:
+    st = _state()
+    _feed(st, True, 0, 0, max_gap_s=600)
+    _feed(st, True, 0, 1, max_gap_s=600)  # entered
+    assert _feed(st, False, 40, 2, max_gap_s=600) is None
+    assert _feed(st, False, 40, 900, max_gap_s=600) is None  # back after an outage
+    assert _feed(st, False, 40, 901, max_gap_s=600) == "exit"
+
+
+def test_a_short_gap_keeps_the_run() -> None:
+    st = _state()
+    assert _feed(st, True, 0, 0, max_gap_s=600) is None
+    assert _feed(st, True, 0, 300, max_gap_s=600) == "entry"  # a slow tracker, not an outage
+
+
+def test_a_run_counted_before_runs_were_timed_still_enters() -> None:
+    st = _state()
+    st.consec_in = 1  # one inside fix counted by the previous release, with no start time
+    assert st.entered_at is None
+    assert _feed(st, True, 0, 1) == "entry"

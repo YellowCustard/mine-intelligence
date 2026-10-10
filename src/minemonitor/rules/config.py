@@ -12,6 +12,10 @@ from dataclasses import dataclass
 DEFAULT_DEBOUNCE_IN = 2
 DEFAULT_EXIT_DEBOUNCE = 2
 DEFAULT_HYSTERESIS_M = 15.0
+# Time inside, from the first of the N fixes, before entry is confirmed. 0 = the fix
+# count alone. Raise it on a zone whose boundary sees jitter; keep it low on a
+# restricted zone, where a short incursion is still a breach.
+DEFAULT_MIN_ENTRY_DWELL_S = 0.0
 DEFAULT_OVERSPEED_CONSECUTIVE = 3
 # Below this speed an asset counts as stationary (for dwell).
 STATIONARY_KPH = 1.5
@@ -24,6 +28,7 @@ class RuleConfig:
     debounce_in: int = DEFAULT_DEBOUNCE_IN
     exit_debounce: int = DEFAULT_EXIT_DEBOUNCE
     hysteresis_m: float = DEFAULT_HYSTERESIS_M
+    min_entry_dwell_s: float = DEFAULT_MIN_ENTRY_DWELL_S
     # restricted
     authorized_classes: tuple[str, ...] | None = None
     # speed_limited
@@ -45,6 +50,7 @@ def parse_rules(kind: str, rules: dict | None) -> RuleConfig:
         debounce_in=int(r.get("debounce_in", DEFAULT_DEBOUNCE_IN)),
         exit_debounce=int(r.get("exit_debounce", DEFAULT_EXIT_DEBOUNCE)),
         hysteresis_m=float(r.get("hysteresis_m", DEFAULT_HYSTERESIS_M)),
+        min_entry_dwell_s=float(r.get("min_entry_dwell_s", DEFAULT_MIN_ENTRY_DWELL_S)),
         authorized_classes=tuple(authorized) if authorized is not None else None,
         speed_limit_kph=(
             float(r["speed_limit_kph"]) if r.get("speed_limit_kph") is not None else None
