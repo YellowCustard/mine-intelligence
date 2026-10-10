@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from minemonitor.devices.acl import VISION_EDGE_SOURCE
 from minemonitor.devices.broker_config import mosquitto_password_hash
-from minemonitor.storage.models import Device
+from minemonitor.storage.models import Device, User
 
 
 def register_device(
@@ -109,3 +109,50 @@ def authorized_asset(session: Session, site_id: str, asset_id: str) -> bool:
         )
     ).first()
     return row is not None
+
+
+def position_refusal(
+    session: Session, principal: User, site_id: str, asset_id: str, *, strict: bool
+) -> str | None:
+    """Why HTTP ingest must refuse this position from ``principal``, or None (audit M8).
+
+    A device account whose username is a provisioned ``device_id`` is the same identity the
+    broker knows, so it is held to what the broker ACL lets that device write: its own asset's
+    positions, and only while enabled. Any other device account (a gateway, the shared ingest
+    account) is site-scoped by the router, and with ``strict`` may write only assets that have an
+    enabled tracker, as the MQTT ingestor does. An admin passes every device check.
+    """
+    if principal.role != "device":
+        return None
+    dev = session.get(Device, principal.username)
+    if dev is not None:
+        if not dev.enabled:
+            return "device is disabled"
+        if dev.source == VISION_EDGE_SOURCE:
+            return "a vision edge node cannot publish positions"
+        if (dev.site_id, dev.asset_id) != (site_id, asset_id):
+            return "device is bound to another asset"
+        return None
+    if strict and not authorized_asset(session, site_id, asset_id):
+        return "no enabled tracker is provisioned for this asset"
+    return None
+
+
+def vision_refusal(session: Session, principal: User, site_id: str) -> str | None:
+    """Why HTTP ingest must refuse a vision record from ``principal``, or None (audit M8).
+
+    The broker ACL lets a vision edge node write its own site's vision topics and nothing
+    else, and never lets a tracker write vision; HTTP holds a provisioned device to the same.
+    """
+    if principal.role != "device":
+        return None
+    dev = session.get(Device, principal.username)
+    if dev is None:
+        return None
+    if not dev.enabled:
+        return "device is disabled"
+    if dev.source != VISION_EDGE_SOURCE:
+        return "a tracker cannot publish vision records"
+    if dev.site_id != site_id:
+        return "device is provisioned at another site"
+    return None

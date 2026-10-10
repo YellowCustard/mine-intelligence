@@ -92,7 +92,8 @@ Rules:
 
 - **API identity (default transport):** the node is a `device`-role user scoped to its site
   (`python -m minemonitor.auth.cli edge-01 device --site <site>`). It pulls
-  `GET /vision/config` and posts to `POST /ingest/vision` with it.
+  `GET /vision/config` and posts to `POST /ingest/vision` with it. When a device row of the same
+  id exists (below), HTTP holds the account to it too: vision records for its own site only.
 - **Broker identity (MQTT transport, optional):** a device row with `source: "vision-edge"` and
   `asset_id` = the node id (`POST /sites/<site>/devices`, one-time secret). The generated ACL
   lets it write `mm/<site>/vision/#` **for its own site only** — never a position topic — and
