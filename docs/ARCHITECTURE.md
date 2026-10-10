@@ -165,7 +165,8 @@ The network and power **will** fail; the whole ingest side is designed around it
   `restricted` (unauthorised class → critical), `speed_limited` (sustained speed over
   the limit *of the zone it is in*, N consecutive fixes), `dwell` (stationary beyond a
   threshold), `asset_offline` (no fix for N minutes while previously active —
-  distinguished from *parked with ignition off*).
+  distinguished from *parked with ignition off*; a source that reports no ignition is
+  raised too, marked "ignition unknown").
 - **Haul-cycle analytics** (the commercial payload): a per-asset state machine driven
   by zone transitions, `AT_FACE → HAULING_LOADED → AT_DUMP → RETURNING_EMPTY →
   AT_FACE`. **Queue time** = stationary + in-load-zone + ignition-on, *before* loading
