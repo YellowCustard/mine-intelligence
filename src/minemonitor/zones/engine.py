@@ -9,7 +9,9 @@ it holds the current state, which is what damps the flap.
 
 Fixes either side of a silence longer than ``max_gap_s`` (the platform's offline
 threshold) are not consecutive: two lone fixes far apart in time corroborate
-nothing, so the count starts again (audit M11).
+nothing, so the count starts again (audit M11). Nor is a fix dated before the
+previous one, which reaches here only when the pipeline heals a future-dated
+watermark: a run that bad clock began must not hold an entry until its time comes.
 
 The state object is a plain row (:class:`AssetZoneState`); this function mutates
 it and returns the confirmed transition, if any.
@@ -41,7 +43,9 @@ def step(
     last = state.last_ts
     if last is not None and last.tzinfo is None:
         last = last.replace(tzinfo=UTC)  # SQLite returns naive, Postgres aware
-    if max_gap_s is not None and last is not None and (ts - last).total_seconds() > max_gap_s:
+    if last is not None and (
+        ts < last or (max_gap_s is not None and (ts - last).total_seconds() > max_gap_s)
+    ):
         state.consec_in = 0
         state.consec_out = 0
 

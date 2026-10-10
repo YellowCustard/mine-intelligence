@@ -114,6 +114,8 @@ def test_leaving_restarts_the_entry_clock() -> None:
 def test_min_entry_dwell_is_zone_data() -> None:
     assert parse_rules("restricted", {"min_entry_dwell_s": 4}).min_entry_dwell_s == 4.0
     assert parse_rules("restricted", {}).min_entry_dwell_s == 0.0  # the fix count alone
+    # A null (a cleared field) is unset, as for dwell_s: it must not fail every fix.
+    assert parse_rules("restricted", {"min_entry_dwell_s": None}).min_entry_dwell_s == 0.0
 
 
 def test_fixes_either_side_of_an_outage_are_not_consecutive() -> None:

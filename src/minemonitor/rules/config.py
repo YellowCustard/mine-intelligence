@@ -50,7 +50,11 @@ def parse_rules(kind: str, rules: dict | None) -> RuleConfig:
         debounce_in=int(r.get("debounce_in", DEFAULT_DEBOUNCE_IN)),
         exit_debounce=int(r.get("exit_debounce", DEFAULT_EXIT_DEBOUNCE)),
         hysteresis_m=float(r.get("hysteresis_m", DEFAULT_HYSTERESIS_M)),
-        min_entry_dwell_s=float(r.get("min_entry_dwell_s", DEFAULT_MIN_ENTRY_DWELL_S)),
+        min_entry_dwell_s=(
+            float(r["min_entry_dwell_s"])
+            if r.get("min_entry_dwell_s") is not None
+            else DEFAULT_MIN_ENTRY_DWELL_S
+        ),
         authorized_classes=tuple(authorized) if authorized is not None else None,
         speed_limit_kph=(
             float(r["speed_limit_kph"]) if r.get("speed_limit_kph") is not None else None
