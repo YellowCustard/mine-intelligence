@@ -149,6 +149,8 @@ The network and power **will** fail; the whole ingest side is designed around it
   anonymous broker. Above the broker, the ingestor still independently rejects any
   message whose topic and payload disagree (anti-spoof), and, when
   `MM_MQTT_REQUIRE_REGISTERED_DEVICE=true`, rejects assets with no enabled device row.
+  HTTP ingest holds a `device` account named after a provisioned `device_id` to the same
+  binding as the ACL, and applies strict mode to `device` accounts too.
 
 ---
 
