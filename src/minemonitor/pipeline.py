@@ -48,7 +48,10 @@ def process_position(session: Session, pos: AssetPositionV1, created: bool) -> l
 
     asset_class = _asset_class(session, pos.site_id, pos.asset_id)
     events: list[EventV1] = []
-    max_skew = timedelta(seconds=get_settings().max_future_skew_s)
+    settings = get_settings()
+    max_skew = timedelta(seconds=settings.max_future_skew_s)
+    # Silent longer than this = offline: fixes either side of it are not consecutive.
+    max_gap_s = settings.offline_threshold_s
 
     for zone in zones:
         state = get_or_create_state(session, pos.site_id, pos.asset_id, zone.zone_id)
@@ -90,7 +93,12 @@ def process_position(session: Session, pos: AssetPositionV1, created: bool) -> l
         dist_out = 0.0 if inside_raw else distance_to_polygon_m(pos.lat, pos.lon, zone.geometry)
 
         transition = engine.step(
-            state, inside_raw=inside_raw, dist_outside_m=dist_out, ts=pos.ts, cfg=cfg
+            state,
+            inside_raw=inside_raw,
+            dist_outside_m=dist_out,
+            ts=pos.ts,
+            cfg=cfg,
+            max_gap_s=max_gap_s,
         )
         if transition == "entry":
             ev = on_entry(pos=pos, zone=zone, cfg=cfg, asset_class=asset_class)
