@@ -5,8 +5,8 @@ Additive and safe for an existing install: one new table. A gate event dated bey
 cursor into the future and hid every later event); it lands here instead and raises one
 ``source_clock_skew`` alarm per gate. No personal data: no operator or credential reference.
 
-Revision ID: 0029_access_quarantine
-Revises: 0028_breach_records
+Revision ID: 0030_access_quarantine
+Revises: 0029_recompute_cursors
 Create Date: 2026-10-07
 """
 
@@ -17,8 +17,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0029_access_quarantine"
-down_revision: str | None = "0028_breach_records"
+revision: str = "0030_access_quarantine"
+down_revision: str | None = "0029_recompute_cursors"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

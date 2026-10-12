@@ -83,3 +83,15 @@ def test_recompute_runs_and_audits(client: TestClient) -> None:
     assert isinstance(r.json(), dict)  # counts of what was rebuilt
     audit = client.get("/sites/kn-zw-01/audit").json()
     assert any(a["action"] == "recompute" for a in audit)
+
+
+def test_recompute_refuses_until_rather_than_splitting_a_cycle(client: TestClient) -> None:
+    r = client.post("/sites/kn-zw-01/recompute", params={"until": "2026-09-05T08:00:00Z"})
+    assert r.status_code == 400
+    assert "until" in r.json()["detail"]
+
+
+def test_recompute_since_rebuilds_from_shortly_before_it(client: TestClient) -> None:
+    r = client.post("/sites/kn-zw-01/recompute", params={"since": "2026-09-05T08:00:00Z"})
+    assert r.status_code == 200
+    assert set(r.json()) == {"cycles", "buckets", "assets", "failed"}

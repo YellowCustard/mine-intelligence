@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     # the future and every genuine fix after it would be skipped as "late".
     max_future_skew_s: int = Field(default=120, ge=0)
     default_site_id: str = "kn-zw-01"
+    # Haul cycles (brief §9). A load-to-load span longer than this is not haulage (a
+    # breakdown, or a truck parked between its last dump and the next shift's first load)
+    # and is not reported as a cycle. It also bounds how far back the maintenance tick's
+    # incremental recompute reads when late data arrives.
+    cycle_max_s: int = Field(default=14400, ge=600)
     # First-party vision (Stage B). A commissioned camera whose health heartbeat is silent this
     # long raises ``camera_offline`` (the "missed" lane).
     vision_camera_stale_s: int = 300

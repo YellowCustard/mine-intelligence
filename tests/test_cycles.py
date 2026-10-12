@@ -8,10 +8,15 @@ all waiting on one staging line (audit M2: the old rule only passed the second).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from minemonitor.cycles import compute_cycles
+from minemonitor.cycles.statemachine import Resume, analyse_cycles
 from minemonitor.ingest.adapters.simulator import FACE, QUEUE_STEP_M, ROM, Simulator
+from minemonitor.ingest.geo import offset_m
 from minemonitor.zones.geometry import box_polygon
 
 _LOAD = box_polygon(FACE[0], FACE[1], 70)
@@ -98,3 +103,75 @@ def test_drive_through_load_zone_has_no_queue() -> None:
     cycles = compute_cycles("WB-01", fixes["WB-01"], load_geom=_LOAD, dump_geom=_DUMP)
     for c in cycles:
         assert c.queue_s == 0.0
+
+
+# --- window boundaries and the cycle cap (audit H3) -------------------------------------
+
+_T0 = datetime(2026, 9, 5, 6, 0, 0, tzinfo=UTC)
+_HAUL = offset_m(FACE[0], FACE[1], 0, 300)  # outside both zones
+_QUEUE = offset_m(FACE[0], FACE[1], -QUEUE_STEP_M, 0)  # one truck back from the face
+
+
+@dataclass
+class _Fix:
+    ts: datetime
+    lat: float
+    lon: float
+    speed_kph: float | None
+
+
+def _legs(*legs: tuple[tuple[float, float], float, int], start: datetime = _T0) -> list[_Fix]:
+    t, out = start, []
+    for (lat, lon), kph, secs in legs:
+        for _ in range(secs):
+            out.append(_Fix(t, lat, lon, kph))
+            t += timedelta(seconds=1)
+    return out
+
+
+_CYCLE = (
+    (_QUEUE, 0.0, 60),  # queue
+    (FACE, 8.0, 5),  # spot
+    (FACE, 0.0, 90),  # load
+    (_HAUL, 30.0, 300),
+    (ROM, 0.0, 40),
+    (_HAUL, 30.0, 300),
+)
+
+
+def _analyse(fixes: list[_Fix], **kw):
+    return analyse_cycles("HT-1", fixes, load_geom=_LOAD, dump_geom=_DUMP, **kw)
+
+
+def test_stream_starting_mid_visit_opens_no_cycle_unless_its_start_is_known() -> None:
+    fixes = _legs(*_CYCLE, *_CYCLE, (FACE, 0.0, 30))[30:]  # cut 30 s into the first queue
+    known, _ = _analyse(fixes)
+    unknown, _ = _analyse(fixes, leading_entry_known=False)
+    assert len(known) == 2 and known[0].queue_s == 30.0  # treats the cut as the arrival
+    assert [c.start_ts for c in unknown] == [known[1].start_ts]
+
+
+def test_cycle_longer_than_the_cap_is_dropped_and_the_next_still_counts() -> None:
+    parked = (*_CYCLE[:5], (_HAUL, 0.0, 3 * 3600), _CYCLE[5])
+    fixes = _legs(*parked, *_CYCLE, (FACE, 0.0, 30))
+    assert len(_analyse(fixes)[0]) == 2
+    cycles, _ = _analyse(fixes, max_cycle_s=3600)
+    assert [c.cycle_time_s for c in cycles] == [795.0]
+
+
+def test_resume_is_the_open_cycles_entry_while_it_can_still_finish() -> None:
+    fixes = _legs(*_CYCLE, *_CYCLE[:4])  # second visit's cycle is in progress
+    second_entry = _T0 + timedelta(seconds=795)
+    assert _analyse(fixes, max_cycle_s=3600)[1] == Resume(second_entry, True)
+    # Once the open cycle cannot finish within the cap, nothing before the last fix can
+    # change any more.
+    late = fixes + _legs((_HAUL, 0.0, 3600), start=fixes[-1].ts + timedelta(seconds=1))
+    assert _analyse(late, max_cycle_s=3600)[1] == Resume(late[-1].ts, False)
+
+
+def test_resume_reports_a_visit_still_in_progress() -> None:
+    fixes = _legs(*_CYCLE, (FACE, 0.0, 120))
+    assert _analyse(fixes)[1] == Resume(_T0 + timedelta(seconds=795), True, inside=True)
+    # A visit too short to count yet may still close the open cycle: resume before it.
+    blip = _legs(*_CYCLE, *_CYCLE[:4], (FACE, 0.0, 5))
+    assert _analyse(blip)[1] == Resume(_T0 + timedelta(seconds=795), True)

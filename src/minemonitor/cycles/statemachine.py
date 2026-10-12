@@ -13,8 +13,15 @@ stops; all of that is queue (audit M2). Loading is its last stop of at least
 closer together than ``MIN_STEP_M`` are one stop (a speed spike or a shuffle under
 the bucket is not a move), so the split uses position alone.
 
+A cycle longer than ``max_cycle_s`` is not a haul cycle (a breakdown, or a truck
+parked overnight between a dump and the next load) and is not reported. The cap also
+bounds how far back an incremental recompute ever has to look (audit H3).
+
 Pure and stateless over its inputs, so it can be re-run over stored positions at
-any time (brief §9).
+any time (brief §9). ``analyse_cycles`` additionally returns the *resume point*: the
+earliest time from which re-running over the same stream (plus any later fixes)
+reproduces every cycle not yet final, so a caller can recompute a window instead of
+the whole history and get exactly the same cycles.
 """
 
 from __future__ import annotations
@@ -71,6 +78,23 @@ class Cycle:
     @property
     def queue_pct(self) -> float:
         return 100.0 * self.queue_s / self.cycle_time_s if self.cycle_time_s else 0.0
+
+
+@dataclass(frozen=True)
+class Resume:
+    """Where to restart cycle computation so that every non-final cycle is rebuilt.
+
+    ``entry_known`` is True when ``ts`` is the first fix of a load-zone visit (the fix
+    before it was outside), so a visit starting there is complete; False when ``ts`` is
+    an arbitrary fix, so a load visit already in progress there has an unknown start and
+    must not open a cycle.
+    """
+
+    ts: datetime
+    entry_known: bool
+    # The stream's last fix is still inside the load visit that starts at ``ts``: until a
+    # fix lands outside the load zone, nothing about the cycles can change.
+    inside: bool = False
 
 
 def _aware(dt: datetime) -> datetime:
@@ -172,11 +196,45 @@ def compute_cycles(
     dump_geom: dict,
     move_threshold_kph: float = MOVE_THRESHOLD_KPH,
     min_visit_s: float = MIN_VISIT_S,
+    max_cycle_s: float | None = None,
+    leading_entry_known: bool = True,
 ) -> list[Cycle]:
     """Compute complete haul cycles for one asset from an ordered position stream."""
+    cycles, _ = analyse_cycles(
+        asset_id,
+        fixes,
+        load_geom=load_geom,
+        dump_geom=dump_geom,
+        move_threshold_kph=move_threshold_kph,
+        min_visit_s=min_visit_s,
+        max_cycle_s=max_cycle_s,
+        leading_entry_known=leading_entry_known,
+    )
+    return cycles
+
+
+def analyse_cycles(
+    asset_id: str,
+    fixes: list[Fix],
+    *,
+    load_geom: dict,
+    dump_geom: dict,
+    move_threshold_kph: float = MOVE_THRESHOLD_KPH,
+    min_visit_s: float = MIN_VISIT_S,
+    max_cycle_s: float | None = None,
+    leading_entry_known: bool = True,
+) -> tuple[list[Cycle], Resume | None]:
+    """Cycles in ``fixes``, and the point a later recompute must restart from.
+
+    ``leading_entry_known=False`` says the stream starts at an arbitrary fix rather than at
+    the true start of the asset's track: a load visit in progress at the first fix began
+    earlier, so its queue and cycle start are unknown and it opens no cycle.
+
+    Returns ``(cycles, None)`` for an empty stream.
+    """
     fixes = sorted(fixes, key=lambda f: _aware(f.ts))
-    if len(fixes) < 2:
-        return []
+    if not fixes:
+        return [], None
 
     times = [_aware(f.ts) for f in fixes]
     in_load = [point_in_polygon(f.lat, f.lon, load_geom) for f in fixes]
@@ -186,12 +244,21 @@ def compute_cycles(
     def _long_enough(v: _Visit) -> bool:
         return (v.exit_ts - v.enter_ts).total_seconds() >= min_visit_s
 
-    load_visits = [v for v in _visits(in_load, times) if _long_enough(v)]
+    def _can_open(v: _Visit) -> bool:
+        return v.start > 0 or leading_entry_known
+
+    load_runs = _visits(in_load, times)
+    load_visits = [v for v in load_runs if _long_enough(v)]
     dump_visits = [v for v in _visits(in_dump, times) if _long_enough(v)]
 
     cycles: list[Cycle] = []
     for idx in range(len(load_visits) - 1):
         lv, lv_next = load_visits[idx], load_visits[idx + 1]
+        if not _can_open(lv):
+            continue  # began before the stream did: its start and queue are unknown
+        cycle_time_s = (lv_next.enter_ts - lv.enter_ts).total_seconds()
+        if max_cycle_s is not None and cycle_time_s > max_cycle_s:
+            continue  # not a haul cycle (breakdown, parked between dump and load)
         # The dump visit that happens between this load and the next.
         dv = next(
             (d for d in dump_visits if lv.exit_ts <= d.enter_ts < lv_next.enter_ts),
@@ -208,7 +275,7 @@ def compute_cycles(
                 cycle_index=len(cycles),
                 start_ts=lv.enter_ts,
                 end_ts=lv_next.enter_ts,
-                cycle_time_s=(lv_next.enter_ts - lv.enter_ts).total_seconds(),
+                cycle_time_s=cycle_time_s,
                 queue_s=queue_s,
                 load_s=max(0.0, load_zone_s - queue_s),
                 haul_s=(dv.enter_ts - lv.exit_ts).total_seconds(),
@@ -216,4 +283,36 @@ def compute_cycles(
                 return_s=(lv_next.enter_ts - dv.exit_ts).total_seconds(),
             )
         )
-    return cycles
+
+    last = times[-1]
+    resume = Resume(ts=last, entry_known=False)
+    openers = [v for v in load_visits if _can_open(v)]
+    # A load visit under way at the last fix that is still too short to count.
+    pending = load_runs[-1] if in_load[-1] and not _long_enough(load_runs[-1]) else None
+
+    def _may_still_close(opener: _Visit) -> bool:
+        if max_cycle_s is None:
+            return True
+        if (last - opener.enter_ts).total_seconds() < max_cycle_s:
+            return True  # the next visit has not begun, and there is time for it to
+        # The cap has passed, but a visit that began within it may yet count and close
+        # the cycle at its entry.
+        return (
+            pending is not None
+            and (pending.enter_ts - opener.enter_ts).total_seconds() <= max_cycle_s
+        )
+
+    if openers and _may_still_close(openers[-1]):
+        # The cycle this visit opens is still in progress (its end is the next visit,
+        # not yet counted) and can still finish within the cap: rebuild from its entry.
+        # Everything before it is final, including the cycle that ends at this entry.
+        resume = Resume(ts=openers[-1].enter_ts, entry_known=True)
+    elif pending is not None and _can_open(pending):
+        # A load visit has just begun and is not yet long enough to count: once it is,
+        # it may open a cycle, so rebuild from its entry.
+        resume = Resume(ts=load_runs[-1].enter_ts, entry_known=True)
+    # Otherwise no cycle is in progress (none opened, or the open one has run past the
+    # cap): nothing before the last fix can change, so restart there.
+    if resume.entry_known and in_load[-1] and load_runs[-1].enter_ts == resume.ts:
+        resume = Resume(ts=resume.ts, entry_known=True, inside=True)
+    return cycles, resume
