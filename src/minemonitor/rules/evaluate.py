@@ -4,6 +4,11 @@ Each rule fires **once per episode**, not once per fix: a restricted entry fires
 on the confirmed entry transition; overspeed fires once per sustained-over spell;
 dwell fires once per stationary spell. That is what makes one real breach produce
 one alarm, not a storm (brief §9, M3 acceptance).
+
+A fix without a speed (a source that does not report one) is no evidence either way:
+it is never read as 0 kph (audit M10). It neither starts nor ends a dwell, and it
+breaks an overspeed run (the rule needs consecutive over-limit fixes) without
+re-arming an alarm already raised.
 """
 
 from __future__ import annotations
@@ -66,7 +71,10 @@ def on_inzone_fix(
     Mutates the per-episode counters on ``state``.
     """
     events: list[EventV1] = []
-    speed = pos.speed_kph or 0.0
+    speed = pos.speed_kph
+    if speed is None:
+        state.overspeed_consec = 0
+        return events
 
     if cfg.speed_limit_kph is not None:
         if speed > cfg.speed_limit_kph:

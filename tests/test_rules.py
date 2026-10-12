@@ -28,7 +28,7 @@ def _state() -> AssetZoneState:
     )
 
 
-def _pos(i: int, speed: float) -> AssetPositionV1:
+def _pos(i: int, speed: float | None) -> AssetPositionV1:
     ts = datetime(2026, 9, 5, 6, 0, 0, tzinfo=UTC) + timedelta(seconds=i)
     return AssetPositionV1(
         schema="asset.position.v1",
@@ -98,3 +98,46 @@ def test_dwell_resets_when_moving() -> None:
     events += on_inzone_fix(pos=_pos(4, 20.0), zone=zone, cfg=cfg, state=st)  # moves
     assert events == []
     assert st.stationary_since is None
+
+
+# --- A source that does not report speed (audit M10) ------------------------------
+
+
+def test_fixes_without_speed_do_not_raise_a_dwell() -> None:
+    """No speed is no evidence of standing still: it must not read as 0 kph."""
+    zone = _zone("loading", {"dwell_s": 5})
+    cfg = parse_rules(zone.kind, zone.rules)
+    st = _state()
+    events = []
+    for i in range(30):
+        events += on_inzone_fix(pos=_pos(i, None), zone=zone, cfg=cfg, state=st)
+    assert events == []
+    assert st.stationary_since is None
+
+
+def test_a_fix_without_speed_does_not_end_a_dwell() -> None:
+    zone = _zone("loading", {"dwell_s": 5})
+    cfg = parse_rules(zone.kind, zone.rules)
+    st = _state()
+    speeds: list[float | None] = [0.0, 0.0, None, None, None, None, 0.0]
+    events = []
+    for i, spd in enumerate(speeds):
+        events += on_inzone_fix(pos=_pos(i, spd), zone=zone, cfg=cfg, state=st)
+    # Stationary at 0 s and at 6 s: the episode ran through the speed-less fixes.
+    assert [e.type for e in events] == ["zone_dwell"]
+    assert events[0].detail["dwell_s"] == 6.0
+
+
+def test_a_fix_without_speed_breaks_an_overspeed_run_without_rearming_it() -> None:
+    zone = _zone("speed_limited", {"speed_limit_kph": 25, "overspeed_consecutive": 2})
+    cfg = parse_rules(zone.kind, zone.rules)
+    st = _state()
+    events = []
+    # Over, unknown, over: never two known over-limit fixes in a row.
+    for i, spd in enumerate([40, None, 40]):
+        events += on_inzone_fix(pos=_pos(i, spd), zone=zone, cfg=cfg, state=st)
+    assert events == []
+    # A sustained spell with a gap in the speed reports alarms once, not twice.
+    for i, spd in enumerate([40, 40, None, 40, 40], start=3):
+        events += on_inzone_fix(pos=_pos(i, spd), zone=zone, cfg=cfg, state=st)
+    assert [e.type for e in events] == ["overspeed"]
