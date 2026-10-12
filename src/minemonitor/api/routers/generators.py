@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from minemonitor import audit
@@ -91,8 +91,8 @@ def ingest_reading(
 def list_readings(
     site_id: str,
     asset_id: str,
-    since: datetime | None = None,
-    until: datetime | None = None,
+    since: AwareDatetime | None = None,
+    until: AwareDatetime | None = None,
     limit: int = 200,
     db: Session = Depends(get_db),
     _: User = Depends(require_viewer),

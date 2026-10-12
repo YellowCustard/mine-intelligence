@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from minemonitor.breaches.service import record_breach
 from minemonitor.config import get_settings
 from minemonitor.contracts import AssetPositionV1
 from minemonitor.ingest.mqtt import MqttIngestor
@@ -98,6 +99,40 @@ def test_every_site_gets_alarms_and_analytics(db_session: Session, ingestor: Mqt
     assert _offline_alarms(db_session) == {("kn-zw-01", "HT-102"), (SECOND, "HT-901")}
     assert _cycles_refreshed(db_session, "kn-zw-01", "HT-102")
     assert _cycles_refreshed(db_session, SECOND, "HT-901")
+
+
+def _overdue_breach(db: Session, site_id: str) -> None:
+    """A breach found 30 hours ago: its 24-hour regulator notice is overdue and unsent."""
+    record_breach(
+        db,
+        site_id=site_id,
+        discovered_at=datetime.now(UTC) - timedelta(hours=30),
+        occurred_at=None,
+        summary="Operator export emailed to the wrong address",
+        data_classes=["operator_records"],
+        operator_ids=[],
+        notify_individuals=False,
+        actor="admin",
+    )
+    db.commit()
+
+
+def test_every_site_gets_its_breach_notice_alarms(
+    db_session: Session, ingestor: MqttIngestor
+) -> None:
+    # C-1's deadline check joined the tick for the default site only; it is per site too.
+    db_session.add(Site(site_id=SECOND, name="Second", timezone="Africa/Harare"))
+    db_session.commit()
+    _overdue_breach(db_session, "kn-zw-01")
+    _overdue_breach(db_session, SECOND)
+
+    _tick(ingestor)
+
+    db_session.expire_all()
+    rows = db_session.execute(
+        select(Event.site_id, Event.severity).where(Event.type == "breach_notice_due")
+    )
+    assert sorted(rows) == [("kn-zw-01", "critical"), (SECOND, "critical")]
 
 
 def test_default_site_runs_even_without_a_sites_row(

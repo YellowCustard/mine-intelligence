@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -59,7 +59,7 @@ def current_shift(site_id: str, db: Session = Depends(get_db)) -> dict[str, Any]
 @router.get("/sites/{site_id}/scorecard", dependencies=[Depends(require_viewer)])
 def shift_scorecard(
     site_id: str,
-    at: datetime | None = Query(default=None),
+    at: AwareDatetime | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Scorecard for the shift containing ``at`` (default now), vs the previous shift.
@@ -83,7 +83,7 @@ def exceptions(site_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
 def trends(
     site_id: str,
     shifts: int = Query(default=7, ge=1, le=60),
-    at: datetime | None = Query(default=None),
+    at: AwareDatetime | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Per-shift series of the headline metrics over the last N shifts (observed only)."""
@@ -93,7 +93,7 @@ def trends(
 @router.get("/sites/{site_id}/bottlenecks", dependencies=[Depends(require_viewer)])
 def bottlenecks(
     site_id: str,
-    at: datetime | None = Query(default=None),
+    at: AwareDatetime | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Bottleneck observations for the shift containing ``at`` — correlations, not causes."""

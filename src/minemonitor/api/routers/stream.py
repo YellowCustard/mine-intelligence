@@ -3,16 +3,25 @@
 Server-Sent Events, one-way server→browser, chosen over WebSockets because they
 are simpler and survive flaky links (brief §7). The stream polls the database on
 a short interval rather than coupling the API to MQTT — robust regardless of how
-positions arrived, and cheap at Phase-1 volumes (~9 assets).
+positions arrived.
+
+The stream waits between frames on the event loop, not in a worker thread, so an open
+dashboard holds no thread: sync routes share AnyIO's small worker pool (40 threads), and
+a stream that slept in one used to keep it for as long as the tab stayed open. Every
+open stream for a site shares one snapshot, computed at most once per
+``_SNAPSHOT_MAX_AGE_S``, so ten dashboards cost the database what one does.
 """
 
 from __future__ import annotations
 
 import json
+import threading
 import time
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
+import anyio
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
@@ -168,23 +177,84 @@ def state(site_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     return _snapshot(db, site_id, include_zones=True)
 
 
+# A frame may be this old when it is sent. Below the stream's shortest poll interval it
+# adds no visible lag; above it, frames would repeat.
+_SNAPSHOT_MAX_AGE_S = 0.5
+# A site no stream has asked about for this long is dropped from the cache.
+_SNAPSHOT_IDLE_S = 60.0
+
+
+class _Snapshots:
+    """The latest SSE frame per site, shared by every open stream for that site.
+
+    ``get`` runs in a worker thread. At most one thread computes a site's frame at a time;
+    another stream asking meanwhile gets the previous frame instead of queueing behind it,
+    so a slow snapshot ties up one thread, not one per open dashboard.
+    """
+
+    def __init__(self, max_age_s: float, idle_s: float) -> None:
+        self._max_age_s = max_age_s
+        self._idle_s = idle_s
+        self._guard = threading.Lock()
+        self._frames: dict[str, tuple[float, str]] = {}  # site -> (monotonic time, frame)
+        self._computing: dict[str, threading.Lock] = {}
+
+    def fresh(self, site_id: str) -> str | None:
+        """The cached frame if it is still fresh enough to send; safe on the event loop."""
+        with self._guard:
+            hit = self._frames.get(site_id)
+        if hit is not None and time.monotonic() - hit[0] < self._max_age_s:
+            return hit[1]
+        return None
+
+    def get(self, site_id: str) -> str:
+        """A fresh frame, computing it if needed. Blocks; call it from a worker thread."""
+        with self._guard:
+            lock = self._computing.setdefault(site_id, threading.Lock())
+            stale = self._frames.get(site_id)
+        if not lock.acquire(blocking=False):
+            if stale is not None:
+                return stale[1]  # another stream is computing its replacement
+            lock.acquire()  # nothing to send yet: wait for the frame being computed
+        try:
+            frame = self.fresh(site_id)  # computed while this thread waited for the lock
+            if frame is None:
+                frame = _frame(site_id)
+                with self._guard:
+                    now = time.monotonic()
+                    self._frames[site_id] = (now, frame)
+                    for sid, (at, _) in list(self._frames.items()):
+                        if now - at > self._idle_s:
+                            del self._frames[sid]
+                            self._computing.pop(sid, None)
+            return frame
+        finally:
+            lock.release()
+
+
+def _frame(site_id: str) -> str:
+    session = get_session_factory()()
+    try:
+        payload = _snapshot(session, site_id, include_zones=False)
+    finally:
+        session.close()
+    return f"data: {json.dumps(payload, default=str)}\n\n"
+
+
+_SNAPSHOTS = _Snapshots(_SNAPSHOT_MAX_AGE_S, _SNAPSHOT_IDLE_S)
+
+
 @router.get("/sites/{site_id}/stream", dependencies=[Depends(require_viewer)])
 def stream(site_id: str, poll_s: float = Query(default=2.0, ge=0.5, le=30)) -> StreamingResponse:
     """SSE stream of live state (assets, events, cycle summary)."""
 
-    def gen():
-        factory = get_session_factory()
-        try:
-            while True:
-                session = factory()
-                try:
-                    payload = _snapshot(session, site_id, include_zones=False)
-                finally:
-                    session.close()
-                yield f"data: {json.dumps(payload, default=str)}\n\n"
-                time.sleep(poll_s)
-        except GeneratorExit:
-            return
+    async def gen() -> AsyncIterator[str]:
+        while True:
+            frame = _SNAPSHOTS.fresh(site_id)
+            if frame is None:
+                frame = await anyio.to_thread.run_sync(_SNAPSHOTS.get, site_id)
+            yield frame
+            await anyio.sleep(poll_s)
 
     return StreamingResponse(
         gen(),

@@ -7,10 +7,9 @@ consistency (net ≈ gross − tare) is flagged downstream, never silently corre
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 WeighDirection = Literal["inbound", "outbound"]
 WeighSource = Literal["manual", "import", "api", "serial"]
@@ -27,7 +26,7 @@ class WeighbridgeTransactionV1(BaseModel):
     ticket_id: str = Field(min_length=1)
     site_id: str = Field(min_length=1)
     ticket_no: str = Field(min_length=1)
-    ts: datetime
+    ts: AwareDatetime
     direction: WeighDirection = "outbound"
     gross_kg: float = Field(ge=0)
     tare_kg: float = Field(ge=0)

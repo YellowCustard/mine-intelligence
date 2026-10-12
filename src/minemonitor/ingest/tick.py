@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from minemonitor import heartbeat, retention
 from minemonitor.access import service as access
+from minemonitor.breaches import service as breaches
 from minemonitor.config import Settings
 from minemonitor.cycles import recompute
 from minemonitor.ingest.adapters import dahua_gate
@@ -57,9 +58,9 @@ def _key(status: str, name: str, site_id: str | None) -> str:
     return f"{_PREFIX}:{status}:{name}:{site_id or _GLOBAL}"
 
 
-def _logged(kind: str, field: str, events: list[Any]) -> None:
+def _logged(kind: str, field: str, events: list[Any], level: int = logging.INFO) -> None:
     for ev in events:
-        log.info(kind, extra={"site_id": ev.site_id, field: getattr(ev, field)})
+        log.log(level, kind, extra={"site_id": ev.site_id, field: getattr(ev, field)})
 
 
 def plan(
@@ -100,6 +101,15 @@ def plan(
             "missed_search",
             lambda site, s: _logged(
                 "search missed", "detail", access.detect_missed_searches(s, site)
+            ),
+        ),
+        (
+            "breach_deadlines",
+            lambda site, s: _logged(
+                "breach notice due",
+                "detail",
+                breaches.check_breach_deadlines(s, site),
+                level=logging.WARNING,
             ),
         ),
     ]

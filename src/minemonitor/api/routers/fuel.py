@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 from sqlalchemy.orm import Session
 
 from minemonitor import audit
@@ -34,7 +34,7 @@ class TankIn(BaseModel):
 
 class TransactionIn(BaseModel):
     litres: float = Field(gt=0)
-    ts: datetime | None = None
+    ts: AwareDatetime | None = None
     direction: FuelDirection = "dispense"
     source: FuelSource = "manual"
     asset_id: str | None = None
@@ -49,7 +49,7 @@ class TransactionIn(BaseModel):
 class TankReadingIn(BaseModel):
     tank_id: str = Field(min_length=1)
     level_l: float = Field(ge=0)
-    ts: datetime | None = None
+    ts: AwareDatetime | None = None
     source: str = "manual"
 
 
@@ -182,8 +182,8 @@ def record_transaction(
 def list_transactions(
     site_id: str,
     asset_id: str | None = None,
-    since: datetime | None = None,
-    until: datetime | None = None,
+    since: AwareDatetime | None = None,
+    until: AwareDatetime | None = None,
     limit: int = 200,
     db: Session = Depends(get_db),
     _: User = Depends(require_viewer),
@@ -222,8 +222,8 @@ def record_tank_reading(
 def consumption(
     site_id: str,
     asset_id: str,
-    since: datetime,
-    until: datetime,
+    since: AwareDatetime,
+    until: AwareDatetime,
     db: Session = Depends(get_db),
     _: User = Depends(require_viewer),
 ) -> dict[str, Any]:
@@ -235,8 +235,8 @@ def consumption(
 def reconciliation(
     site_id: str,
     tank_id: str,
-    since: datetime,
-    until: datetime,
+    since: AwareDatetime,
+    until: AwareDatetime,
     tolerance_l: float = 50.0,
     db: Session = Depends(get_db),
     _: User = Depends(require_supervisor),

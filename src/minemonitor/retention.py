@@ -23,6 +23,8 @@ from minemonitor.config import get_settings
 from minemonitor.storage.models import (
     AssetMetrics,
     AuditLog,
+    BreachOperator,
+    BreachRecord,
     DelayClassification,
     Event,
     HaulCycle,
@@ -60,8 +62,9 @@ def run_retention(
     governs the operational-annotation tables (delay classifications by their end,
     shift handovers by creation, and **closed** incidents by their close time —
     open incidents are live work and are never age-deleted). ``audit_days`` prunes
-    the audit trail itself (0 = keep forever); the entry written for this run is
-    created after the cutoff, so a run never deletes its own record.
+    the audit trail itself (0 = keep forever), and closed breach records by their close
+    time; the entry written for this run is created after the cutoff, so a run never
+    deletes its own record.
     """
     now = now or datetime.now(UTC)
     deleted: dict[str, int] = {}
@@ -100,6 +103,30 @@ def run_retention(
         incs = session.execute(delete(Incident).where(Incident.incident_id.in_(ids))).rowcount
         return incs or 0, notes or 0
 
+    def _purge_closed_breaches(days: int) -> int:
+        """Delete breach records closed before the audit window (and their links).
+
+        A breach record is part of the accountability trail, so it follows the audit
+        window, counted from its close. An open breach is live work and is never deleted.
+        """
+        if days <= 0:
+            return 0
+        cutoff = now - timedelta(days=days)
+        ids = (
+            session.execute(
+                select(BreachRecord.breach_id).where(
+                    BreachRecord.closed_at.is_not(None), BreachRecord.closed_at < cutoff
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not ids:
+            return 0
+        session.execute(delete(BreachOperator).where(BreachOperator.breach_id.in_(ids)))
+        res = session.execute(delete(BreachRecord).where(BreachRecord.breach_id.in_(ids)))
+        return res.rowcount or 0
+
     deleted["positions"] = _purge(Position, Position.ts, positions_days)
     deleted["asset_metrics"] = _purge(AssetMetrics, AssetMetrics.bucket_start, metrics_days)
     deleted["haul_cycles"] = _purge(HaulCycle, HaulCycle.end_ts, metrics_days)
@@ -124,6 +151,7 @@ def run_retention(
         VisionOperationalEvent, VisionOperationalEvent.ts, events_days
     )
     deleted["vision_zone_rollups"] = _purge(VisionZoneRollup, VisionZoneRollup.ts, metrics_days)
+    deleted["breach_records"] = _purge_closed_breaches(audit_days)
     deleted["audit_log"] = _purge(AuditLog, AuditLog.ts, audit_days)
 
     audit.record(

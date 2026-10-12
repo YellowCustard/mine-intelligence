@@ -448,6 +448,56 @@ class ShiftHandover(Base):
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class BreachRecord(Base):
+    """A personal-data breach the site, as data controller, is handling (CDPA, SI 155 of 2024).
+
+    Records what happened, which classes of data and which people were affected (people as
+    opaque operator ids in ``breach_operators``, so names stay in ``operators`` and erasure
+    still works), and when the regulator and the people affected were told. The two notice
+    deadlines are fixed when the breach is recorded, from the settings then in force, so a
+    later settings change never moves the deadline of a breach already being handled.
+    """
+
+    __tablename__ = "breach_records"
+
+    breach_id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False, index=True)
+    discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Free text entered by an admin. Never copied into an alarm: alarms leave the box.
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    data_classes: Mapped[list[str]] = mapped_column(JsonType, nullable=False)
+    notify_individuals: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    regulator_due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Null when notice to the people affected is not required.
+    individuals_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    regulator_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    regulator_reference: Mapped[str | None] = mapped_column(String, nullable=True)
+    individuals_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    recorded_by: Mapped[str] = mapped_column(String, nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    close_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class BreachOperator(Base):
+    """A person (operator id) affected by a breach."""
+
+    __tablename__ = "breach_operators"
+
+    breach_id: Mapped[str] = mapped_column(ForeignKey("breach_records.breach_id"), primary_key=True)
+    operator_id: Mapped[str] = mapped_column(
+        ForeignKey("operators.operator_id"), primary_key=True, index=True
+    )
+
+
 class AuditLog(Base):
     """Append-only audit trail: rule/zone changes, acks, retention runs, auth
     failures/lockouts, and access to personal data (operator reads, exports and

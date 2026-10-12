@@ -202,6 +202,12 @@ dashboard (`web/mine.html`) is framework-free: a `fetch()` of current state on l
 plus an `EventSource` subscription. It is **extended, not rewritten** — the inline-SVG
 site plan and alarm table are the UI contract.
 
+An open stream holds no worker thread: it waits between frames on the event loop, and
+every stream for a site shares one snapshot, rebuilt at most twice a second. So the number
+of open dashboards does not limit other requests, and ten dashboards cost the database
+what one does. The latest-fix-per-asset query behind the snapshot walks the positions
+primary key, so its cost does not grow with stored history.
+
 **API versioning.** Every domain router is served both at its historical unprefixed
 path (the dashboard and existing clients) and under **`/api/v1`** (new clients —
 mobile, integrations). The unprefixed paths are the compatibility surface and are
@@ -282,7 +288,9 @@ Route surface (roles: `viewer < supervisor < admin`, plus `device` for ingest on
   is a foreign key, never a name in an event payload; the `operators` table is the
   single PII home, supporting export and tombstone erasure. Retention is configurable
   per data class with a scheduled deletion job that actually runs. Audit log on access
-  to personal data and on rule/zone changes.
+  to personal data and on rule/zone changes. A per-site breach register fixes the
+  regulator and individual notice deadlines when a breach is recorded and raises
+  `breach_notice_due` alarms as they approach and pass (`breaches/`).
 
 ---
 
