@@ -11,12 +11,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from minemonitor.contracts import EventV1
 from minemonitor.events.repository import alarmed_since, new_event_id, persist_event
-from minemonitor.storage.models import Position
+from minemonitor.storage.repositories import latest_positions
 
 SOURCE = "gnss_offline"
 
@@ -35,20 +34,9 @@ def detect_offline(
 ) -> list[EventV1]:
     """Raise asset_offline events for active assets gone silent. Commits."""
     now = now or datetime.now(UTC)
-    latest = (
-        select(Position.asset_id, func.max(Position.ts).label("mts"))
-        .where(Position.site_id == site_id)
-        .group_by(Position.asset_id)
-        .subquery()
-    )
-    rows = session.execute(
-        select(Position.asset_id, Position.ts, Position.ignition)
-        .join(
-            latest,
-            and_(Position.asset_id == latest.c.asset_id, Position.ts == latest.c.mts),
-        )
-        .where(Position.site_id == site_id)
-    ).all()
+    # Each asset's newest fix by index probes, not by grouping the site's whole history:
+    # that grew with every fix stored and ran every tick (soak).
+    rows = [(p.asset_id, p.ts, p.ignition) for p in latest_positions(session, site_id)]
 
     events: list[EventV1] = []
     for asset_id, ts, ignition in rows:
