@@ -131,24 +131,49 @@ services:
       db:
         condition: service_healthy
     environment:
+      # A container reads only the settings listed here, never .env itself, so every platform
+      # setting .env.example documents is listed for both the API and the ingestor
+      # (tests/test_compose_env.py).
+      MM_ENV: ${MM_ENV:-dev}
+      MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
+      MM_DEFAULT_SITE_ID: ${MM_DEFAULT_SITE_ID:-kn-zw-01}
+      MM_DEFAULT_SITE_TZ: ${MM_DEFAULT_SITE_TZ:-Africa/Harare}
       MM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-minemonitor}:${POSTGRES_PASSWORD:-minemonitor}@db:5432/${POSTGRES_DB:-minemonitor}
       MM_MQTT_HOST: mqtt
+      MM_MQTT_PORT: ${MM_MQTT_PORT:-1883}
+      MM_MQTT_TOPIC_PREFIX: ${MM_MQTT_TOPIC_PREFIX:-mm}
+      MM_MQTT_INGEST_CLIENT_ID: ${MM_MQTT_INGEST_CLIENT_ID:-mm-ingestor}
       # Broker service account (blank = anonymous broker for dev/demo).
       MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
       MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
-      MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
+      MM_MQTT_REQUIRE_REGISTERED_DEVICE: ${MM_MQTT_REQUIRE_REGISTERED_DEVICE:-false}
       # First-run admin (M6): created only if the users table is empty. Leave
       # blank in production and create the first admin with the CLI instead.
       MM_BOOTSTRAP_ADMIN_USER: ${MM_BOOTSTRAP_ADMIN_USER:-}
       MM_BOOTSTRAP_ADMIN_PASSWORD: ${MM_BOOTSTRAP_ADMIN_PASSWORD:-}
-      MM_RETAIN_POSITIONS_DAYS: ${MM_RETAIN_POSITIONS_DAYS:-90}
-      MM_RETAIN_METRICS_DAYS: ${MM_RETAIN_METRICS_DAYS:-365}
-      MM_RETAIN_EVENTS_DAYS: ${MM_RETAIN_EVENTS_DAYS:-365}
-      MM_RETAIN_ANNOTATIONS_DAYS: ${MM_RETAIN_ANNOTATIONS_DAYS:-365}
-      MM_RETAIN_AUDIT_DAYS: ${MM_RETAIN_AUDIT_DAYS:-730}
       # Auth hardening (Phase 2). Tunable per site.
       MM_LOGIN_MAX_FAILURES: ${MM_LOGIN_MAX_FAILURES:-5}
       MM_LOGIN_LOCKOUT_MINUTES: ${MM_LOGIN_LOCKOUT_MINUTES:-15}
+      MM_AUTH_VERIFY_CACHE_TTL_S: ${MM_AUTH_VERIFY_CACHE_TTL_S:-30}
+      MM_OFFLINE_THRESHOLD_S: ${MM_OFFLINE_THRESHOLD_S:-600}
+      MM_OFFLINE_CHECK_INTERVAL_S: ${MM_OFFLINE_CHECK_INTERVAL_S:-60}
+      MM_VISION_CAMERA_STALE_S: ${MM_VISION_CAMERA_STALE_S:-300}
+      MM_CYCLE_MAX_S: ${MM_CYCLE_MAX_S:-14400}
+      MM_MAX_FUTURE_SKEW_S: ${MM_MAX_FUTURE_SKEW_S:-120}
+      MM_LAB_ANOMALY_BOUNDS: ${MM_LAB_ANOMALY_BOUNDS:-}
+      MM_GENERATOR_MODBUS_HOST: ${MM_GENERATOR_MODBUS_HOST:-}
+      MM_GENERATOR_MODBUS_PORT: ${MM_GENERATOR_MODBUS_PORT:-502}
+      MM_ACCESS_SEARCH_RATE_PERCENT: ${MM_ACCESS_SEARCH_RATE_PERCENT:-0}
+      MM_ACCESS_SEARCH_GRACE_S: ${MM_ACCESS_SEARCH_GRACE_S:-900}
+      MM_ACCESS_GATE_URL: ${MM_ACCESS_GATE_URL:-}
+      MM_ACCESS_GATE_SOURCE_SYSTEM: ${MM_ACCESS_GATE_SOURCE_SYSTEM:-dahua_gate}
+      MM_ACCESS_GATE_OVERLAP_S: ${MM_ACCESS_GATE_OVERLAP_S:-30}
+      MM_ACCESS_GATE_OFFLINE_S: ${MM_ACCESS_GATE_OFFLINE_S:-600}
+      MM_BREACH_REGULATOR_NAME: ${MM_BREACH_REGULATOR_NAME:-POTRAZ}
+      MM_BREACH_REGULATOR_NOTICE_H: ${MM_BREACH_REGULATOR_NOTICE_H:-24}
+      MM_BREACH_INDIVIDUALS_NOTICE_H: ${MM_BREACH_INDIVIDUALS_NOTICE_H:-72}
+      MM_BREACH_WARN_BEFORE_H: ${MM_BREACH_WARN_BEFORE_H:-6}
+      MM_BREACH_DEADLINE_FROM: ${MM_BREACH_DEADLINE_FROM:-discovered}
       MM_HEARTBEAT_STALE_S: ${MM_HEARTBEAT_STALE_S:-180}
       MM_NOTIFY_MIN_SEVERITY: ${MM_NOTIFY_MIN_SEVERITY:-}
       MM_NOTIFY_WEBHOOK_URL: ${MM_NOTIFY_WEBHOOK_URL:-}
@@ -159,6 +184,19 @@ services:
       MM_NOTIFY_SMTP_STARTTLS: ${MM_NOTIFY_SMTP_STARTTLS:-true}
       MM_NOTIFY_EMAIL_FROM: ${MM_NOTIFY_EMAIL_FROM:-}
       MM_NOTIFY_EMAIL_TO: ${MM_NOTIFY_EMAIL_TO:-}
+      MM_NOTIFY_WHATSAPP_URL: ${MM_NOTIFY_WHATSAPP_URL:-}
+      MM_NOTIFY_WHATSAPP_TOKEN: ${MM_NOTIFY_WHATSAPP_TOKEN:-}
+      MM_NOTIFY_WHATSAPP_TO: ${MM_NOTIFY_WHATSAPP_TO:-}
+      MM_NOTIFY_MAX_ATTEMPTS: ${MM_NOTIFY_MAX_ATTEMPTS:-5}
+      MM_NOTIFY_RETRY_BASE_S: ${MM_NOTIFY_RETRY_BASE_S:-60}
+      MM_RETAIN_POSITIONS_DAYS: ${MM_RETAIN_POSITIONS_DAYS:-90}
+      MM_RETAIN_METRICS_DAYS: ${MM_RETAIN_METRICS_DAYS:-365}
+      MM_RETAIN_EVENTS_DAYS: ${MM_RETAIN_EVENTS_DAYS:-365}
+      MM_RETAIN_ANNOTATIONS_DAYS: ${MM_RETAIN_ANNOTATIONS_DAYS:-365}
+      MM_RETAIN_AUDIT_DAYS: ${MM_RETAIN_AUDIT_DAYS:-730}
+      MM_RETAIN_VISION_OBSERVATIONS_DAYS: ${MM_RETAIN_VISION_OBSERVATIONS_DAYS:-30}
+      MM_RETAIN_VISION_HEALTH_DAYS: ${MM_RETAIN_VISION_HEALTH_DAYS:-30}
+      MM_RETENTION_INTERVAL_S: ${MM_RETENTION_INTERVAL_S:-86400}
     volumes:
       # Shared with the broker: `python -m minemonitor.devices.broker_config` (run
       # via `docker compose exec api`) writes passwd+acl here, and the mqtt service
@@ -181,18 +219,45 @@ services:
       mqtt:
         condition: service_started
     environment:
+      # As for the API: a container reads only what is listed here (tests/test_compose_env.py).
+      MM_ENV: ${MM_ENV:-dev}
+      MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
+      MM_DEFAULT_SITE_ID: ${MM_DEFAULT_SITE_ID:-kn-zw-01}
+      MM_DEFAULT_SITE_TZ: ${MM_DEFAULT_SITE_TZ:-Africa/Harare}
       MM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-minemonitor}:${POSTGRES_PASSWORD:-minemonitor}@db:5432/${POSTGRES_DB:-minemonitor}
       MM_MQTT_HOST: mqtt
+      MM_MQTT_PORT: ${MM_MQTT_PORT:-1883}
+      MM_MQTT_TOPIC_PREFIX: ${MM_MQTT_TOPIC_PREFIX:-mm}
+      MM_MQTT_INGEST_CLIENT_ID: ${MM_MQTT_INGEST_CLIENT_ID:-mm-ingestor}
+      # Broker service account (blank = anonymous broker for dev/demo).
       MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
       MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
-      MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
-      # The ingestor also runs the scheduled retention deletion job (~daily).
-      MM_RETAIN_POSITIONS_DAYS: ${MM_RETAIN_POSITIONS_DAYS:-90}
-      MM_RETAIN_METRICS_DAYS: ${MM_RETAIN_METRICS_DAYS:-365}
-      MM_RETAIN_EVENTS_DAYS: ${MM_RETAIN_EVENTS_DAYS:-365}
-      MM_RETAIN_ANNOTATIONS_DAYS: ${MM_RETAIN_ANNOTATIONS_DAYS:-365}
-      MM_RETAIN_AUDIT_DAYS: ${MM_RETAIN_AUDIT_DAYS:-730}
-      MM_RETENTION_INTERVAL_S: ${MM_RETENTION_INTERVAL_S:-86400}
+      MM_MQTT_REQUIRE_REGISTERED_DEVICE: ${MM_MQTT_REQUIRE_REGISTERED_DEVICE:-false}
+      # Auth hardening (Phase 2). Tunable per site.
+      MM_LOGIN_MAX_FAILURES: ${MM_LOGIN_MAX_FAILURES:-5}
+      MM_LOGIN_LOCKOUT_MINUTES: ${MM_LOGIN_LOCKOUT_MINUTES:-15}
+      MM_AUTH_VERIFY_CACHE_TTL_S: ${MM_AUTH_VERIFY_CACHE_TTL_S:-30}
+      MM_OFFLINE_THRESHOLD_S: ${MM_OFFLINE_THRESHOLD_S:-600}
+      MM_OFFLINE_CHECK_INTERVAL_S: ${MM_OFFLINE_CHECK_INTERVAL_S:-60}
+      MM_VISION_CAMERA_STALE_S: ${MM_VISION_CAMERA_STALE_S:-300}
+      MM_CYCLE_MAX_S: ${MM_CYCLE_MAX_S:-14400}
+      MM_MAX_FUTURE_SKEW_S: ${MM_MAX_FUTURE_SKEW_S:-120}
+      MM_LAB_ANOMALY_BOUNDS: ${MM_LAB_ANOMALY_BOUNDS:-}
+      MM_GENERATOR_MODBUS_HOST: ${MM_GENERATOR_MODBUS_HOST:-}
+      MM_GENERATOR_MODBUS_PORT: ${MM_GENERATOR_MODBUS_PORT:-502}
+      MM_ACCESS_SEARCH_RATE_PERCENT: ${MM_ACCESS_SEARCH_RATE_PERCENT:-0}
+      MM_ACCESS_SEARCH_GRACE_S: ${MM_ACCESS_SEARCH_GRACE_S:-900}
+      # The gate feed: only the ingestor polls it, so only it holds the token.
+      MM_ACCESS_GATE_URL: ${MM_ACCESS_GATE_URL:-}
+      MM_ACCESS_GATE_TOKEN: ${MM_ACCESS_GATE_TOKEN:-}
+      MM_ACCESS_GATE_SOURCE_SYSTEM: ${MM_ACCESS_GATE_SOURCE_SYSTEM:-dahua_gate}
+      MM_ACCESS_GATE_OVERLAP_S: ${MM_ACCESS_GATE_OVERLAP_S:-30}
+      MM_ACCESS_GATE_OFFLINE_S: ${MM_ACCESS_GATE_OFFLINE_S:-600}
+      MM_BREACH_REGULATOR_NAME: ${MM_BREACH_REGULATOR_NAME:-POTRAZ}
+      MM_BREACH_REGULATOR_NOTICE_H: ${MM_BREACH_REGULATOR_NOTICE_H:-24}
+      MM_BREACH_INDIVIDUALS_NOTICE_H: ${MM_BREACH_INDIVIDUALS_NOTICE_H:-72}
+      MM_BREACH_WARN_BEFORE_H: ${MM_BREACH_WARN_BEFORE_H:-6}
+      MM_BREACH_DEADLINE_FROM: ${MM_BREACH_DEADLINE_FROM:-discovered}
       MM_HEARTBEAT_STALE_S: ${MM_HEARTBEAT_STALE_S:-180}
       MM_NOTIFY_MIN_SEVERITY: ${MM_NOTIFY_MIN_SEVERITY:-}
       MM_NOTIFY_WEBHOOK_URL: ${MM_NOTIFY_WEBHOOK_URL:-}
@@ -203,6 +268,20 @@ services:
       MM_NOTIFY_SMTP_STARTTLS: ${MM_NOTIFY_SMTP_STARTTLS:-true}
       MM_NOTIFY_EMAIL_FROM: ${MM_NOTIFY_EMAIL_FROM:-}
       MM_NOTIFY_EMAIL_TO: ${MM_NOTIFY_EMAIL_TO:-}
+      MM_NOTIFY_WHATSAPP_URL: ${MM_NOTIFY_WHATSAPP_URL:-}
+      MM_NOTIFY_WHATSAPP_TOKEN: ${MM_NOTIFY_WHATSAPP_TOKEN:-}
+      MM_NOTIFY_WHATSAPP_TO: ${MM_NOTIFY_WHATSAPP_TO:-}
+      MM_NOTIFY_MAX_ATTEMPTS: ${MM_NOTIFY_MAX_ATTEMPTS:-5}
+      MM_NOTIFY_RETRY_BASE_S: ${MM_NOTIFY_RETRY_BASE_S:-60}
+      # The ingestor also runs the scheduled retention deletion job (~daily).
+      MM_RETAIN_POSITIONS_DAYS: ${MM_RETAIN_POSITIONS_DAYS:-90}
+      MM_RETAIN_METRICS_DAYS: ${MM_RETAIN_METRICS_DAYS:-365}
+      MM_RETAIN_EVENTS_DAYS: ${MM_RETAIN_EVENTS_DAYS:-365}
+      MM_RETAIN_ANNOTATIONS_DAYS: ${MM_RETAIN_ANNOTATIONS_DAYS:-365}
+      MM_RETAIN_AUDIT_DAYS: ${MM_RETAIN_AUDIT_DAYS:-730}
+      MM_RETAIN_VISION_OBSERVATIONS_DAYS: ${MM_RETAIN_VISION_OBSERVATIONS_DAYS:-30}
+      MM_RETAIN_VISION_HEALTH_DAYS: ${MM_RETAIN_VISION_HEALTH_DAYS:-30}
+      MM_RETENTION_INTERVAL_S: ${MM_RETENTION_INTERVAL_S:-86400}
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.mqtt"]
     healthcheck:
       # The ingestor has no HTTP endpoint; it is healthy while its heartbeat is fresh.
@@ -220,15 +299,25 @@ services:
     profiles: ["trackers"]
     restart: unless-stopped
     depends_on:
+      db:
+        condition: service_healthy
       mqtt:
         condition: service_started
     environment:
-      MM_MQTT_HOST: mqtt
-      MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
-      MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
+      MM_ENV: ${MM_ENV:-dev}
       MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
       MM_DEFAULT_SITE_ID: ${MM_DEFAULT_SITE_ID:-kn-zw-01}
+      # A tracker's IMEI is looked up in the devices table at its handshake.
+      MM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-minemonitor}:${POSTGRES_PASSWORD:-minemonitor}@db:5432/${POSTGRES_DB:-minemonitor}
+      MM_MQTT_HOST: mqtt
+      MM_MQTT_PORT: ${MM_MQTT_PORT:-1883}
+      MM_MQTT_TOPIC_PREFIX: ${MM_MQTT_TOPIC_PREFIX:-mm}
+      MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
+      MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
+      MM_MQTT_REQUIRE_REGISTERED_DEVICE: ${MM_MQTT_REQUIRE_REGISTERED_DEVICE:-false}
+      MM_SPOOL_PATH: ${MM_SPOOL_PATH:-/tmp/mm-spool.sqlite}
       MM_TELTONIKA_PORT: ${MM_TELTONIKA_PORT:-5027}
+      MM_TELTONIKA_IDLE_TIMEOUT_S: ${MM_TELTONIKA_IDLE_TIMEOUT_S:-900}
     ports:
       # Trackers dial in, so this one faces the network. ufw cannot narrow it (Docker-published
       # ports bypass ufw); set MM_TELTONIKA_BIND to the host address the trackers reach.
@@ -248,10 +337,15 @@ services:
       mqtt:
         condition: service_started
     environment:
+      # No MM_ENV: under prod its guard wants a database URL, and the simulator only publishes.
+      MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
+      MM_DEFAULT_SITE_ID: ${MM_DEFAULT_SITE_ID:-kn-zw-01}
       MM_MQTT_HOST: mqtt
+      MM_MQTT_PORT: ${MM_MQTT_PORT:-1883}
+      MM_MQTT_TOPIC_PREFIX: ${MM_MQTT_TOPIC_PREFIX:-mm}
       MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
       MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
-      MM_LOG_LEVEL: ${MM_LOG_LEVEL:-INFO}
+      MM_SPOOL_PATH: ${MM_SPOOL_PATH:-/tmp/mm-spool.sqlite}
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.adapters.simulator"]
     # As for teltonika: the image's API healthcheck cannot pass in this container.
     healthcheck:
