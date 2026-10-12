@@ -44,7 +44,12 @@ _HOST_SIDE = {
 _FIXED = {"MM_DATABASE_URL", "MM_MQTT_HOST"}
 # The tracker listener's own settings go to it alone, and the publisher spool to the services
 # that publish (the listener and the simulator).
-_LISTENER = {"MM_TELTONIKA_PORT", "MM_TELTONIKA_IDLE_TIMEOUT_S"}
+_LISTENER = {
+    "MM_TELTONIKA_PORT",
+    "MM_TELTONIKA_IDLE_TIMEOUT_S",
+    "MM_TELTONIKA_TLS_CERT",
+    "MM_TELTONIKA_TLS_KEY",
+}
 _PUBLISHER = {"MM_SPOOL_PATH"}
 # A secret goes only where it is used.
 _WITHHELD = {
