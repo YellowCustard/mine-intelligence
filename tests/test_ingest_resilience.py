@@ -32,9 +32,13 @@ _TOPIC = "mm/kn-zw-01/HT-102/position"
 
 
 class _Msg:
+    """The fields of a paho ``MQTTMessage`` the ingestor reads."""
+
     def __init__(self, topic: str, payload: dict[str, object]) -> None:
         self.topic = topic
         self.payload = json.dumps(payload).encode()
+        self.mid = 1
+        self.qos = 1
 
 
 def _body(ts: str) -> dict[str, object]:
@@ -65,13 +69,23 @@ def ingestor(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> MqttIngest
 
 def _deliver(ing: MqttIngestor, msg: _Msg, timeout_s: float = 5.0) -> None:
     """Run the callback in a thread so a regression (infinite retry) fails, not hangs."""
-    t = threading.Thread(target=ing._on_message, args=(None, None, msg), daemon=True)
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            ing._on_message(None, None, msg)
+        except BaseException as exc:  # noqa: BLE001 - re-raised in the test thread below
+            errors.append(exc)
+
+    t = threading.Thread(target=run, daemon=True)
     t.start()
     t.join(timeout_s)
     if t.is_alive():
         ing._stop.set()  # release the stuck loop before failing
         t.join(2)
         pytest.fail("ingest callback wedged on a single message")
+    if errors:
+        raise errors[0]
 
 
 def _stored(db_session: Session) -> int:

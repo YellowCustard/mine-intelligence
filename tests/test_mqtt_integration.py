@@ -83,3 +83,47 @@ def test_publish_ingest_roundtrip_and_idempotent(clean_positions: None) -> None:
 
     publisher.stop()
     ingestor.stop()
+
+
+def test_fix_unstored_when_the_ingestor_stops_is_redelivered(
+    clean_positions: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Audit M4: a graceful stop during a database outage used to ack the fix it was
+    # retrying, so the broker discarded it. Unacked, the persistent session gets it back.
+    from sqlalchemy import exc as sa_exc
+
+    from minemonitor.ingest import mqtt as mqtt_mod
+    from minemonitor.ingest.adapters.simulator import Simulator
+    from minemonitor.ingest.mqtt import MqttIngestor, MqttPublisher
+
+    run = uuid.uuid4().hex[:8]
+    attempts: list[int] = []
+
+    def db_down(*_a: object, **_k: object) -> object:
+        attempts.append(1)
+        raise sa_exc.OperationalError("INSERT", {}, Exception("server closed connection"))
+
+    monkeypatch.setattr(mqtt_mod, "store_and_process", db_down)
+    ingestor = MqttIngestor(client_id=f"mm-ing-{run}", write_retry_s=0.2)
+    ingestor.start()
+    publisher = MqttPublisher(
+        spool_path=f"/tmp/mm-test-spool-{run}.sqlite", client_id=f"mm-pub-{run}"
+    )
+    publisher.start()
+    time.sleep(1.0)
+    publisher.publish_position(Simulator(seed=6).step()[0])
+    deadline = time.time() + 10
+    while time.time() < deadline and len(attempts) < 2:
+        time.sleep(0.1)
+    assert len(attempts) >= 2  # delivered, and retrying against the "down" database
+    ingestor.stop()
+    publisher.stop()
+    monkeypatch.undo()
+
+    restarted = MqttIngestor(client_id=f"mm-ing-{run}", write_retry_s=0.2)
+    restarted.start()
+    deadline = time.time() + 15
+    while time.time() < deadline and _count() < 1:
+        time.sleep(0.2)
+    restarted.stop()
+    assert _count() == 1
