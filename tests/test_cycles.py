@@ -21,6 +21,8 @@ from minemonitor.zones.geometry import box_polygon
 
 _LOAD = box_polygon(FACE[0], FACE[1], 70)
 _DUMP = box_polygon(ROM[0], ROM[1], 70)
+_LOADS = [("pit-face", _LOAD)]
+_DUMPS = [("rom-pad", _DUMP)]
 
 _QUEUES = pytest.mark.parametrize(
     "queue_step_m", [QUEUE_STEP_M, 0.0], ids=["stepwise-line", "staging-line"]
@@ -41,13 +43,13 @@ def test_cycles_are_detected_for_all_trucks() -> None:
     for aid, fx in fixes.items():
         if not aid.startswith("HT-"):
             continue
-        cycles = compute_cycles(aid, fx, load_geom=_LOAD, dump_geom=_DUMP)
+        cycles = compute_cycles(aid, fx, load_zones=_LOADS, dump_zones=_DUMPS)
         assert len(cycles) >= 3  # several complete cycles in the window
 
 
 def test_segments_sum_to_cycle_time() -> None:
     _, fixes = _run()
-    cycles = compute_cycles("HT-101", fixes["HT-101"], load_geom=_LOAD, dump_geom=_DUMP)
+    cycles = compute_cycles("HT-101", fixes["HT-101"], load_zones=_LOADS, dump_zones=_DUMPS)
     for c in cycles:
         seg = c.queue_s + c.load_s + c.haul_s + c.dump_s + c.return_s
         assert abs(seg - c.cycle_time_s) < 1e-6
@@ -61,7 +63,7 @@ def test_per_cycle_queue_matches_injected_truth(queue_step_m: float) -> None:
     for aid, fx in fixes.items():
         if not aid.startswith("HT-"):
             continue
-        cycles = compute_cycles(aid, fx, load_geom=_LOAD, dump_geom=_DUMP)
+        cycles = compute_cycles(aid, fx, load_zones=_LOADS, dump_zones=_DUMPS)
         episodes = [e for e in sim.queue_episodes if e[0] == aid]
         for c in cycles:
             ep = next((q for (a, s, e, q) in episodes if c.start_ts <= s < c.end_ts), None)
@@ -78,7 +80,7 @@ def test_aggregate_queue_within_five_percent(queue_step_m: float) -> None:
     for aid, fx in fixes.items():
         if not aid.startswith("HT-"):
             continue
-        cycles = compute_cycles(aid, fx, load_geom=_LOAD, dump_geom=_DUMP)
+        cycles = compute_cycles(aid, fx, load_zones=_LOADS, dump_zones=_DUMPS)
         if not cycles:
             continue
         computed += sum(c.queue_s for c in cycles)
@@ -100,7 +102,7 @@ def test_drive_through_load_zone_has_no_queue() -> None:
     """A truck that never stops in the load zone records zero queue."""
     _, fixes = _run()
     # Patrol vehicles pass through zones without queuing.
-    cycles = compute_cycles("WB-01", fixes["WB-01"], load_geom=_LOAD, dump_geom=_DUMP)
+    cycles = compute_cycles("WB-01", fixes["WB-01"], load_zones=_LOADS, dump_zones=_DUMPS)
     for c in cycles:
         assert c.queue_s == 0.0
 
@@ -140,7 +142,7 @@ _CYCLE = (
 
 
 def _analyse(fixes: list[_Fix], **kw):
-    return analyse_cycles("HT-1", fixes, load_geom=_LOAD, dump_geom=_DUMP, **kw)
+    return analyse_cycles("HT-1", fixes, load_zones=_LOADS, dump_zones=_DUMPS, **kw)
 
 
 def test_stream_starting_mid_visit_opens_no_cycle_unless_its_start_is_known() -> None:

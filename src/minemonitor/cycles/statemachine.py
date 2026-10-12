@@ -4,14 +4,19 @@ Driven by load-zone and dump-zone membership:
 
     AT_FACE -> HAULING_LOADED -> AT_DUMP -> RETURNING_EMPTY -> AT_FACE
 
-A cycle spans one load-zone entry to the next. **Queue time** is the time a truck
-spends waiting in the load zone for the loader: from its first stop there until it
-spots forward onto the loading spot. A line of trucks moves up in steps, so a truck
-may stop several times while it waits, creeping forward a truck length between
-stops; all of that is queue (audit M2). Loading is its last stop of at least
-``MIN_LOAD_S`` before it leaves the zone, and the move onto it is the spot. Stops
-closer together than ``MIN_STEP_M`` are one stop (a speed spike or a shuffle under
-the bucket is not a move), so the split uses position alone.
+A cycle spans one load-zone entry to the next. Every loading zone counts as the load
+zone and every unloading zone as the dump (audit M3): a site with a ROM pad and a waste
+dump, or two faces, has cycles through each. Fixes in touching zones of one kind make one
+visit, credited to the zone with most of its fixes, and each cycle records where it
+loaded and where it dumped.
+
+**Queue time** is the time a truck spends waiting in the load zone for the loader: from
+its first stop there until it spots forward onto the loading spot. A line of trucks moves
+up in steps, so a truck may stop several times while it waits, creeping forward a truck
+length between stops; all of that is queue (audit M2). Loading is its last stop of at
+least ``MIN_LOAD_S`` before it leaves the zone, and the move onto it is the spot. Stops
+closer together than ``MIN_STEP_M`` are one stop (a speed spike or a shuffle under the
+bucket is not a move), so the split uses position alone.
 
 A cycle longer than ``max_cycle_s`` is not a haul cycle (a breakdown, or a truck
 parked overnight between a dump and the next load) and is not reported. The cap also
@@ -26,6 +31,8 @@ the whole history and get exactly the same cycles.
 
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
@@ -52,6 +59,9 @@ MIN_LOAD_S = 30.0
 # A move up the line is at least a truck length (~10 m).
 MIN_STEP_M = 5.0
 
+# A zone as the analysis sees it: its id and its GeoJSON polygon.
+ZoneShape = tuple[str, dict]
+
 
 class Fix(Protocol):
     ts: datetime
@@ -74,6 +84,8 @@ class Cycle:
     haul_s: float
     dump_s: float
     return_s: float
+    load_zone_id: str | None = None
+    dump_zone_id: str | None = None
 
     @property
     def queue_pct(self) -> float:
@@ -107,6 +119,17 @@ class _Visit:
     exit_ts: datetime
     start: int
     end: int  # exclusive
+
+
+def _zone_at(lat: float, lon: float, zones: Sequence[ZoneShape]) -> str | None:
+    """The first of ``zones`` containing the point, if any."""
+    return next((zid for zid, geom in zones if point_in_polygon(lat, lon, geom)), None)
+
+
+def _credited_zone(visit: _Visit, labels: list[str | None]) -> str | None:
+    """The zone holding most of the visit's fixes; on a tie, the one it was in first."""
+    counts = Counter(labels[k] for k in range(visit.start, visit.end) if labels[k] is not None)
+    return counts.most_common(1)[0][0] if counts else None
 
 
 def _visits(flags: list[bool], times: list[datetime]) -> list[_Visit]:
@@ -192,8 +215,8 @@ def compute_cycles(
     asset_id: str,
     fixes: list[Fix],
     *,
-    load_geom: dict,
-    dump_geom: dict,
+    load_zones: Sequence[ZoneShape],
+    dump_zones: Sequence[ZoneShape],
     move_threshold_kph: float = MOVE_THRESHOLD_KPH,
     min_visit_s: float = MIN_VISIT_S,
     max_cycle_s: float | None = None,
@@ -203,8 +226,8 @@ def compute_cycles(
     cycles, _ = analyse_cycles(
         asset_id,
         fixes,
-        load_geom=load_geom,
-        dump_geom=dump_geom,
+        load_zones=load_zones,
+        dump_zones=dump_zones,
         move_threshold_kph=move_threshold_kph,
         min_visit_s=min_visit_s,
         max_cycle_s=max_cycle_s,
@@ -217,8 +240,8 @@ def analyse_cycles(
     asset_id: str,
     fixes: list[Fix],
     *,
-    load_geom: dict,
-    dump_geom: dict,
+    load_zones: Sequence[ZoneShape],
+    dump_zones: Sequence[ZoneShape],
     move_threshold_kph: float = MOVE_THRESHOLD_KPH,
     min_visit_s: float = MIN_VISIT_S,
     max_cycle_s: float | None = None,
@@ -237,8 +260,10 @@ def analyse_cycles(
         return [], None
 
     times = [_aware(f.ts) for f in fixes]
-    in_load = [point_in_polygon(f.lat, f.lon, load_geom) for f in fixes]
-    in_dump = [point_in_polygon(f.lat, f.lon, dump_geom) for f in fixes]
+    load_at = [_zone_at(f.lat, f.lon, load_zones) for f in fixes]
+    dump_at = [_zone_at(f.lat, f.lon, dump_zones) for f in fixes]
+    in_load = [z is not None for z in load_at]
+    in_dump = [z is not None for z in dump_at]
     moving = [(f.speed_kph or 0.0) >= move_threshold_kph for f in fixes]
 
     def _long_enough(v: _Visit) -> bool:
@@ -281,6 +306,8 @@ def analyse_cycles(
                 haul_s=(dv.enter_ts - lv.exit_ts).total_seconds(),
                 dump_s=(dv.exit_ts - dv.enter_ts).total_seconds(),
                 return_s=(lv_next.enter_ts - dv.exit_ts).total_seconds(),
+                load_zone_id=_credited_zone(lv, load_at),
+                dump_zone_id=_credited_zone(dv, dump_at),
             )
         )
 

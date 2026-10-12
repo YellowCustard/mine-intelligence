@@ -34,6 +34,8 @@ def _cycle_dict(c: HaulCycle) -> dict[str, Any]:
         "end_ts": c.end_ts,
         "cycle_time_s": c.cycle_time_s,
         **{s: getattr(c, s) for s in _SEGMENTS},
+        "load_zone_id": c.load_zone_id,
+        "dump_zone_id": c.dump_zone_id,
     }
     d["queue_pct"] = 100.0 * c.queue_s / c.cycle_time_s if c.cycle_time_s else 0.0
     return d
