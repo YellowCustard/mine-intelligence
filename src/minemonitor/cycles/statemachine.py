@@ -4,10 +4,14 @@ Driven by load-zone and dump-zone membership:
 
     AT_FACE -> HAULING_LOADED -> AT_DUMP -> RETURNING_EMPTY -> AT_FACE
 
-A cycle spans one load-zone entry to the next. **Queue time** is the initial
-stationary spell inside the load zone — from when the truck first stops until it
-spots forward to the loader (its first movement in the zone). That movement is
-what separates queuing (unproductive waiting) from loading, using position alone.
+A cycle spans one load-zone entry to the next. **Queue time** is the time a truck
+spends waiting in the load zone for the loader: from its first stop there until it
+spots forward onto the loading spot. A line of trucks moves up in steps, so a truck
+may stop several times while it waits, creeping forward a truck length between
+stops; all of that is queue (audit M2). Loading is its last stop of at least
+``MIN_LOAD_S`` before it leaves the zone, and the move onto it is the spot. Stops
+closer together than ``MIN_STEP_M`` are one stop (a speed spike or a shuffle under
+the bucket is not a move), so the split uses position alone.
 
 A cycle longer than ``max_cycle_s`` is not a haul cycle (a breakdown, or a truck
 parked overnight between a dump and the next load) and is not reported. The cap also
@@ -26,6 +30,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 
+from minemonitor.ingest.geo import haversine_m
 from minemonitor.zones.geometry import point_in_polygon
 
 # Below this speed a fix counts as stationary; at/above it, the truck is moving
@@ -37,6 +42,15 @@ MOVE_THRESHOLD_KPH = 3.0
 # (e.g. a departing truck momentarily reading back inside) and must not create a
 # phantom cycle.
 MIN_VISIT_S = 15.0
+
+# Loading a haul truck takes minutes (several passes of the bucket), so a stop shorter
+# than this after the truck is loaded (giving way at the zone exit) is not the loading.
+MIN_LOAD_S = 30.0
+
+# A truck that stopped and stopped again closer than this to where it was did not move
+# up the line or onto the loader: the movement between was GNSS speed noise or a shuffle.
+# A move up the line is at least a truck length (~10 m).
+MIN_STEP_M = 5.0
 
 
 class Fix(Protocol):
@@ -112,20 +126,66 @@ def _visits(flags: list[bool], times: list[datetime]) -> list[_Visit]:
     return out
 
 
-def _queue_seconds(times: list[datetime], moving: list[bool], visit: _Visit) -> float:
-    """Initial stationary spell within a load-zone visit = queue time."""
-    s = None
-    for i in range(visit.start, visit.end):
-        if not moving[i]:
-            s = i
-            break
-    if s is None:
+@dataclass
+class _Stop:
+    """A stationary spell within a visit: fixes [start, end), ``end`` the next fix."""
+
+    start: int
+    end: int
+    n: int  # stationary fixes in it
+    lat: float  # their centroid
+    lon: float
+
+
+def _stops(fixes: list[Fix], moving: list[bool], visit: _Visit) -> list[_Stop]:
+    """The stops within a visit, merging those closer together than ``MIN_STEP_M``."""
+    out: list[_Stop] = []
+    i = visit.start
+    while i < visit.end:
+        if moving[i]:
+            i += 1
+            continue
+        start = i
+        while i < visit.end and not moving[i]:
+            i += 1
+        n = i - start
+        lat = sum(fixes[k].lat for k in range(start, i)) / n
+        lon = sum(fixes[k].lon for k in range(start, i)) / n
+        prev = out[-1] if out else None
+        if prev is not None and haversine_m(prev.lat, prev.lon, lat, lon) < MIN_STEP_M:
+            total = prev.n + n
+            out[-1] = _Stop(
+                start=prev.start,
+                end=i,
+                n=total,
+                lat=(prev.lat * prev.n + lat * n) / total,
+                lon=(prev.lon * prev.n + lon * n) / total,
+            )
+        else:
+            out.append(_Stop(start=start, end=i, n=n, lat=lat, lon=lon))
+    return out
+
+
+def _queue_seconds(
+    times: list[datetime], fixes: list[Fix], moving: list[bool], visit: _Visit
+) -> float:
+    """Time spent waiting in a load-zone visit: first stop until the spot to the loader."""
+    stops = _stops(fixes, moving, visit)
+    if not stops:
         return 0.0  # never stopped — drove through, no queue
-    for j in range(s + 1, visit.end):
-        if moving[j]:
-            return (times[j] - times[s]).total_seconds()  # first movement = spotting
-    # Still stationary at the end of the visit.
-    return (times[visit.end - 1] - times[s]).total_seconds()
+    last = len(times) - 1
+
+    def _length_s(stop: _Stop) -> float:
+        return (times[min(stop.end, last)] - times[stop.start]).total_seconds()
+
+    loading = next(
+        (k for k in range(len(stops) - 1, -1, -1) if _length_s(stops[k]) >= MIN_LOAD_S),
+        len(stops) - 1,
+    )
+    if loading == 0:
+        return 0.0  # its first stop was the loading: no wait
+    # Waiting ends when the truck leaves its last place in line for the loading spot.
+    return (times[stops[loading - 1].end] - times[stops[0].start]).total_seconds()
 
 
 def compute_cycles(
@@ -207,7 +267,7 @@ def analyse_cycles(
         if dv is None:
             continue  # incomplete cycle (no dump in between) — skip
 
-        queue_s = _queue_seconds(times, moving, lv)
+        queue_s = _queue_seconds(times, fixes, moving, lv)
         load_zone_s = (lv.exit_ts - lv.enter_ts).total_seconds()
         cycles.append(
             Cycle(

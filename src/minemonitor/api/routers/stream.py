@@ -20,7 +20,6 @@ from sqlalchemy.orm import Session
 
 from minemonitor.auth.deps import require_viewer
 from minemonitor.config import get_settings
-from minemonitor.cycles.shifts import shift_bounds
 from minemonitor.events.repository import list_events
 from minemonitor.operations import equipment
 from minemonitor.operations.shifts import resolve_shift
@@ -31,20 +30,6 @@ from minemonitor.storage.repositories import latest_positions
 router = APIRouter(tags=["stream"])
 
 _SEGMENTS = ("queue_s", "load_s", "haul_s", "dump_s", "return_s")
-
-
-def _current_shift(now: datetime) -> tuple[datetime, datetime, str]:
-    """The shift window (UTC) containing ``now``, in Africa/Harare."""
-    local_date = now.date()
-    for shift in ("day", "night"):
-        start, end = shift_bounds(local_date, shift)
-        if start <= now < end:
-            return start, end, shift
-    # Before the day shift starts: we are in the previous day's night shift.
-    from datetime import timedelta
-
-    start, end = shift_bounds(local_date - timedelta(days=1), "night")
-    return start, end, "night"
 
 
 def _cycles_in(session: Session, site_id: str, start: datetime, end: datetime) -> list[HaulCycle]:
@@ -62,24 +47,36 @@ def _cycles_in(session: Session, site_id: str, start: datetime, end: datetime) -
 
 
 def _cycle_summary(session: Session, site_id: str, now: datetime) -> dict[str, Any]:
+    """Cycle breakdown for the site's shift containing ``now``, from its own shift
+    definitions (the same window the header shows), never a fixed day/night split."""
     from datetime import timedelta
 
-    start, end, shift = _current_shift(now)
-    rows = _cycles_in(session, site_id, start, end)
+    window = resolve_shift(session, site_id, now)
+    if window is None:
+        return {"shift": None, "shift_id": None, "cycles": 0, "segments_s": {}, "queue_pct": None}
+    rows = _cycles_in(session, site_id, window.start, window.end)
     # If the current shift has just begun (or rolled over) with no complete
     # cycles yet, fall back to the previous shift so the chart still informs.
     if not rows:
-        prev_start = start - timedelta(hours=12)
-        prev_rows = _cycles_in(session, site_id, prev_start, start)
-        if prev_rows:
-            rows, shift = prev_rows, ("night" if shift == "day" else "day")
+        prev = resolve_shift(session, site_id, window.start - timedelta(seconds=1))
+        if prev is not None and prev.shift_id != window.shift_id:
+            prev_rows = _cycles_in(session, site_id, prev.start, prev.end)
+            if prev_rows:
+                rows, window = prev_rows, prev
     n = len(rows)
     if n == 0:
-        return {"shift": shift, "cycles": 0, "segments_s": {}, "queue_pct": None}
+        return {
+            "shift": window.name,
+            "shift_id": window.shift_id,
+            "cycles": 0,
+            "segments_s": {},
+            "queue_pct": None,
+        }
     total = sum(c.cycle_time_s for c in rows)
     seg = {s: sum(getattr(c, s) for c in rows) for s in _SEGMENTS}
     return {
-        "shift": shift,
+        "shift": window.name,
+        "shift_id": window.shift_id,
         "cycles": n,
         "mean_cycle_time_s": total / n,
         "segments_s": {s: seg[s] / n for s in _SEGMENTS},

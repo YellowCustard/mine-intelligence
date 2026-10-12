@@ -1,7 +1,10 @@
 """Per-asset ``asset.metrics.v1`` rollups over fixed time buckets.
 
 Derived from positions, recomputable, never hand-edited (brief §6). Each segment
-between consecutive fixes is attributed to the bucket of its earlier fix.
+between consecutive fixes is attributed to the bucket of its earlier fix. A segment
+starting at a fix without a speed is neither moving nor idle time, and such fixes do
+not enter the speed statistics (audit M10): a source that reports no speed must not
+read as an idle machine.
 """
 
 from __future__ import annotations
@@ -78,15 +81,18 @@ def compute_metrics(
     for i, f in enumerate(fixes):
         ts = _aware(f.ts)
         b = bucket_for(ts)
-        speed = f.speed_kph or 0.0
-        b.max_speed_kph = max(b.max_speed_kph, speed)
-        b._speed_sum += speed
-        b._speed_n += 1
+        speed = f.speed_kph
+        if speed is not None:
+            b.max_speed_kph = max(b.max_speed_kph, speed)
+            b._speed_sum += speed
+            b._speed_n += 1
         # Attribute the interval to the *next* fix to the earlier fix's bucket.
         if i + 1 < len(fixes):
             dt = (_aware(fixes[i + 1].ts) - ts).total_seconds()
             if 0 < dt <= bucket_s:  # ignore large gaps (offline stretches)
-                if speed >= MOVE_THRESHOLD_KPH:
+                if speed is None:
+                    pass  # unknown: neither moving nor idle
+                elif speed >= MOVE_THRESHOLD_KPH:
                     b.moving_time_s += dt
                     b.distance_m += haversine_m(f.lat, f.lon, fixes[i + 1].lat, fixes[i + 1].lon)
                 else:

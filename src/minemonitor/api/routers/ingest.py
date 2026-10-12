@@ -14,6 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from minemonitor.auth.deps import require_device, require_viewer
+from minemonitor.config import get_settings
+from minemonitor.devices import service as devices
 from minemonitor.ingest.service import (
     FutureTimestampError,
     PositionIngest,
@@ -41,7 +43,9 @@ def ingest_position(
     ride in the device payload, so a site-scoped device credential must not be
     able to publish telemetry for another site merely by changing the body. A
     site-scoped device may write only its own site; a global (site-less) device
-    account — the shared ingestor/simulator — may still write any site.
+    account — the shared ingestor/simulator — may still write any site. A device
+    account named after a provisioned ``device_id`` may write only that device's
+    asset, as on the broker (``devices.service.position_refusal``).
     """
     if device.site_id is not None and payload.site_id != device.site_id:
         log.warning(
@@ -56,6 +60,24 @@ def ingest_position(
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "device not authorised to publish for this site"
         )
+    refusal = devices.position_refusal(
+        db,
+        device,
+        payload.site_id,
+        payload.asset_id,
+        strict=get_settings().mqtt_require_registered_device,
+    )
+    if refusal is not None:
+        log.warning(
+            "rejected device ingest",
+            extra={
+                "device": device.username,
+                "site_id": payload.site_id,
+                "asset_id": payload.asset_id,
+                "reason": refusal,
+            },
+        )
+        raise HTTPException(status.HTTP_403_FORBIDDEN, refusal)
     try:
         reject_if_future(payload)
     except FutureTimestampError as exc:
