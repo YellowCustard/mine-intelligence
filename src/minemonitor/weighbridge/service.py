@@ -214,6 +214,16 @@ def tonnage_summary(
 _REQUIRED_COLS = {"ticket_no", "ts", "gross_kg", "tare_kg", "net_kg"}
 
 
+def _parse_ts(raw_ts: str | None) -> datetime:
+    """Parse a ticket time; one without a UTC offset is ambiguous on a UTC+2 site, so refused."""
+    if not raw_ts:
+        raise ValueError("ts is missing")
+    ts = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+    if ts.tzinfo is None:
+        raise ValueError(f"ts must carry its UTC offset: {raw_ts!r}")
+    return ts
+
+
 def import_csv(
     session: Session, *, site_id: str, csv_text: str, created_by: str, now: datetime
 ) -> dict[str, Any]:
@@ -235,7 +245,7 @@ def import_csv(
                 session,
                 site_id=site_id,
                 ticket_no=(raw.get("ticket_no") or "").strip(),
-                ts=datetime.fromisoformat((raw["ts"]).replace("Z", "+00:00")),
+                ts=_parse_ts(raw["ts"]),
                 gross_kg=float(raw["gross_kg"]),
                 tare_kg=float(raw["tare_kg"]),
                 net_kg=float(raw["net_kg"]),

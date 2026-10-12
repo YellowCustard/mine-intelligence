@@ -24,7 +24,6 @@ No contract here has a field that could carry identity, a face, or frame bytes.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
@@ -186,7 +185,7 @@ class Subject(_Strict):
 class Evidence(_Strict):
     """Why an operational event was concluded. Mandatory; never empty of a window."""
 
-    observation_window: tuple[datetime, datetime]
+    observation_window: tuple[AwareDatetime, AwareDatetime]
     track_ids: list[str] = Field(default_factory=list)
     frame_ids: list[str] = Field(default_factory=list)
     signals: dict[str, Any] = Field(default_factory=dict)

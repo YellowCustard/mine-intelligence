@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 import minemonitor.api.routers
 import minemonitor.contracts
+from minemonitor.contracts.vision import Evidence
 from tests.conftest import ADMIN, make_client
 
 NAIVE = "2026-09-05T11:42:07"
@@ -46,7 +47,9 @@ def _accepts_naive(annotation: Any) -> bool:
     try:
         value = TypeAdapter(annotation).validate_python(NAIVE)
     except ValidationError:
-        return False
+        # A container (a (start, end) window, a list of times) cannot take a bare string,
+        # so ask its members: a time nested inside one is held to the same rule.
+        return any(_mentions_datetime(a) and _accepts_naive(a) for a in typing.get_args(annotation))
     return isinstance(value, datetime)
 
 
@@ -126,6 +129,24 @@ def test_a_naive_timestamp_is_rejected_not_stored(
     # These used to answer 201 and store the time as if it were UTC.
     r = make_client(db_session, ADMIN).post(path, json=body)
     assert r.status_code == 422, r.text
+
+
+def test_a_naive_evidence_window_is_rejected() -> None:
+    # The window sits inside a tuple, where the field-level walk used to miss it.
+    with pytest.raises(ValidationError, match="timezone"):
+        Evidence.model_validate({"observation_window": [NAIVE, NAIVE]})
+
+
+def test_a_naive_weighbridge_csv_time_is_rejected_not_stored(db_session: Session) -> None:
+    # A weighbridge export in local time without an offset used to import as if UTC.
+    csv_text = f"ticket_no,ts,gross_kg,tare_kg,net_kg\nT-1,{NAIVE},40000,15000,25000\n"
+    r = make_client(db_session, ADMIN).post(
+        "/sites/kn-zw-01/weighbridge/import", json={"csv": csv_text}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["imported"] == 0
+    assert [e["row"] for e in r.json()["errors"]] == [2]
+    assert "offset" in r.json()["errors"][0]["error"]
 
 
 def test_a_naive_report_time_is_rejected(db_session: Session) -> None:
