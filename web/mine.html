@@ -1408,15 +1408,17 @@ async function renderSysAudit(){
     const m=document.getElementById('sy-audit-meta'); if(m) m.textContent='admin only';
     return;
   }
+  // One click for what a POTRAZ inspector asks for (processing, retention, audit, breaches).
+  const pack=`<p class="sub2" style="margin-bottom:8px"><a class="ackbtn" id="sy-pack" href="/sites/${encodeURIComponent(SITE)}/compliance-pack.zip">Compliance pack</a> processing, retention, audit log and breach register (download is audited)</p>`;
   try{
     const r=await fetch(`/sites/${SITE}/audit?limit=20`);
-    if(!r.ok){ el.innerHTML='<p class="note">Audit log unavailable.</p>'; return; }
+    if(!r.ok){ el.innerHTML=pack+'<p class="note">Audit log unavailable.</p>'; return; }
     const rows=await r.json();
-    el.innerHTML = rows.length ? rows.map(a=>
+    el.innerHTML = pack + (rows.length ? rows.map(a=>
       `<div class="md-line"><span class="m sub2">${fmtTime(a.ts)}</span> <b>${E(a.action)}</b> `
       +`<span class="sub2">${E(a.actor)}${a.entity_id?` · ${E(a.entity_id)}`:''}</span></div>`).join('')
-      : '<p class="note">No audit entries yet.</p>';
-  }catch(e){ el.innerHTML='<p class="note">Audit log unavailable.</p>'; }
+      : '<p class="note">No audit entries yet.</p>');
+  }catch(e){ el.innerHTML=pack+'<p class="note">Audit log unavailable.</p>'; }
 }
 
 async function ackAlarm(id){

@@ -1,21 +1,29 @@
 """M4 acceptance: computed queue time matches the simulator's injected truth.
 
 The strongest form: match each computed cycle to the ground-truth queue episode
-inside it and require near-exact agreement, plus an aggregate within 5%.
+inside it and require near-exact agreement, plus an aggregate within 5%. Both run
+against a line that moves up in steps (the simulator's default) and against trucks
+all waiting on one staging line (audit M2: the old rule only passed the second).
 """
 
 from __future__ import annotations
 
+import pytest
+
 from minemonitor.cycles import compute_cycles
-from minemonitor.ingest.adapters.simulator import FACE, ROM, Simulator
+from minemonitor.ingest.adapters.simulator import FACE, QUEUE_STEP_M, ROM, Simulator
 from minemonitor.zones.geometry import box_polygon
 
 _LOAD = box_polygon(FACE[0], FACE[1], 70)
 _DUMP = box_polygon(ROM[0], ROM[1], 70)
 
+_QUEUES = pytest.mark.parametrize(
+    "queue_step_m", [QUEUE_STEP_M, 0.0], ids=["stepwise-line", "staging-line"]
+)
 
-def _run(ticks: int = 4000, seed: int = 1):
-    sim = Simulator(seed=seed)
+
+def _run(ticks: int = 4000, seed: int = 1, queue_step_m: float = QUEUE_STEP_M):
+    sim = Simulator(seed=seed, queue_step_m=queue_step_m)
     fixes: dict[str, list] = {}
     for _ in range(ticks):
         for p in sim.step():
@@ -40,9 +48,10 @@ def test_segments_sum_to_cycle_time() -> None:
         assert abs(seg - c.cycle_time_s) < 1e-6
 
 
-def test_per_cycle_queue_matches_injected_truth() -> None:
+@_QUEUES
+def test_per_cycle_queue_matches_injected_truth(queue_step_m: float) -> None:
     """Each cycle's queue equals the ground-truth episode inside it (±1 tick)."""
-    sim, fixes = _run()
+    sim, fixes = _run(queue_step_m=queue_step_m)
     matched = 0
     for aid, fx in fixes.items():
         if not aid.startswith("HT-"):
@@ -57,8 +66,9 @@ def test_per_cycle_queue_matches_injected_truth() -> None:
     assert matched >= 15  # plenty of cycles checked across the fleet
 
 
-def test_aggregate_queue_within_five_percent() -> None:
-    sim, fixes = _run()
+@_QUEUES
+def test_aggregate_queue_within_five_percent(queue_step_m: float) -> None:
+    sim, fixes = _run(queue_step_m=queue_step_m)
     computed = truth = 0.0
     for aid, fx in fixes.items():
         if not aid.startswith("HT-"):

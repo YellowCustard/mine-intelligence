@@ -7,9 +7,11 @@ means the two transports cannot drift in how they validate or what they store.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from minemonitor.config import get_settings
@@ -79,15 +81,36 @@ def store_position(session: Session, payload: PositionIngest) -> bool:
     return insert_position(session, to_canonical(payload))
 
 
+def lock_asset(session: Session, site_id: str, asset_id: str) -> None:
+    """Hold this asset's processing lock until the transaction ends (audit M9).
+
+    Zone/rule processing reads the asset's zone state, steps it and writes it back.
+    Two fixes for one asset processed side by side (parallel HTTP requests, or HTTP
+    and MQTT at once) would both step the same stale state, and both raise the alarm
+    one entry deserves. A PostgreSQL transaction-scoped advisory lock per asset makes
+    them take turns; a later fix then sees the earlier one's state. Other assets are
+    not held up. SQLite (tests) serialises writers already.
+    """
+    if session.get_bind().dialect.name != "postgresql":
+        return
+    digest = hashlib.blake2b(
+        f"{site_id}\x1f{asset_id}".encode(), digest_size=8, person=b"mm-asset-lock"
+    ).digest()
+    key = int.from_bytes(digest, "big", signed=True)  # a collision only adds a wait
+    session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+
+
 def store_and_process(session: Session, payload: PositionIngest) -> tuple[bool, list]:
     """Store a position and run zone/rule processing in one transaction.
 
     Returns ``(created, events)``. The position insert and any events it raises
     commit together, so a crash cannot store a position while losing its events.
+    Processing for one asset is serialised (:func:`lock_asset`).
     """
     from minemonitor.pipeline import process_position
 
     canonical = to_canonical(payload)
+    lock_asset(session, canonical.site_id, canonical.asset_id)
     created = insert_position(session, canonical, commit=False)
     events = process_position(session, canonical, created)
     session.commit()

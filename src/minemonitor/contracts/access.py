@@ -13,10 +13,9 @@ separate ``event.v1`` when they disagree — the intelligence on top of the reco
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 AccessDecision = Literal["granted", "denied"]
 
@@ -29,7 +28,7 @@ class AccessEventV1(BaseModel):
     schema_: Literal["access.event.v1"] = Field(default="access.event.v1", alias="schema")
     event_id: str = Field(min_length=1)
     site_id: str = Field(min_length=1)
-    ts: datetime
+    ts: AwareDatetime
     source_system: str = Field(min_length=1)  # e.g. "dahua_gate", "ihua_tag", "turnstile"
     gate_id: str = Field(min_length=1)
     # An opaque credential reference (tag/card/face-event id) — NEVER a template or image.

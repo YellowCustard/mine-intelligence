@@ -8,10 +8,9 @@ autonomously shuts a machine down (advisory, brief §15).
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 RiskLevel = Literal["Normal", "Watch", "Elevated", "High", "Critical", "Unknown"]
 Basis = Literal["observed", "measured", "estimated", "inferred", "unknown"]
@@ -28,7 +27,7 @@ class MaintenanceHealthV1(BaseModel):
     site_id: str = Field(min_length=1)
     asset_id: str = Field(min_length=1)
     component: str = Field(min_length=1)
-    ts: datetime
+    ts: AwareDatetime
     risk: RiskLevel
     basis: Basis
     confidence: float = Field(ge=0, le=1)
