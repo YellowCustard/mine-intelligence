@@ -1,4 +1,4 @@
-"""Teltonika Codec 8 / 8E adapter — real GNSS trackers over raw TCP (brief §7, §10).
+"""Teltonika Codec 8 / 8E adapter — real GNSS trackers over raw TCP or TLS (brief §7, §10).
 
 Trackers speak their own binary protocol, not MQTT, so this adapter decodes it and
 republishes ``asset.position.v1`` into MQTT — indistinguishable at the ingest
@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import ssl
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -231,6 +232,23 @@ class TeltonikaReplayAdapter(DeviceAdapter):
             )
 
 
+def tls_context(cert_path: str, key_path: str) -> ssl.SSLContext | None:
+    """The listener's TLS context, or None to listen in plain TCP (plan C-2).
+
+    Both paths or neither: a certificate without its key, or the reverse, is refused at
+    startup rather than served as plain TCP. So is a file that is missing or unreadable.
+    Trackers authenticate by IMEI, so no client certificate is asked for.
+    """
+    if not cert_path and not key_path:
+        return None
+    if not cert_path or not key_path:
+        raise ValueError("MM_TELTONIKA_TLS_CERT and MM_TELTONIKA_TLS_KEY must be set together")
+    ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.load_cert_chain(cert_path, key_path)
+    return ctx
+
+
 def default_asset_for(imei: str) -> str:
     """Placeholder IMEI→asset mapping pending the real fleet list (brief §14)."""
     return f"teltonika-{imei}"
@@ -280,6 +298,7 @@ class TeltonikaServer:
         imei_to_asset=default_asset_for,
         resolve: ImeiResolver | None = None,
         idle_timeout_s: float | None = None,
+        tls: ssl.SSLContext | None = None,
     ) -> None:
         self._publisher = publisher
         self._host = host
@@ -293,6 +312,7 @@ class TeltonikaServer:
         # connection that stops sending, so a half-open socket cannot linger.
         self._resolve = resolve
         self._idle_timeout_s = idle_timeout_s
+        self._tls = tls
 
     async def _read_exactly(self, reader: asyncio.StreamReader, n: int) -> bytes:
         if self._idle_timeout_s is None:
@@ -353,13 +373,23 @@ class TeltonikaServer:
             pass  # device disconnected
         except TimeoutError:
             log.info("teltonika idle timeout", extra={"peer": str(peer)})  # half-open connection
+        except (ConnectionError, ssl.SSLError) as exc:
+            # A dropped link: over TLS it surfaces as a reset or an SSL error, not as EOF.
+            log.info("teltonika connection lost", extra={"peer": str(peer), "error": str(exc)})
         finally:
             log.info("teltonika disconnected", extra={"peer": str(peer)})
             writer.close()
 
+    async def start(self) -> asyncio.Server:
+        server = await asyncio.start_server(self._handle, self._host, self._port, ssl=self._tls)
+        log.info(
+            "teltonika listener up",
+            extra={"host": self._host, "port": self._port, "tls": self._tls is not None},
+        )
+        return server
+
     async def serve(self) -> None:
-        server = await asyncio.start_server(self._handle, self._host, self._port)
-        log.info("teltonika listener up", extra={"host": self._host, "port": self._port})
+        server = await self.start()
         async with server:
             await server.serve_forever()
 
@@ -373,6 +403,7 @@ def main() -> None:
 
     settings = get_settings()
     configure_logging(settings.log_level)
+    tls = tls_context(settings.teltonika_tls_cert, settings.teltonika_tls_key)
     publisher = MqttPublisher()
     publisher.start()
     resolver = make_device_resolver(
@@ -387,6 +418,7 @@ def main() -> None:
         site_id=settings.default_site_id,
         resolve=resolver,
         idle_timeout_s=settings.teltonika_idle_timeout_s,
+        tls=tls,
     )
     try:
         asyncio.run(server.serve())
