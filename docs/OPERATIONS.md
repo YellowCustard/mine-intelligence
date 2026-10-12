@@ -122,9 +122,13 @@ debounce/hysteresis symptom, not normal — see §8.
 
 **Zone-occupancy alarms.** A zone can carry a `max_occupancy` in its rule payload; when
 more assets are confirmed inside it than the cap (the "6 people in a 5-person sector"
-signal), the ingestor raises one `zone_occupancy` `event.v1` into the same queue and
-holds it open (deduped) until acknowledged. It is a cross-asset aggregate checked on the
-maintenance tick, source-agnostic (GNSS today, vision tracks later), and advisory.
+signal), the ingestor raises one `zone_occupancy` `event.v1` into the same queue for as
+long as the zone stays over its cap. When a tick finds the zone back at or under its cap, the
+alarm is marked `cleared_at`, and the next breach raises a new alarm whether or not the first
+was acknowledged. It is a cross-asset aggregate checked on the maintenance tick,
+source-agnostic (GNSS today, vision tracks later), and advisory. `asset_offline` and
+`camera_offline` are deduped the same way: one alarm per outage, and a new outage after the
+asset or camera reports again is a new alarm.
 
 Set or clear a sector's capacity without resending the whole zone via
 `PUT /api/v1/sites/{id}/zones/{zone_id}/occupancy` (admin, audited) with
