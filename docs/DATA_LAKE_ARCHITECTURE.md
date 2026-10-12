@@ -150,8 +150,9 @@ didn't — the exact gap workers exploit. Formalising `missed` as a first-class 
 concrete answer to "116 cameras, 2 operators, unmanageable."
 
 **How classification works (deterministic, explainable):**
-- **Dedup** — one open alarm per (subject, type) while the condition persists; a re-observation
-  refreshes, it doesn't restack (already implemented for offline/occupancy/search).
+- **Dedup** — one alarm per (subject, type) per episode of the condition; a re-observation
+  doesn't restack, and a new episode after recovery is a new alarm whatever the first one's
+  state (implemented for offline/camera-offline/occupancy; per passage for search).
 - **Severity** — set by **rule/zone policy**, never by a model; a restricted zone → critical, a
   speed-limited zone → warning.
 - **Correlation raises confidence** — two independent sources agreeing (UWB tag count == vision

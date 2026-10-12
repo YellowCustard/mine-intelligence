@@ -370,6 +370,44 @@ def test_camera_offline_raised_once_for_silent_commissioned_camera(
     assert service.detect_camera_offline(db_session, SITE, stale_s=300, now=_NOW) == []  # deduped
 
 
+def test_camera_offline_rearms_after_the_camera_recovers(db_session: Session, cam: Camera) -> None:
+    from datetime import timedelta
+
+    from minemonitor.events.repository import acknowledge_event
+
+    def health(ts: str, state: str = "ok") -> None:
+        service.ingest(db_session, service.parse(_cam_health(cam.id, ts, state)), received_at=_NOW)
+        db_session.commit()
+
+    health("2026-09-28T07:50:00Z")
+    first = service.detect_camera_offline(db_session, SITE, stale_s=300, now=_NOW)
+    assert len(first) == 1
+    acknowledge_event(db_session, SITE, first[0].event_id, "sup")
+    health("2026-09-28T08:10:00Z")  # reporting again
+    at = _NOW + timedelta(minutes=12)
+    assert service.detect_camera_offline(db_session, SITE, stale_s=300, now=at) == []
+    at = _NOW + timedelta(minutes=30)  # silent since 08:10: a second outage
+    assert len(service.detect_camera_offline(db_session, SITE, stale_s=300, now=at)) == 1
+    at = _NOW + timedelta(minutes=31)
+    assert service.detect_camera_offline(db_session, SITE, stale_s=300, now=at) == []
+
+
+def test_no_signal_then_silent_is_one_outage(db_session: Session, cam: Camera) -> None:
+    from datetime import timedelta
+
+    def health(ts: str, state: str = "ok") -> None:
+        service.ingest(db_session, service.parse(_cam_health(cam.id, ts, state)), received_at=_NOW)
+        db_session.commit()
+
+    health("2026-09-28T07:40:00Z")
+    for ts in ("2026-09-28T07:50:00Z", "2026-09-28T07:55:00Z", "2026-09-28T08:00:00Z"):
+        health(ts, "no_signal")  # stream down, node still reporting
+    assert len(service.detect_camera_offline(db_session, SITE, stale_s=300, now=_NOW)) == 1
+    # The node then goes silent too: still the same blind window, not a second alarm.
+    at = _NOW + timedelta(minutes=20)
+    assert service.detect_camera_offline(db_session, SITE, stale_s=300, now=at) == []
+
+
 def test_fresh_camera_is_not_offline(db_session: Session, cam: Camera) -> None:
     service.ingest(
         db_session, service.parse(_cam_health(cam.id, "2026-09-28T07:58:00Z")), received_at=_NOW

@@ -3,7 +3,8 @@
 An asset is *offline* if it was active (its last fix had ignition on) but no
 position has arrived for a threshold. That is different from *stationary with
 ignition off* (parked), which is normal and raises nothing — the two mean
-different things to a supervisor (brief §9). Deduped: one open alarm per asset.
+different things to a supervisor (brief §9). Deduped per outage: one alarm per silence, and a
+new silence after the asset reports again is a new alarm.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from minemonitor.contracts import EventV1
-from minemonitor.events.repository import has_open_event, new_event_id, persist_event
+from minemonitor.events.repository import alarmed_since, new_event_id, persist_event
 from minemonitor.storage.models import Position
 
 SOURCE = "gnss_offline"
@@ -58,7 +59,9 @@ def detect_offline(
         # unknown as parked let every outage of such a tracker pass unseen.
         if age <= threshold_s or ignition is False:
             continue
-        if has_open_event(session, site_id, asset_id, "asset_offline", None):
+        # One alarm per outage: the outage began at this fix, so an alarm raised since covers
+        # it, whatever its state. A fix after that alarm would have started a new outage.
+        if alarmed_since(session, site_id, "asset_offline", _aware(ts), asset_id=asset_id):
             continue
         events.append(
             EventV1(
