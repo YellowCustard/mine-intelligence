@@ -1,10 +1,13 @@
 """Tick reads that do not grow with history (soak).
 
-Additive and safe for an existing install: one nullable column and one partial index on
-``access_events``. ``search_escalated_at`` marks a passage whose skipped search has been
-raised, so the tick reads only searches still pending (the partial index holds just those)
-instead of every missed search ever, and an alarm purged by events retention is not raised
-again. Passages already escalated are marked from their ``search_missed`` alarms.
+Additive and safe for an existing install: one nullable column and two indexes.
+
+- ``access_events.search_escalated_at`` marks a passage whose skipped search has been raised,
+  so the tick reads only searches still pending (a partial index holds just those) instead of
+  every missed search ever, and an alarm purged by events retention is not raised again.
+  Passages already escalated are marked from their ``search_missed`` alarms.
+- ``events (site_id, type, ts)``: the occupancy check's "latest alarm of this type for this
+  zone" read the site's whole alarm history backwards whenever the zone had none.
 
 Revision ID: 0032_bounded_tick_reads
 Revises: 0031_source_status
@@ -50,8 +53,10 @@ def upgrade() -> None:
         postgresql_where=sa.text(_PENDING),
         sqlite_where=sa.text(_PENDING),
     )
+    op.create_index("ix_events_site_type_ts", "events", ["site_id", "type", "ts"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_events_site_type_ts", table_name="events")
     op.drop_index("ix_access_events_search_pending", table_name="access_events")
     op.drop_column("access_events", "search_escalated_at")

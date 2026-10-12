@@ -156,7 +156,12 @@ class Event(Base):
     __tablename__ = "events"
     # The alarm queue is read as "this site's events, newest first" on every
     # dashboard poll — a composite index keeps that ordered scan off the heap.
-    __table_args__ = (Index("ix_events_site_ts", "site_id", "ts"),)
+    # The tick's checks ask for one type of event ("the latest occupancy alarm for this
+    # zone", "an offline alarm since"): by type, they read that type only, not the history.
+    __table_args__ = (
+        Index("ix_events_site_ts", "site_id", "ts"),
+        Index("ix_events_site_type_ts", "site_id", "type", "ts"),
+    )
 
     event_id: Mapped[str] = mapped_column(String, primary_key=True)
     site_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
