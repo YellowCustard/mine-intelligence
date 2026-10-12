@@ -19,6 +19,7 @@ from minemonitor import audit, heartbeat
 from minemonitor.api.routers.health import _mqtt_reachable
 from minemonitor.auth.deps import require_admin, require_viewer
 from minemonitor.config import get_settings
+from minemonitor.ingest import tick
 from minemonitor.operations import bottlenecks as bottlenecks_mod
 from minemonitor.operations import dataquality as dataquality_mod
 from minemonitor.operations import exceptions as exceptions_mod
@@ -122,6 +123,7 @@ def system_health(site_id: str, db: Session = Depends(get_db)) -> dict[str, Any]
         offline_after_s=settings.offline_threshold_s,
         ingestor_fresh=ingestor_fresh,
         mqtt_ok=mqtt_ok,
+        failing_steps=tick.failing_steps(db, site_id),
     )
 
 

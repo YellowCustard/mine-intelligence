@@ -35,7 +35,8 @@ payload — queue time at the face), and a live operations dashboard. See
   moving/idle, speeds, zone dwell, loads) and a per-shift summary (cycle count,
   mean cycle time, segment breakdown incl. queue %). No target is ever hardcoded —
   we report this mine's observed numbers. API: cycles, shift-summary, metrics, and
-  an idempotent recompute.
+  an idempotent recompute. The ingestor keeps them current incrementally: each tick
+  rebuilds an asset only from its open cycle and any late data, never the whole history.
 - **Live operations dashboard** — the existing `web/mine.html` wired to the real
   API (not rewritten): the site plan, geofences, asset markers, fleet and alarm
   tables and cycle chart are driven by a `fetch()` of current state plus a
@@ -343,7 +344,9 @@ These endpoints are pure reads over existing data (no new migration).
 - **System-health centre** — beyond the `/health` probe, answers *whose* fault a
   gap is: `platform_degraded` (ingestor/broker/DB — ours) vs `field_degraded`
   (trackers/comms quiet — the site's), never conflated:
-  `GET /sites/{id}/system-health`.
+  `GET /sites/{id}/system-health`. It also names any maintenance step (offline
+  alarms, cycles, notifications, retention, …) whose latest run failed, so a job
+  that keeps failing is visible while the ingestor itself is alive.
 - **Role capabilities** — `GET /me/capabilities` returns per-role capability flags
   so a role-specific UI (control room / supervisor / manager / admin) keys off one
   source of truth; the API still enforces every permission independently.

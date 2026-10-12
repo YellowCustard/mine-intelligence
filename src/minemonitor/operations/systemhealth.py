@@ -34,8 +34,15 @@ def compute_system_health(
     ingestor_fresh: bool,
     mqtt_ok: bool,
     db_ok: bool = True,
+    failing_steps: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Compose the platform-vs-field health verdict for a site."""
+    """Compose the platform-vs-field health verdict for a site.
+
+    ``failing_steps`` names maintenance-tick steps whose latest attempt failed for this
+    site (or platform-wide): the ingestor is alive, but an alarm, analytics or
+    housekeeping job is not running.
+    """
+    failing_steps = failing_steps or []
     # Most recent fix across the site, and how many assets are currently silent.
     latest_ts = session.execute(
         select(func.max(Position.ts)).where(Position.site_id == site_id)
@@ -55,7 +62,7 @@ def compute_system_health(
         if a_latest is None or (now - _aware(a_latest)).total_seconds() > offline_after_s:
             silent += 1
 
-    app_ok = db_ok and mqtt_ok and ingestor_fresh
+    app_ok = db_ok and mqtt_ok and ingestor_fresh and not failing_steps
     # Ingest is flowing if a recent fix landed. If not, blame the app plane when it
     # is unhealthy, otherwise the field (trackers/comms) — never both at once.
     ingest_flowing = latest_age_s is not None and latest_age_s <= offline_after_s
@@ -73,6 +80,7 @@ def compute_system_health(
             "db": "ok" if db_ok else "unavailable",
             "mqtt": "ok" if mqtt_ok else "unavailable",
             "ingestor": "ok" if ingestor_fresh else "stale",
+            "failing_steps": failing_steps,
         },
         "field_plane": {
             "assets": len(asset_ids),
