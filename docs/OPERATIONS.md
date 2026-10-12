@@ -360,9 +360,18 @@ docker compose exec mqtt kill -HUP 1
 
 **Strict mode.** With `MM_MQTT_REQUIRE_REGISTERED_DEVICE=true` the ingestor also accepts
 telemetry only for assets with an enabled device row — a second, source-agnostic check
-above the broker ACL. It is **off by default** so a fresh or demo install ingests
-without provisioning. Independently of this flag, the ingestor always rejects any
-message whose topic and payload disagree (anti-spoof).
+above the broker ACL. HTTP ingest applies the same check to `device` accounts (an admin is
+exempt, so the post-deploy smoke check still runs). It is **off by default** so a fresh or
+demo install ingests without provisioning. Independently of this flag, the ingestor always
+rejects any message whose topic and payload disagree (anti-spoof).
+
+**HTTP ingest uses the same binding.** A `device` account whose username is a provisioned
+`device_id` is the identity the broker knows, so `POST /ingest/positions` and
+`POST /ingest/vision` hold it to what the ACL lets that device write: a tracker posts only
+its own asset's positions, a vision edge node only its own site's vision records, and a
+disabled device nothing (`403` with the reason). Name a tracker's or edge node's HTTP account
+after its `device_id`. A `device` account with no device row (a gateway, the shared ingest
+account) keeps its site scope only.
 
 ### 7.1 First-party vision edge nodes (Stage B)
 

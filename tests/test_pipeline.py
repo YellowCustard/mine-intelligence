@@ -128,3 +128,34 @@ def test_re_entry_raises_a_second_event(session: Session) -> None:
     ]
     _feed(session, seq)
     assert len(_critical_breaches(session, "LV-07")) == 2
+
+
+def test_lone_inside_fixes_either_side_of_an_outage_raise_none(session: Session) -> None:
+    """Two fixes inside 15 min apart corroborate nothing: no breach (audit M11)."""
+    inside = (_MAG_LAT, _MAG_LON)
+    _feed(session, [_pos("LV-07", *inside, 0), _pos("LV-07", *inside, 15 * 60)])
+    assert _critical_breaches(session, "LV-07") == []
+    _feed(session, [_pos("LV-07", *inside, 15 * 60 + 1)])  # a second fix, now consecutive
+    assert len(_critical_breaches(session, "LV-07")) == 1
+
+
+def test_a_zone_can_require_time_inside_before_a_breach(session: Session) -> None:
+    upsert_zone(
+        session,
+        site_id="kn-zw-01",
+        zone_id="r1-explosives-magazine",
+        name="R1 Explosives Magazine",
+        kind="restricted",
+        geometry=box_polygon(_MAG_LAT, _MAG_LON, 40),
+        rules={"authorized_classes": [], "severity": "critical", "min_entry_dwell_s": 3},
+    )
+    session.commit()
+    far = (_MAG_LAT + 0.01, _MAG_LON)
+    inside = (_MAG_LAT, _MAG_LON)
+    # In for 2 s (three fixes), then out: not long enough.
+    seq = [_pos("LV-07", *far, 0)] + [_pos("LV-07", *inside, i) for i in (1, 2, 3)]
+    seq += [_pos("LV-07", *far, 4), _pos("LV-07", *far, 5)]
+    _feed(session, seq)
+    assert _critical_breaches(session, "LV-07") == []
+    _feed(session, [_pos("LV-07", *inside, i) for i in range(6, 10)])  # in for 3 s
+    assert len(_critical_breaches(session, "LV-07")) == 1
