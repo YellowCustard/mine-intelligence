@@ -302,6 +302,100 @@ def test_cursor_never_runs_ahead_of_server_time(db_session: Session) -> None:
     assert cur is not None and cur <= _NOW - timedelta(seconds=30)
 
 
+# -- a gate feed outage raises an alarm (plan G2) --------------------------------------
+
+
+def _feed_alarms(db: Session) -> list[Any]:
+    from sqlalchemy import select
+
+    from minemonitor.storage.models import Event
+
+    return list(
+        db.execute(select(Event).where(Event.type == "source_offline").order_by(Event.ts))
+        .scalars()
+        .all()
+    )
+
+
+def _poll_at(db: Session, minutes: float, *, fail: bool) -> None:
+    from datetime import timedelta
+
+    poll_once(
+        db,
+        SITE,
+        _FakeSource([], fail=fail),
+        source_system="dahua_gate",
+        now=_NOW + timedelta(minutes=minutes),
+        offline_after_s=600,
+    )
+
+
+def test_feed_outage_raises_one_alarm_after_threshold(db_session: Session) -> None:
+    _poll_at(db_session, 0, fail=False)  # the feed was up
+    for m in (1, 5, 10):  # failing, but not yet for 10 minutes
+        _poll_at(db_session, m, fail=True)
+    assert _feed_alarms(db_session) == []
+    _poll_at(db_session, 11, fail=True)  # 10 min since the first failed poll
+    _poll_at(db_session, 12, fail=True)
+    alarms = _feed_alarms(db_session)
+    assert len(alarms) == 1
+    a = alarms[0]
+    assert a.severity == "warning" and a.advisory and a.state == "open"
+    assert a.source == "access_feed:dahua_gate" and a.asset_id is None
+    assert a.detail["failing_since"].startswith("2026-09-12T09:01")
+    assert "gate link down" in a.detail["last_error"]
+
+
+def test_feed_never_reached_since_start_still_alarms(db_session: Session) -> None:
+    for m in (0, 6, 10):
+        _poll_at(db_session, m, fail=True)
+    assert len(_feed_alarms(db_session)) == 1
+
+
+def test_feed_recovery_rearms_and_marks_the_alarm(db_session: Session) -> None:
+    from minemonitor.events.repository import acknowledge_event
+
+    for m in (0, 10):
+        _poll_at(db_session, m, fail=True)
+    first = _feed_alarms(db_session)[0]
+    acknowledge_event(db_session, SITE, first.event_id, "sup")
+    _poll_at(db_session, 15, fail=False)  # feed restored
+    db_session.refresh(first)
+    assert first.detail["recovered_at"].startswith("2026-09-12T09:15")
+    assert "restored" in first.summary
+    # A second outage is a new alarm, not swallowed by the first (acknowledged) one.
+    for m in (20, 31):
+        _poll_at(db_session, m, fail=True)
+    assert len(_feed_alarms(db_session)) == 2
+
+
+def test_short_blips_never_alarm(db_session: Session) -> None:
+    for m in range(0, 60, 3):  # fails every other poll, never 10 minutes in a row
+        _poll_at(db_session, m, fail=(m // 3) % 2 == 0)
+    assert _feed_alarms(db_session) == []
+
+
+def test_feed_outage_is_per_site(db_session: Session) -> None:
+    from datetime import timedelta
+
+    from minemonitor.storage.models import Site
+
+    db_session.add(Site(site_id="other-site", name="O", timezone="Africa/Harare"))
+    db_session.commit()
+    for m in (0, 10):
+        _poll_at(db_session, m, fail=True)
+        poll_once(
+            db_session,
+            "other-site",
+            _FakeSource([]),
+            source_system="dahua_gate",
+            now=_NOW + timedelta(minutes=m),
+            offline_after_s=600,
+        )
+    alarms = _feed_alarms(db_session)
+    assert [a.site_id for a in alarms] == [SITE]
+
+
 # -- one poll batch under the production session settings (autoflush off) ---------------
 
 
