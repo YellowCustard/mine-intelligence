@@ -923,6 +923,47 @@ class AccessEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class AccessQuarantine(Base):
+    """A gate event refused at ingest because its device clock is too far ahead (plan G1).
+
+    Not an access record: the passage's true time is unknown, so it is never stored in
+    ``access_events`` (where it would move the poll cursor into the future and hide every later
+    event). Keyed on the same deterministic id as the access event, so a vendor that re-presents
+    the same event every poll is recognised and never re-alarms. Holds **no personal data**
+    (no operator or credential reference); ``source_event_id`` finds the record on the gate
+    appliance, which keeps it.
+    """
+
+    __tablename__ = "access_quarantine"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False, index=True)
+    source_system: Mapped[str] = mapped_column(String, nullable=False)
+    source_event_id: Mapped[str] = mapped_column(String, nullable=False)
+    gate_id: Mapped[str] = mapped_column(String, nullable=False)
+    decision: Mapped[str] = mapped_column(String, nullable=False)
+    claimed_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    skew_s: Mapped[float] = mapped_column(Float, nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SourceStatus(Base):
+    """Reachability of a polled external feed (plan G2), e.g. the Dahua gate API.
+
+    Persisted so an outage keeps its start time across an ingestor restart or a power cut
+    (brief §3). ``failing_since`` is the first failed poll of the current outage and is cleared
+    by the next successful one; ``source_offline`` is raised once per outage from it.
+    """
+
+    __tablename__ = "source_status"
+
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), primary_key=True)
+    source: Mapped[str] = mapped_column(String, primary_key=True)
+    last_ok_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failing_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
 class GeneratorReading(Base):
     """A **measured** DSE genset controller reading (generator domain, FP-11).
 

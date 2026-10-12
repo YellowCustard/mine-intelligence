@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from minemonitor import audit
 from minemonitor.config import get_settings
 from minemonitor.storage.models import (
+    AccessQuarantine,
     AssetMetrics,
     AuditLog,
     BreachOperator,
@@ -131,6 +132,10 @@ def run_retention(
     deleted["asset_metrics"] = _purge(AssetMetrics, AssetMetrics.bucket_start, metrics_days)
     deleted["haul_cycles"] = _purge(HaulCycle, HaulCycle.end_ts, metrics_days)
     deleted["events"] = _purge(Event, Event.ts, events_days)
+    # Quarantined gate events are the evidence behind a clock-skew alarm: they follow events.
+    deleted["access_quarantine"] = _purge(
+        AccessQuarantine, AccessQuarantine.first_seen_at, events_days
+    )
     deleted["delay_classifications"] = _purge(
         DelayClassification, DelayClassification.end_ts, annotations_days
     )

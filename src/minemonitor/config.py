@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     # On each poll, refetch this far behind the last-seen event so a boundary event is never
     # missed; idempotent ingest drops the overlap.
     access_gate_overlap_s: int = 30
+    # Polls failing for this long (the gate API unreachable or erroring) raise one
+    # ``source_offline`` alarm, so "no one came through" is never confused with "the feed is down".
+    access_gate_offline_s: int = Field(default=600, ge=60)
 
     # Live DSE generator poller (FP-11). Blank host = off (the simulator and the HTTP-ingest
     # endpoint still work). When set, the ingestor polls the DSE controller(s) over Modbus TCP
