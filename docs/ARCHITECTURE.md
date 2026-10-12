@@ -149,6 +149,8 @@ The network and power **will** fail; the whole ingest side is designed around it
   anonymous broker. Above the broker, the ingestor still independently rejects any
   message whose topic and payload disagree (anti-spoof), and, when
   `MM_MQTT_REQUIRE_REGISTERED_DEVICE=true`, rejects assets with no enabled device row.
+  HTTP ingest holds a `device` account named after a provisioned `device_id` to the same
+  binding as the ACL, and applies strict mode to `device` accounts too.
 
 ---
 
@@ -156,8 +158,11 @@ The network and power **will** fail; the whole ingest side is designed around it
 
 - **Zone engine:** WGS84 polygons per site, point-in-polygon per incoming fix against
   that site's zones only. **Debounce is mandatory** — N consecutive fixes inside
-  (default 2) plus a minimum dwell to confirm entry, and a hysteresis buffer
-  (default 15 m) to confirm exit. Both configurable per zone. Emits `zone_entry` /
+  (`debounce_in`, default 2) plus a minimum time inside (`min_entry_dwell_s`, default
+  0 s: the fix count alone) to confirm entry, and a hysteresis buffer (`hysteresis_m`,
+  default 15 m) to confirm exit. All configurable per zone in its `rules`. Fixes either
+  side of a silence longer than `MM_OFFLINE_THRESHOLD_S` are not consecutive, so two
+  lone fixes around an outage confirm nothing. Emits `zone_entry` /
   `zone_exit` internally; emits `event.v1` only when a *rule* is breached. This is
   what stops GNSS jitter producing an alarm storm (M3 acceptance: the light vehicle in
   the magazine raises exactly **one** critical event; boundary-huggers raise none).
@@ -165,11 +170,14 @@ The network and power **will** fail; the whole ingest side is designed around it
   `restricted` (unauthorised class → critical), `speed_limited` (sustained speed over
   the limit *of the zone it is in*, N consecutive fixes), `dwell` (stationary beyond a
   threshold), `asset_offline` (no fix for N minutes while previously active —
-  distinguished from *parked with ignition off*).
+  distinguished from *parked with ignition off*; a source that reports no ignition is
+  raised too, marked "ignition unknown").
 - **Haul-cycle analytics** (the commercial payload): a per-asset state machine driven
   by zone transitions, `AT_FACE → HAULING_LOADED → AT_DUMP → RETURNING_EMPTY →
-  AT_FACE`. **Queue time** = stationary + in-load-zone + ignition-on, *before* loading
-  begins — the headline metric. No target or benchmark is ever hardcoded; we report
+  AT_FACE`. **Queue time** = time waiting in the load zone *before* loading begins —
+  the headline metric: from the truck's first stop in the zone to its spot onto the
+  loading spot, including the creeps forward as the line moves up (loading is its last
+  stop of 30 s or more there). No target or benchmark is ever hardcoded; we report
   this mine's observed number. The state machine is a pure function, so cycles are
   recomputable from stored positions (idempotent `recompute`).
 
@@ -193,6 +201,12 @@ server→browser, simpler than WebSockets and more tolerant of a flaky link. The
 dashboard (`web/mine.html`) is framework-free: a `fetch()` of current state on load
 plus an `EventSource` subscription. It is **extended, not rewritten** — the inline-SVG
 site plan and alarm table are the UI contract.
+
+An open stream holds no worker thread: it waits between frames on the event loop, and
+every stream for a site shares one snapshot, rebuilt at most twice a second. So the number
+of open dashboards does not limit other requests, and ten dashboards cost the database
+what one does. The latest-fix-per-asset query behind the snapshot walks the positions
+primary key, so its cost does not grow with stored history.
 
 **API versioning.** Every domain router is served both at its historical unprefixed
 path (the dashboard and existing clients) and under **`/api/v1`** (new clients —
@@ -274,7 +288,9 @@ Route surface (roles: `viewer < supervisor < admin`, plus `device` for ingest on
   is a foreign key, never a name in an event payload; the `operators` table is the
   single PII home, supporting export and tombstone erasure. Retention is configurable
   per data class with a scheduled deletion job that actually runs. Audit log on access
-  to personal data and on rule/zone changes.
+  to personal data and on rule/zone changes. A per-site breach register fixes the
+  regulator and individual notice deadlines when a breach is recorded and raises
+  `breach_notice_due` alarms as they approach and pass (`breaches/`).
 
 ---
 

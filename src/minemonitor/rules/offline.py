@@ -52,9 +52,11 @@ def detect_offline(
     events: list[EventV1] = []
     for asset_id, ts, ignition in rows:
         age = (now - _aware(ts)).total_seconds()
-        # Silent beyond threshold AND last seen active (ignition on) = offline.
-        # Ignition off = parked; not an alarm.
-        if age <= threshold_s or not ignition:
+        # Silent beyond threshold AND not last seen parked = offline. Ignition off =
+        # parked; not an alarm. A source that reports no ignition gives no way to tell,
+        # so its silence is raised too, marked "ignition unknown" (audit M1): reading
+        # unknown as parked let every outage of such a tracker pass unseen.
+        if age <= threshold_s or ignition is False:
             continue
         if has_open_event(session, site_id, asset_id, "asset_offline", None):
             continue
@@ -69,8 +71,11 @@ def detect_offline(
                 asset_id=asset_id,
                 zone_id=None,
                 source=SOURCE,
-                summary=f"{asset_id} offline: no position for {int(age)}s",
-                detail={"age_s": age, "threshold_s": threshold_s},
+                summary=(
+                    f"{asset_id} offline: no position for {int(age)}s"
+                    + (" (ignition unknown)" if ignition is None else "")
+                ),
+                detail={"age_s": age, "threshold_s": threshold_s, "ignition": ignition},
                 advisory=True,
                 state="open",
             )

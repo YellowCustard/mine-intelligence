@@ -4,8 +4,8 @@ Additive and safe for an existing install: one new table. It records when the cu
 a polled feed (the Dahua gate API) began, so a ``source_offline`` alarm survives an ingestor
 restart and fires once per outage.
 
-Revision ID: 0029_source_status
-Revises: 0028_access_quarantine
+Revision ID: 0030_source_status
+Revises: 0029_access_quarantine
 Create Date: 2026-10-08
 """
 
@@ -16,8 +16,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0029_source_status"
-down_revision: str | None = "0028_access_quarantine"
+revision: str = "0030_source_status"
+down_revision: str | None = "0029_access_quarantine"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

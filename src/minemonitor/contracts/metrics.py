@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 class AssetMetricsV1(BaseModel):
@@ -20,8 +19,8 @@ class AssetMetricsV1(BaseModel):
     schema_: Literal["asset.metrics.v1"] = Field(default="asset.metrics.v1", alias="schema")
     site_id: str = Field(min_length=1)
     asset_id: str = Field(min_length=1)
-    bucket_start: datetime
-    bucket_end: datetime
+    bucket_start: AwareDatetime
+    bucket_end: AwareDatetime
     distance_m: float | None = Field(default=None, ge=0)
     moving_time_s: float | None = Field(default=None, ge=0)
     idle_time_s: float | None = Field(default=None, ge=0)
