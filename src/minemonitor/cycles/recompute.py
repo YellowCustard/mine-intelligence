@@ -12,9 +12,11 @@ Two entry points share one per-asset routine:
 
 Both rewrite exactly what a whole-history rebuild would produce for the cycles and
 buckets they touch. A window starts either at a known load-zone entry, or far enough
-before the changed data (``cycle_max_s`` plus the minimum visit) that no cycle the change
-can affect begins earlier. Neither deletes a cycle or bucket older than its window, so
-derived history outlives raw-position retention as configured (audit H4).
+before the changed data (``cycle_max_s`` plus the minimum visit and exit) that no cycle
+the change can affect begins earlier. Its cycle analysis also reads the minimum exit of
+fixes before its start, so a visit that began just before it is seen to have (audit
+M12). Neither deletes a cycle or bucket older than its window, so derived history
+outlives raw-position retention as configured (audit H4).
 
 Assets are processed one at a time, in short transactions, and one asset's failure does
 not stall the others. Rebuilders of one asset (the tick, on-demand slices) exclude each
@@ -42,6 +44,7 @@ from sqlalchemy.orm import Session
 from minemonitor.config import get_settings
 from minemonitor.cycles.metrics import BUCKET_S, MetricsBucket, compute_metrics, floor_bucket
 from minemonitor.cycles.statemachine import (
+    MIN_EXIT_S,
     MIN_VISIT_S,
     Cycle,
     Resume,
@@ -60,6 +63,7 @@ _LOOKBACK_MARGIN_S = 60.0
 _CHUNK = timedelta(hours=12)
 _CHUNK_MIN = timedelta(hours=1)
 _MIN_VISIT = timedelta(seconds=MIN_VISIT_S)
+_MIN_EXIT = timedelta(seconds=MIN_EXIT_S)
 
 
 @dataclass(frozen=True)
@@ -110,10 +114,11 @@ def _lookback(max_cycle_s: float) -> timedelta:
     """How far before a late fix a rebuild starts when no load entry can anchor it.
 
     A cycle lasts at most ``max_cycle_s``, and whether its closing visit counts depends on
-    at most ``MIN_VISIT_S`` of fixes after that visit's entry. A cycle starting further
-    back than this is therefore over, and settled, before the late fix: it cannot change.
+    fixes up to ``MIN_VISIT_S`` after that visit's entry, plus ``MIN_EXIT_S`` (a fix back
+    inside that soon after it left rejoins it). A cycle starting further back than this
+    is therefore over, and settled, before the late fix: it cannot change.
     """
-    return timedelta(seconds=max_cycle_s + MIN_VISIT_S + _LOOKBACK_MARGIN_S)
+    return timedelta(seconds=max_cycle_s + MIN_VISIT_S + MIN_EXIT_S + _LOOKBACK_MARGIN_S)
 
 
 def _lock_rebuild(session: Session, site_id: str, asset_id: str) -> None:
@@ -284,27 +289,45 @@ def _read_fixes(
     return rows + [after] if after is not None else rows
 
 
+def _fix_before(
+    session: Session, site_id: str, asset_id: str, ts: datetime, rows: list[Any]
+) -> Any | None:
+    """The asset's last fix before ``ts``: from ``rows`` (read in order) when they reach
+    back past ``ts``, else from the database."""
+    before = [r for r in rows if _aware(r.ts) < ts]
+    if before:
+        return before[-1]
+    return session.execute(
+        select(Position.ts, Position.lat, Position.lon, Position.speed_kph)
+        .where(Position.site_id == site_id, Position.asset_id == asset_id, Position.ts < ts)
+        .order_by(Position.ts.desc())
+        .limit(1)
+    ).first()
+
+
 def _entry_known_at(
     session: Session, site_id: str, asset_id: str, zones: _Zones, ts: datetime, rows: list[Any]
 ) -> bool:
     """Whether a load visit starting at the first fix from ``ts`` on starts there.
 
-    True unless the fix just before ``ts`` was already in a load zone.
+    True unless the fix just before ``ts`` was already in a load zone. (A visit left less
+    than ``MIN_EXIT_S`` before ``ts`` that it rejoins shows up in the analysis's lead-in.)
     """
     if not zones.loads:
         return True
-    before = [r for r in rows if _aware(r.ts) < ts]
-    prev = (
-        before[-1]
-        if before
-        else session.execute(
-            select(Position.lat, Position.lon)
-            .where(Position.site_id == site_id, Position.asset_id == asset_id, Position.ts < ts)
-            .order_by(Position.ts.desc())
-            .limit(1)
-        ).first()
-    )
+    prev = _fix_before(session, site_id, asset_id, ts, rows)
     return prev is None or not zones.in_load(prev.lat, prev.lon)
+
+
+def _cycle_fixes(
+    session: Session, site_id: str, asset_id: str, cycles_from: datetime, rows: list[Any]
+) -> list[Any]:
+    """The fixes a cycle analysis from ``cycles_from`` reads: from there on, plus the lead-in
+    (the ``MIN_EXIT_S`` before it and the fix before those) that shows whether a visit
+    under way there began earlier. ``rows`` must reach back to the lead-in."""
+    lead_from = cycles_from - _MIN_EXIT
+    prior = _fix_before(session, site_id, asset_id, lead_from, rows)
+    return ([prior] if prior is not None else []) + [r for r in rows if _aware(r.ts) >= lead_from]
 
 
 def _still_in_open_visit(rows: list[Any], win: _Window, zones: _Zones, max_cycle_s: float) -> bool:
@@ -351,8 +374,9 @@ def _apply(
     rows = _read_fixes(session, site_id, asset_id, win.metrics_from, until)
     rebuild_cycles = not _still_in_open_visit(rows, win, zones, max_cycle_s)
     read_from = min(win.cycles_from, win.metrics_from) if rebuild_cycles else win.metrics_from
-    if read_from < win.metrics_from:
-        rows = _read_fixes(session, site_id, asset_id, read_from, until)
+    lead_from = win.cycles_from - _MIN_EXIT
+    if rebuild_cycles and lead_from < win.metrics_from:
+        rows = _read_fixes(session, site_id, asset_id, lead_from, until)
 
     cycles: list[Cycle] = []
     resume: Resume | None = None
@@ -361,11 +385,12 @@ def _apply(
     elif zones.loads and zones.dumps:
         cycles, resume = analyse_cycles(
             asset_id,
-            [r for r in rows if _aware(r.ts) >= win.cycles_from],
+            _cycle_fixes(session, site_id, asset_id, win.cycles_from, rows),
             load_zones=zones.loads,
             dump_zones=zones.dumps,
             max_cycle_s=max_cycle_s,
             leading_entry_known=win.entry_known,
+            opens_from=win.cycles_from,
         )
         if end is not None:
             cycles = [c for c in cycles if c.start_ts < end]
@@ -436,8 +461,9 @@ def _advance(
         cur.in_open_visit = done.resume.inside
         # The next run rewrites the bucket an in-order fix's predecessor sits in, and
         # the one where a cycle closes if a load visit begun within MIN_VISIT_S of
-        # ``last`` turns out long enough to count.
-        cur.metrics_from = floor_bucket(done.last - _MIN_VISIT, bucket_s)
+        # ``last`` (plus MIN_EXIT_S, if it has just left and may rejoin) turns out long
+        # enough to count.
+        cur.metrics_from = floor_bucket(done.last - _MIN_VISIT - _MIN_EXIT, bucket_s)
         cur.through_ts = done.last
 
 
