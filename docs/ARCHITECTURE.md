@@ -174,8 +174,10 @@ The network and power **will** fail; the whole ingest side is designed around it
   raised too, marked "ignition unknown").
 - **Haul-cycle analytics** (the commercial payload): a per-asset state machine driven
   by zone transitions, `AT_FACE → HAULING_LOADED → AT_DUMP → RETURNING_EMPTY →
-  AT_FACE`. **Queue time** = stationary + in-load-zone + ignition-on, *before* loading
-  begins — the headline metric. No target or benchmark is ever hardcoded; we report
+  AT_FACE`. **Queue time** = time waiting in the load zone *before* loading begins —
+  the headline metric: from the truck's first stop in the zone to its spot onto the
+  loading spot, including the creeps forward as the line moves up (loading is its last
+  stop of 30 s or more there). No target or benchmark is ever hardcoded; we report
   this mine's observed number. The state machine is a pure function, so cycles are
   recomputable from stored positions (idempotent `recompute`).
 

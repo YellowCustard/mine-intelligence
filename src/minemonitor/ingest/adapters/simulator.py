@@ -6,6 +6,11 @@ metric M4 measures), an excavator working the face, two patrol vehicles on the
 haul road, and a light vehicle that wanders into the restricted magazine (which
 M3's restricted-entry rule must catch).
 
+Trucks waiting for the loader stand in line one behind another and creep forward a
+truck length each time the line advances, as they do at a real face. The queue that
+results is stepwise: several stops, not one (``queue_step_m=0`` puts every waiting
+truck on the staging line instead).
+
 Everything it emits is a ``PositionIngest`` — identical at the ingest boundary to
 a real tracker (brief §10). Coordinates are plausible PLACEHOLDERS near the
 placeholder site, pending the real survey (brief §14).
@@ -37,14 +42,16 @@ def _pt(north_m: float, east_m: float) -> tuple[float, float]:
 
 # Named locations (metres north/east of the base anchor).
 FACE = _pt(0, 0)  # pit face — load point
-FACE_QUEUE = _pt(-15, 0)  # staging line: trucks wait here (still in the load zone)
+_STAGING_NORTH_M = -15.0
+FACE_QUEUE = _pt(_STAGING_NORTH_M, 0)  # head of the line: next truck to load waits here
 FACE_LOAD = FACE  # loader spot: trucks spot forward to here to be loaded
 ROM = _pt(600, 200)  # ROM pad / crusher — ore dump
 WASTE = _pt(-400, 800)  # waste dump
 MAGAZINE = _pt(200, -500)  # restricted: explosives magazine
 WORKSHOP = _pt(-600, -200)  # workshop / muster
 
-SPOT_KPH = 8.0  # slow crawl from the queue up to the loader
+SPOT_KPH = 8.0  # slow crawl from the queue up to the loader, and along the line
+QUEUE_STEP_M = 15.0  # a haul truck's length plus the gap to the truck in front
 
 
 def _move_towards(
@@ -71,6 +78,7 @@ class _Asset:
     ignition: bool = True
     heading: float = 0.0
     dwell_left_s: float = 0.0
+    creeping: bool = False  # moving up the line this tick
     queue_since: datetime | None = None
     queue_total_s: float = 0.0  # ground truth for M4 validation
     waypoints: list[tuple[float, float]] = field(default_factory=list)
@@ -92,12 +100,14 @@ class Simulator(DeviceAdapter):
         load_s: float = 90.0,
         dump_s: float = 40.0,
         jitter_m: float = 2.5,
+        queue_step_m: float = QUEUE_STEP_M,
     ) -> None:
         self.site_id = site_id
         self.tick_s = tick_s
         self.load_s = load_s
         self.dump_s = dump_s
         self.jitter_m = jitter_m
+        self.queue_step_m = queue_step_m
         self._rng = random.Random(seed)
         self.now = start or datetime(2026, 9, 5, 6, 0, 0, tzinfo=UTC)
 
@@ -106,7 +116,10 @@ class Simulator(DeviceAdapter):
         self._loading: str | None = None
         self._load_finish: datetime | None = None
         # Ground truth for M4 validation: one entry per completed queue episode,
-        # as (asset_id, start_ts, end_ts, queue_s).
+        # as (asset_id, start_ts, end_ts, queue_s). An episode runs from the truck
+        # stopping at the back of the line to the loader calling it forward, so it
+        # includes the creeps up the line: the truck is waiting for the loader
+        # throughout. The spot forward to the loader is loading, not queue.
         self.queue_episodes: list[tuple[str, datetime, datetime, float]] = []
 
         self.assets: dict[str, _Asset] = {}
@@ -181,6 +194,12 @@ class Simulator(DeviceAdapter):
     def _speed_mps(self, kph: float) -> float:
         return kph / 3.6
 
+    def _slot(self, k: int) -> tuple[float, float]:
+        """Where the k-th truck in line waits (0 = head of the line)."""
+        if k == 0 or not self.queue_step_m:
+            return FACE_QUEUE
+        return _pt(_STAGING_NORTH_M - k * self.queue_step_m, 0)
+
     def step(self) -> list[PositionIngest]:
         """Advance every asset by one tick and return their positions."""
         self._service_loader()
@@ -215,21 +234,34 @@ class Simulator(DeviceAdapter):
         if a.state == "RETURNING_EMPTY":
             a.ignition = True
             a.lat, a.lon, a.heading, arrived = _move_towards(
-                a.lat, a.lon, FACE_QUEUE, self._speed_mps(a.speed_kph), self.tick_s
+                a.lat,
+                a.lon,
+                self._slot(len(self._load_queue)),  # the back of the line
+                self._speed_mps(a.speed_kph),
+                self.tick_s,
             )
             if arrived:
                 a.state = "QUEUING"
                 a.queue_since = self.now
                 self._load_queue.append(a.asset_id)
         elif a.state == "QUEUING":
-            a.ignition = True  # stationary at the staging line — this is queue time
+            a.ignition = True  # waiting in line for the loader — this is queue time
             if self._loading == a.asset_id:
                 if a.queue_since is not None:
                     q = (self.now - a.queue_since).total_seconds()
                     a.queue_total_s += q
                     self.queue_episodes.append((a.asset_id, a.queue_since, self.now, q))
                     a.queue_since = None
+                a.creeping = False
                 a.state = "SPOTTING"
+            else:
+                # The line moved up: creep forward to the next place in it.
+                slot = self._slot(self._load_queue.index(a.asset_id))
+                a.creeping = haversine_m(a.lat, a.lon, slot[0], slot[1]) > 0.01
+                if a.creeping:
+                    a.lat, a.lon, a.heading, _ = _move_towards(
+                        a.lat, a.lon, slot, self._speed_mps(SPOT_KPH), self.tick_s
+                    )
         elif a.state == "SPOTTING":
             # Crawl forward from the queue to the loader — a visible movement that
             # marks the end of queuing and the start of loading.
@@ -275,9 +307,15 @@ class Simulator(DeviceAdapter):
             a.wp_idx = (a.wp_idx + 1) % len(a.waypoints)
 
     def _emit(self, a: _Asset) -> PositionIngest:
-        moving = a.state in {"RETURNING_EMPTY", "HAULING_LOADED", "PATROL", "WORKING", "SPOTTING"}
+        moving = a.creeping or a.state in {
+            "RETURNING_EMPTY",
+            "HAULING_LOADED",
+            "PATROL",
+            "WORKING",
+            "SPOTTING",
+        }
         speed = a.speed_kph if a.state in {"RETURNING_EMPTY", "HAULING_LOADED", "PATROL"} else 0.0
-        if a.state == "SPOTTING":
+        if a.state == "SPOTTING" or a.creeping:
             speed = SPOT_KPH
         if a.asset_class == "excavator":
             speed = self._rng.uniform(0, 3)

@@ -52,6 +52,20 @@ def test_trucks_accumulate_queue_time_at_the_face() -> None:
     assert all(t.queue_total_s > 0 for t in trucks)
 
 
+def test_waiting_trucks_move_up_the_line_in_steps() -> None:
+    """The queue M4 measures is stepwise: a truck stops more than once while it waits."""
+    sim = Simulator(seed=1)
+    stops: dict[str, list[tuple[float, float]]] = {}
+    for _ in range(3600):
+        for p in sim.step():
+            a = sim.assets[p.asset_id]
+            if a.state == "QUEUING" and not a.creeping:
+                spots = stops.setdefault(p.asset_id, [])
+                if not spots or haversine_m(a.lat, a.lon, *spots[-1]) > 5.0:
+                    spots.append((a.lat, a.lon))
+    assert max(len(s) for s in stops.values()) >= 3
+
+
 def test_light_vehicle_reaches_the_restricted_magazine() -> None:
     """LV-07 must actually enter the magazine so M3 has a breach to catch."""
     sim = Simulator(seed=1)
