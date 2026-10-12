@@ -366,6 +366,10 @@ def _apply(
                 HaulCycle.site_id == site_id,
                 HaulCycle.asset_id == asset_id,
                 HaulCycle.start_ts < win.cycles_from,
+                # No cycle lasts longer than max_cycle_s, so one ending at or after read_from
+                # began at most that long before it. Unbounded, the primary-key scan read
+                # every cycle the asset ever made, every tick (soak).
+                HaulCycle.start_ts >= read_from - timedelta(seconds=max_cycle_s),
                 HaulCycle.end_ts >= read_from,
             )
         ).scalars()
