@@ -7,11 +7,10 @@ correcting a classification requires supervisor and is audited.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 from sqlalchemy.orm import Session
 
 from minemonitor import audit
@@ -25,8 +24,8 @@ router = APIRouter(tags=["delays"])
 
 class DelayIn(BaseModel):
     category: str
-    start_ts: datetime
-    end_ts: datetime
+    start_ts: AwareDatetime
+    end_ts: AwareDatetime
     asset_id: str | None = None
     zone_id: str | None = None
     note: str | None = Field(default=None)
@@ -59,8 +58,8 @@ def get_delays(
     site_id: str,
     category: str | None = Query(default=None),
     asset_id: str | None = Query(default=None),
-    start: datetime | None = Query(default=None),
-    end: datetime | None = Query(default=None),
+    start: AwareDatetime | None = Query(default=None),
+    end: AwareDatetime | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=1000),
     db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:

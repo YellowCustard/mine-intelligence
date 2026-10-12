@@ -8,10 +8,9 @@ platform never actuates a machine (brief §15). ``rationale`` carries the eviden
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 class DispatchRecommendationV1(BaseModel):
@@ -26,7 +25,7 @@ class DispatchRecommendationV1(BaseModel):
     site_id: str = Field(min_length=1)
     job_id: str = Field(min_length=1)
     asset_id: str = Field(min_length=1)
-    ts: datetime
+    ts: AwareDatetime
     objective: str = "balanced"
     score: float
     rationale: list[str] = Field(default_factory=list)

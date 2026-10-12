@@ -8,7 +8,9 @@ day-to-day and 2am-from-another-country runbook.
 
 All times are stored in UTC and rendered in the site timezone
 (`Africa/Harare`, UTC+2). Shifts cross midnight — a day boundary is not a shift
-boundary.
+boundary. Every time sent to the API or published on a contract must carry its offset
+(`2026-09-05T11:42:07Z` or `…T13:42:07+02:00`); one without (`2026-09-05T11:42:07`) is
+refused with 422, because it could mean either and would otherwise be stored two hours off.
 
 ---
 

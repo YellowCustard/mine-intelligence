@@ -24,10 +24,9 @@ No contract here has a field that could carry identity, a face, or frame bytes.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 
 class VisionVendorEventV1(BaseModel):
@@ -49,7 +48,7 @@ class VisionVendorEventV1(BaseModel):
     # The vendor's own confidence — carried, NEVER upgraded to a first-party confidence.
     vendor_confidence: float | None = Field(default=None, ge=0, le=1)
     vendor_rule_name: str | None = None
-    ts: datetime
+    ts: AwareDatetime
     clip_ref: str | None = None
     provenance: Literal["vendor_inferred"] = "vendor_inferred"
     advisory: Literal[True] = True
@@ -151,8 +150,8 @@ class VisionObservationV1(_Strict):
     site_id: str = Field(min_length=1)
     node_id: str = Field(min_length=1)
     camera_id: str = Field(min_length=1)
-    ts: datetime
-    received_at: datetime | None = None
+    ts: AwareDatetime
+    received_at: AwareDatetime | None = None
     frame_id: str = Field(min_length=1)
     model: ModelRef
     image: ImageSize | None = None
@@ -186,7 +185,7 @@ class Subject(_Strict):
 class Evidence(_Strict):
     """Why an operational event was concluded. Mandatory; never empty of a window."""
 
-    observation_window: tuple[datetime, datetime]
+    observation_window: tuple[AwareDatetime, AwareDatetime]
     track_ids: list[str] = Field(default_factory=list)
     frame_ids: list[str] = Field(default_factory=list)
     signals: dict[str, Any] = Field(default_factory=dict)
@@ -211,8 +210,8 @@ class VisionOperationalEventV1(_Strict):
     site_id: str = Field(min_length=1)
     node_id: str = Field(min_length=1)
     camera_id: str = Field(min_length=1)
-    ts: datetime
-    received_at: datetime | None = None
+    ts: AwareDatetime
+    received_at: AwareDatetime | None = None
     type: OperationalType
     provenance: DerivedProvenance
     confidence: float = Field(ge=0, le=1)
@@ -232,8 +231,8 @@ class VisionHealthV1(_Strict):
     health_id: str = Field(min_length=1)
     site_id: str = Field(min_length=1)
     node_id: str = Field(min_length=1)
-    ts: datetime
-    received_at: datetime | None = None
+    ts: AwareDatetime
+    received_at: AwareDatetime | None = None
     status: NodeStatus
     cameras_active: int = Field(ge=0)
     fps_mean: float = Field(ge=0)
@@ -257,13 +256,13 @@ class VisionCameraHealthV1(_Strict):
     site_id: str = Field(min_length=1)
     node_id: str = Field(min_length=1)
     camera_id: str = Field(min_length=1)
-    ts: datetime
-    received_at: datetime | None = None
+    ts: AwareDatetime
+    received_at: AwareDatetime | None = None
     state: CameraState
     blur_score: float | None = Field(default=None, ge=0)
     luma_mean: float | None = Field(default=None, ge=0, le=255)
     frozen_frames: int | None = Field(default=None, ge=0)
-    last_frame_at: datetime | None = None
+    last_frame_at: AwareDatetime | None = None
     advisory: Literal[True] = True
 
 
@@ -294,8 +293,8 @@ class VisionRuleVersionV1(_Strict):
     event_type: OperationalType
     parameters: RuleParameters
     zone_version: str | None = None
-    active_from: datetime
-    active_to: datetime | None = None
+    active_from: AwareDatetime
+    active_to: AwareDatetime | None = None
     author: str | None = None
     notes: str | None = None
     advisory: Literal[True] = True
@@ -316,8 +315,8 @@ class VisionZoneRollupV1(_Strict):
     node_id: str = Field(min_length=1)
     camera_id: str = Field(min_length=1)
     zone_id: str | None = None
-    ts: datetime
-    received_at: datetime | None = None
+    ts: AwareDatetime
+    received_at: AwareDatetime | None = None
     bucket_s: int = Field(gt=0)
     object_class: ObjectClass = "person"
     count_max: int = Field(ge=0)

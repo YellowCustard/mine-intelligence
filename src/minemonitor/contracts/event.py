@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 EventType = Literal[
     "zone_breach",
@@ -46,7 +45,7 @@ class EventV1(BaseModel):
     schema_: Literal["event.v1"] = Field(default="event.v1", alias="schema")
     event_id: str = Field(min_length=1)
     site_id: str = Field(min_length=1)
-    ts: datetime
+    ts: AwareDatetime
     type: EventType
     severity: Severity
     asset_id: str | None = None
@@ -58,4 +57,4 @@ class EventV1(BaseModel):
     advisory: Literal[True] = True
     state: EventState = "open"
     acknowledged_by: str | None = None
-    acknowledged_at: datetime | None = None
+    acknowledged_at: AwareDatetime | None = None

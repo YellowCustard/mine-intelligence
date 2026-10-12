@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from pydantic import AwareDatetime
 from sqlalchemy.orm import Session
 
 from minemonitor.auth.deps import require_viewer
@@ -30,7 +31,7 @@ def _resolve(db: Session, site_id: str, at: datetime | None, shift_id: str | Non
 @router.get("/sites/{site_id}/reports/shift", dependencies=[Depends(require_viewer)])
 def shift_report(
     site_id: str,
-    at: datetime | None = Query(default=None),
+    at: AwareDatetime | None = Query(default=None),
     shift_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -48,7 +49,7 @@ def shift_report(
 )
 def shift_report_csv(
     site_id: str,
-    at: datetime | None = Query(default=None),
+    at: AwareDatetime | None = Query(default=None),
     shift_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> PlainTextResponse:
@@ -72,7 +73,7 @@ def shift_report_csv(
 )
 def shift_report_html(
     site_id: str,
-    at: datetime | None = Query(default=None),
+    at: AwareDatetime | None = Query(default=None),
     shift_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:

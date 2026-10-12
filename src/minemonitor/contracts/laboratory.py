@@ -18,10 +18,9 @@ user/operator reference and is audited.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 class LaboratoryResultV1(BaseModel):
@@ -34,7 +33,7 @@ class LaboratoryResultV1(BaseModel):
     site_id: str = Field(min_length=1)
     instrument: str = Field(min_length=1)
     sample_ref: str = Field(min_length=1)
-    ts: datetime
+    ts: AwareDatetime
     element: str = Field(min_length=1)
     value: float
     unit: str = Field(min_length=1)
@@ -64,5 +63,5 @@ class LaboratoryCorrectionV1(BaseModel):
     unit: str | None = None
     actor: str = Field(min_length=1)
     reason: str = Field(min_length=1)
-    ts: datetime
+    ts: AwareDatetime
     provenance: Literal["corrected"] = "corrected"
