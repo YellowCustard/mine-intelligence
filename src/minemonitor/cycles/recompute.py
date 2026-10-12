@@ -662,16 +662,21 @@ def recompute(
 
 
 def main() -> None:
-    """Recompute the default site from the command line."""
+    """Recompute every site from the command line (or only the site ids given)."""
+    import sys
+
     from minemonitor.logging_config import configure_logging
     from minemonitor.storage.db import get_session_factory
+    from minemonitor.storage.repositories import served_site_ids
 
     settings = get_settings()
     configure_logging(settings.log_level)
     session = get_session_factory()()
     try:
-        result = recompute(session, settings.default_site_id)
-        log.info("recompute result", extra=result)
+        sites = sys.argv[1:] or served_site_ids(session, settings.default_site_id)
+        for site_id in sites:
+            result = recompute(session, site_id)
+            log.info("recompute result", extra={"site_id": site_id, **result})
     finally:
         session.close()
 

@@ -344,7 +344,9 @@ These endpoints are pure reads over existing data (no new migration).
 - **System-health centre** — beyond the `/health` probe, answers *whose* fault a
   gap is: `platform_degraded` (ingestor/broker/DB — ours) vs `field_degraded`
   (trackers/comms quiet — the site's), never conflated:
-  `GET /sites/{id}/system-health`.
+  `GET /sites/{id}/system-health`. It also names any maintenance step (offline
+  alarms, cycles, notifications, retention, …) whose latest run failed, so a job
+  that keeps failing is visible while the ingestor itself is alive.
 - **Role capabilities** — `GET /me/capabilities` returns per-role capability flags
   so a role-specific UI (control room / supervisor / manager / admin) keys off one
   source of truth; the API still enforces every permission independently.
