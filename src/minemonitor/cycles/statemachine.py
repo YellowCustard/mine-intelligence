@@ -8,7 +8,8 @@ A cycle spans one load-zone entry to the next. Every loading zone counts as the 
 zone and every unloading zone as the dump (audit M3): a site with a ROM pad and a waste
 dump, or two faces, has cycles through each. Fixes in touching zones of one kind make one
 visit, credited to the zone with most of its fixes, and each cycle records where it
-loaded and where it dumped.
+loaded and where it dumped. A truck standing at a zone's edge that reads outside for less
+than ``MIN_EXIT_S`` has not left: the runs either side are one visit (audit M12).
 
 **Queue time** is the time a truck spends waiting in the load zone for the loader: from
 its first stop there until it spots forward onto the loading spot. A line of trucks moves
@@ -49,6 +50,12 @@ MOVE_THRESHOLD_KPH = 3.0
 # (e.g. a departing truck momentarily reading back inside) and must not create a
 # phantom cycle.
 MIN_VISIT_S = 15.0
+
+# A truck standing at a zone's edge (queueing at the face, tipping at the dump) reads
+# outside it for a fix or two as GNSS jitters. Time outside shorter than this between
+# two runs inside is that jitter, not a trip out and back, so the runs are one visit
+# (audit M12): nothing leaves a load zone, goes anywhere and returns this quickly.
+MIN_EXIT_S = 15.0
 
 # Loading a haul truck takes minutes (several passes of the bucket), so a stop shorter
 # than this after the truck is loaded (giving way at the zone exit) is not the loading.
@@ -96,10 +103,10 @@ class Cycle:
 class Resume:
     """Where to restart cycle computation so that every non-final cycle is rebuilt.
 
-    ``entry_known`` is True when ``ts`` is the first fix of a load-zone visit (the fix
-    before it was outside), so a visit starting there is complete; False when ``ts`` is
-    an arbitrary fix, so a load visit already in progress there has an unknown start and
-    must not open a cycle.
+    ``entry_known`` is True when ``ts`` is the first fix of a load-zone visit (the fixes
+    before it were outside, for at least ``MIN_EXIT_S``), so a visit starting there is
+    complete; False when ``ts`` is an arbitrary fix, so a load visit already in progress
+    there has an unknown start and must not open a cycle.
     """
 
     ts: datetime
@@ -132,8 +139,12 @@ def _credited_zone(visit: _Visit, labels: list[str | None]) -> str | None:
     return counts.most_common(1)[0][0] if counts else None
 
 
-def _visits(flags: list[bool], times: list[datetime]) -> list[_Visit]:
-    """Contiguous runs where ``flags`` is True, as [enter_ts, exit_ts) spans."""
+def _visits(flags: list[bool], times: list[datetime], min_exit_s: float) -> list[_Visit]:
+    """Runs where ``flags`` is True, as [enter_ts, exit_ts) spans.
+
+    Runs less than ``min_exit_s`` apart are one visit, briefly read outside: its fixes
+    span both runs and the ones between.
+    """
     out: list[_Visit] = []
     i, n = 0, len(flags)
     while i < n:
@@ -145,7 +156,11 @@ def _visits(flags: list[bool], times: list[datetime]) -> list[_Visit]:
             i += 1
         # exit_ts is the first fix outside the zone, or the last fix if it ends inside.
         exit_ts = times[i] if i < n else times[i - 1]
-        out.append(_Visit(enter_ts=times[start], exit_ts=exit_ts, start=start, end=i))
+        prev = out[-1] if out else None
+        if prev is not None and (times[start] - prev.exit_ts).total_seconds() < min_exit_s:
+            prev.exit_ts, prev.end = exit_ts, i
+        else:
+            out.append(_Visit(enter_ts=times[start], exit_ts=exit_ts, start=start, end=i))
     return out
 
 
@@ -219,8 +234,10 @@ def compute_cycles(
     dump_zones: Sequence[ZoneShape],
     move_threshold_kph: float = MOVE_THRESHOLD_KPH,
     min_visit_s: float = MIN_VISIT_S,
+    min_exit_s: float = MIN_EXIT_S,
     max_cycle_s: float | None = None,
     leading_entry_known: bool = True,
+    opens_from: datetime | None = None,
 ) -> list[Cycle]:
     """Compute complete haul cycles for one asset from an ordered position stream."""
     cycles, _ = analyse_cycles(
@@ -230,8 +247,10 @@ def compute_cycles(
         dump_zones=dump_zones,
         move_threshold_kph=move_threshold_kph,
         min_visit_s=min_visit_s,
+        min_exit_s=min_exit_s,
         max_cycle_s=max_cycle_s,
         leading_entry_known=leading_entry_known,
+        opens_from=opens_from,
     )
     return cycles
 
@@ -244,14 +263,21 @@ def analyse_cycles(
     dump_zones: Sequence[ZoneShape],
     move_threshold_kph: float = MOVE_THRESHOLD_KPH,
     min_visit_s: float = MIN_VISIT_S,
+    min_exit_s: float = MIN_EXIT_S,
     max_cycle_s: float | None = None,
     leading_entry_known: bool = True,
+    opens_from: datetime | None = None,
 ) -> tuple[list[Cycle], Resume | None]:
     """Cycles in ``fixes``, and the point a later recompute must restart from.
 
     ``leading_entry_known=False`` says the stream starts at an arbitrary fix rather than at
     the true start of the asset's track: a load visit in progress at the first fix began
     earlier, so its queue and cycle start are unknown and it opens no cycle.
+
+    ``opens_from`` marks the fixes before it as lead-in: they are read only to tell
+    whether a visit after it began earlier (a run inside less than ``min_exit_s`` before
+    rejoins it), and a visit that began before it opens no cycle. A recompute window
+    passes the ``min_exit_s`` of fixes before its start, and the fix before those.
 
     Returns ``(cycles, None)`` for an empty stream.
     """
@@ -270,11 +296,13 @@ def analyse_cycles(
         return (v.exit_ts - v.enter_ts).total_seconds() >= min_visit_s
 
     def _can_open(v: _Visit) -> bool:
+        if opens_from is not None and v.enter_ts < _aware(opens_from):
+            return False  # began in the lead-in: an earlier window rebuilt its cycle
         return v.start > 0 or leading_entry_known
 
-    load_runs = _visits(in_load, times)
+    load_runs = _visits(in_load, times, min_exit_s)
     load_visits = [v for v in load_runs if _long_enough(v)]
-    dump_visits = [v for v in _visits(in_dump, times) if _long_enough(v)]
+    dump_visits = [v for v in _visits(in_dump, times, min_exit_s) if _long_enough(v)]
 
     cycles: list[Cycle] = []
     for idx in range(len(load_visits) - 1):
@@ -314,8 +342,16 @@ def analyse_cycles(
     last = times[-1]
     resume = Resume(ts=last, entry_known=False)
     openers = [v for v in load_visits if _can_open(v)]
-    # A load visit under way at the last fix that is still too short to count.
-    pending = load_runs[-1] if in_load[-1] and not _long_enough(load_runs[-1]) else None
+    # The last load visit, if a later fix may still extend it: the stream ends inside it,
+    # or less than ``min_exit_s`` after it left (a fix back inside would rejoin it).
+    tail = (
+        load_runs[-1]
+        if load_runs
+        and (in_load[-1] or (last - load_runs[-1].exit_ts).total_seconds() < min_exit_s)
+        else None
+    )
+    # ... and it is still too short to count.
+    pending = tail if tail is not None and not _long_enough(tail) else None
 
     def _may_still_close(opener: _Visit) -> bool:
         if max_cycle_s is None:
@@ -337,7 +373,7 @@ def analyse_cycles(
     elif pending is not None and _can_open(pending):
         # A load visit has just begun and is not yet long enough to count: once it is,
         # it may open a cycle, so rebuild from its entry.
-        resume = Resume(ts=load_runs[-1].enter_ts, entry_known=True)
+        resume = Resume(ts=pending.enter_ts, entry_known=True)
     # Otherwise no cycle is in progress (none opened, or the open one has run past the
     # cap): nothing before the last fix can change, so restart there.
     if resume.entry_known and in_load[-1] and load_runs[-1].enter_ts == resume.ts:

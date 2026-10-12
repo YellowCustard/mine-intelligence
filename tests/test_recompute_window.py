@@ -25,6 +25,7 @@ from minemonitor.config import get_settings
 from minemonitor.contracts import AssetPositionV1
 from minemonitor.cycles import recompute as rc
 from minemonitor.cycles.recompute import recompute, refresh
+from minemonitor.cycles.statemachine import MIN_EXIT_S
 from minemonitor.ingest.adapters.simulator import FACE, ROM, Simulator
 from minemonitor.ingest.geo import offset_m
 from minemonitor.ingest.service import to_canonical
@@ -299,6 +300,11 @@ def _cycle_legs(queue_s: int = 60) -> list[Leg]:
     ]
 
 
+# Each analysis also reads the MIN_EXIT_S of fixes (1 Hz) before its window, and the one
+# before those, to see whether a visit under way at its start began earlier (M12).
+_LEAD_IN = int(MIN_EXIT_S) + 1
+
+
 def _spy_cycle_reads(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     """Record how many fixes each per-asset cycle analysis is handed."""
     seen: list[int] = []
@@ -327,7 +333,7 @@ def test_parked_truck_does_not_make_the_tick_reread_its_history(
     more, _ = _track("HT-200", t, [(_OUT, 0.0, 60)])
     _store(s, more)
     refresh(s, SITE)
-    assert seen and max(seen) <= 61  # the new minute, not ten hours
+    assert seen and max(seen) <= 61 + _LEAD_IN  # the new minute, not ten hours
     monkeypatch.undo()
     _assert_matches_full_rebuild(s)
 
@@ -343,7 +349,7 @@ def test_digger_working_the_face_all_shift_is_not_reread(monkeypatch: pytest.Mon
     more, _ = _track("EX-200", t, [(FACE, 2.0, 60)])
     _store(s, more)
     refresh(s, SITE)
-    assert seen and max(seen) <= 61
+    assert seen and max(seen) <= 61 + _LEAD_IN
     monkeypatch.undo()
     _assert_matches_full_rebuild(s)
 
@@ -365,7 +371,7 @@ def test_digger_inside_its_open_visit_costs_only_its_new_fixes(
     out, _ = _track("EX-201", t, [(_OUT, 20.0, 30)])
     _store(s, out)
     refresh(s, SITE)
-    assert seen == [3600 + 60 + 30]  # it left: analysed once, from its entry
+    assert seen == [_LEAD_IN + 3600 + 60 + 30]  # it left: analysed once, from its entry
     monkeypatch.undo()
     _assert_matches_full_rebuild(s)
 
@@ -381,7 +387,7 @@ def test_open_cycle_is_reread_only_from_its_own_start(monkeypatch: pytest.Monkey
     refresh(s, SITE)
     # From the last load-zone entry (40 s in the zone + 2 min hauled + the new minute),
     # not from the start of the six earlier cycles (over 80 minutes).
-    assert seen == [40 + 120 + 60]
+    assert seen == [_LEAD_IN + 40 + 120 + 60]
     monkeypatch.undo()
     _assert_matches_full_rebuild(s)
 
@@ -442,6 +448,124 @@ def test_cycle_closing_just_inside_the_cap_survives_a_tick_mid_visit(
     refresh(s, SITE)
     cycles, _ = _assert_matches_full_rebuild(s)
     assert [round(c[3]) for c in cycles] == [595]
+
+
+# --- M12: a truck at a zone's edge that reads outside for a moment ---------------------
+
+_FACE_EDGE_IN = offset_m(FACE[0], FACE[1], -65, 0)  # 5 m inside the face's southern edge
+_FACE_EDGE_OUT = offset_m(FACE[0], FACE[1], -75, 0)  # 5 m outside it
+_ROM_EDGE_IN = offset_m(ROM[0], ROM[1], -65, 0)
+_ROM_EDGE_OUT = offset_m(ROM[0], ROM[1], -75, 0)
+
+
+def _blip_s(k: int) -> int:
+    return 1 + (5 * k) % (int(MIN_EXIT_S) - 1)  # 1..14 s outside: never a real exit
+
+
+def _jittery_cycle(k: int) -> list[Leg]:
+    """A short haul cycle: queueing at the face edge and tipping at the dump edge each read
+    outside for a moment, at points and for lengths that shift from cycle to cycle."""
+    a, b = 3 + 7 * (k % 7), _blip_s(k)
+    return [
+        (_FACE_EDGE_IN, 0.0, a),
+        (_FACE_EDGE_OUT, 0.0, b),
+        (_FACE_EDGE_IN, 0.0, 50 - a),  # queue: 50 s in the zone, and the blip
+        (FACE, 8.0, 5),  # spot
+        (FACE, 0.0, 40),  # load
+        (_OUT, 30.0, 150),
+        (_ROM_EDGE_IN, 0.0, 12),
+        (_ROM_EDGE_OUT, 0.0, b),
+        (_ROM_EDGE_IN, 0.0, 20),
+        (_OUT, 30.0, 150 + (11 * k) % 40),
+    ]
+
+
+def _jittery_shift(n: int = 12) -> list[AssetPositionV1]:
+    legs = [leg for k in range(n) for leg in _jittery_cycle(k)]
+    fixes, _ = _track("HT-300", T0, [*legs, (_FACE_EDGE_IN, 0.0, 30)])
+    return fixes
+
+
+@pytest.mark.parametrize("chunk_s", [13, 97])
+def test_ticks_over_edge_jitter_match_a_full_rebuild(chunk_s: int) -> None:
+    s = _session()
+    for chunk in _chunks(_jittery_shift(), chunk_s):
+        _store(s, chunk)
+        refresh(s, SITE)
+    cycles, _ = _assert_matches_full_rebuild(s)
+    # Every cycle is there, from the moment its truck joined the line, and its queue
+    # includes the blip.
+    assert [c[4] for c in cycles] == [50.0 + _blip_s(k) for k in range(12)]
+    assert [c[7] for c in cycles] == [32.0 + _blip_s(k) for k in range(12)]
+
+
+def test_edge_jitter_arriving_late_and_out_of_order_matches_a_full_rebuild() -> None:
+    rng = random.Random(7)
+    fixes = _jittery_shift()
+    held = fixes[1200:2400]  # 20 minutes held back by a dropped link
+    chunks = _chunks(fixes[:1200] + fixes[2400:], 41)
+    s = _session()
+    for i, chunk in enumerate(chunks):
+        if i % 5 == 2:
+            rng.shuffle(chunk)
+        _store(s, chunk)
+        if i == 70:
+            _store(s, held[::-1])
+        refresh(s, SITE)
+    _assert_matches_full_rebuild(s)
+
+
+def test_rejoining_a_visit_past_the_cap_opens_no_cycle(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A truck parks in the face past the cap, then reads outside for 3 s and back. The
+    # tick that lands in the blip resumes there with no cycle in progress; the fixes back
+    # inside rejoin the parked visit (whose cycle is over the cap), so they must not open
+    # one. Only the lead-in before the window shows that.
+    monkeypatch.setenv("MM_CYCLE_MAX_S", "600")
+    get_settings.cache_clear()
+    legs: list[Leg] = [
+        (_OUT, 30.0, 60),
+        (_FACE_EDGE_IN, 0.0, 700),  # parked
+        (_FACE_EDGE_OUT, 0.0, 3),
+        (_FACE_EDGE_IN, 0.0, 40),
+        (FACE, 8.0, 5),
+        (FACE, 0.0, 40),
+        (_OUT, 30.0, 150),
+        (ROM, 0.0, 40),
+        (_OUT, 30.0, 150),
+        *_jittery_cycle(1),
+        (_FACE_EDGE_IN, 0.0, 30),
+    ]
+    fixes, _ = _track("HT-301", T0, legs)
+    s = _session()
+    tick_at = 60 + 700 + 1  # one fix into the blip
+    _store(s, fixes[:tick_at])
+    refresh(s, SITE)
+    for chunk in _chunks(fixes[tick_at:], 60):
+        _store(s, chunk)
+        refresh(s, SITE)
+    cycles, _ = _assert_matches_full_rebuild(s)
+    assert len(cycles) == 1  # the jittery cycle after the parked visit's haul
+
+
+def test_on_demand_slices_through_edge_jitter_match_one_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Slice boundaries every 10 minutes land in blips and part-way through visits.
+    monkeypatch.setenv("MM_CYCLE_MAX_S", "600")
+    get_settings.cache_clear()
+    fixes = _jittery_shift()
+
+    def rebuilt(chunk: timedelta, chunk_min: timedelta) -> tuple[list[tuple], list[tuple]]:
+        monkeypatch.setattr(rc, "_CHUNK", chunk)
+        monkeypatch.setattr(rc, "_CHUNK_MIN", chunk_min)
+        s = _session()
+        _seed(s, fixes)
+        recompute(s, SITE)
+        return _derived(s)
+
+    sliced = rebuilt(timedelta(minutes=10), timedelta(minutes=1))
+    assert sliced == rebuilt(timedelta(days=1), timedelta(days=1))
+    assert len(sliced[0]) == 12
 
 
 # --- H4: derived history outlives raw positions ----------------------------------------
