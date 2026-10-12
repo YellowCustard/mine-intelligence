@@ -301,11 +301,13 @@ The mine is the data controller; eigenstate is the processor. Retention is
 | Derived metrics + cycles | `MM_RETAIN_METRICS_DAYS` | 365 |
 | Events | `MM_RETAIN_EVENTS_DAYS` | 365 |
 | Operational annotations | `MM_RETAIN_ANNOTATIONS_DAYS` | 365 |
-| Audit trail | `MM_RETAIN_AUDIT_DAYS` | 730 |
+| Audit trail, and closed breach records | `MM_RETAIN_AUDIT_DAYS` | 730 |
 
 Operational annotations are delay classifications, shift handovers, and **closed**
 incidents (with their notes). An open or in-progress incident is live work and is
 never age-deleted regardless of the window — only its close time starts the clock.
+The same holds for breach records: an open breach is never deleted, and a closed one
+follows the audit window from its close.
 
 Force a retention pass now: `POST /admin/retention/run` (admin).
 
@@ -315,9 +317,43 @@ the operators endpoints; erasure is a tombstone that leaves history intact. Ther
 **no biometric templates** in this database — the gate face terminal yields only an
 access event, never an image or template.
 
-**Breach posture.** Reported obligation is 24 h to the regulator (POTRAZ) and 72 h to
-affected individuals. The **audit log** records access to personal data and rule/zone
-changes; use it to establish scope.
+**Personal-data breaches.** The reported obligation is notice to the regulator
+(POTRAZ) within 24 h and to the people affected within 72 h. When personal data held
+here is lost, exposed or altered, an admin records it in the breach register as soon
+as it is known; the platform then keeps both deadlines in front of the control room.
+Use the **audit log** (access to personal data, rule and zone changes) to establish
+scope.
+
+1. **Record it**: `POST /sites/{site}/breaches` with `discovered_at`, optionally
+   `occurred_at`, a `summary`, the `data_classes` touched (`operator_records`,
+   `positions`, `access_events`, `events`, `audit_log`, `evidence`, `other`), the
+   `operator_ids` of the people affected, and `notify_individuals` (`false` only when
+   notice to them is assessed as not required). Both deadlines are fixed now and
+   returned.
+2. **Watch the alarms**: each unsent notice raises a `breach_notice_due` **warning**
+   `MM_BREACH_WARN_BEFORE_H` (6) hours before it is due and a **critical** alarm once
+   it is overdue, in the normal alarm queue and through any configured notification
+   channel. An alarm names the breach id and the deadline only, never the summary or
+   the people.
+3. **Tell the people affected**: `GET /sites/{site}/breaches/{id}/affected.csv` gives
+   their names and contacts (erased people appear without them). The download is
+   audited as a personal-data export.
+4. **Record each notice**: `POST /sites/{site}/breaches/{id}/notices/regulator` (with
+   `notified_at` and POTRAZ's `reference`) and `…/notices/individuals`. This stops that
+   notice's alarms and acknowledges the ones already raised.
+5. **Close it**: `POST /sites/{site}/breaches/{id}/close` with a `note` (also for a
+   report that turns out not to be a breach). Any notice still unsent is recorded in
+   the audit entry.
+
+`GET /sites/{site}/breaches` lists open breaches with each notice's status
+(`pending`, `due_soon`, `overdue`, `sent`, `not_required`, `not_sent`);
+`?state=all` includes closed ones. All of it is admin-only and audited.
+
+The deadlines are settings, because the legal position is still being confirmed:
+`MM_BREACH_REGULATOR_NOTICE_H` (24), `MM_BREACH_INDIVIDUALS_NOTICE_H` (72),
+`MM_BREACH_DEADLINE_FROM` (`discovered`, or `occurred` when the occurrence time is
+known) and `MM_BREACH_REGULATOR_NAME` (POTRAZ). A breach keeps the deadlines it was
+recorded with, so changing them affects only breaches recorded afterwards.
 
 ---
 
