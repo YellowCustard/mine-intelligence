@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 from sqlalchemy.orm import Session
 
 from minemonitor import audit
@@ -36,7 +36,7 @@ class TicketIn(BaseModel):
     gross_kg: float = Field(ge=0)
     tare_kg: float = Field(ge=0)
     net_kg: float
-    ts: datetime | None = None
+    ts: AwareDatetime | None = None
     direction: str = "outbound"
     scale_id: str | None = None
     asset_id: str | None = None
@@ -181,8 +181,8 @@ def record_ticket(
 @router.get("/sites/{site_id}/weighbridge/tickets")
 def list_tickets(
     site_id: str,
-    since: datetime | None = None,
-    until: datetime | None = None,
+    since: AwareDatetime | None = None,
+    until: AwareDatetime | None = None,
     material: str | None = None,
     limit: int = 200,
     db: Session = Depends(get_db),
@@ -226,8 +226,8 @@ def import_csv(
 @router.get("/sites/{site_id}/weighbridge/tonnage")
 def tonnage(
     site_id: str,
-    since: datetime,
-    until: datetime,
+    since: AwareDatetime,
+    until: AwareDatetime,
     db: Session = Depends(get_db),
     _: User = Depends(require_viewer),
 ) -> dict[str, Any]:

@@ -405,6 +405,7 @@ class MqttIngestor:
         """
         from minemonitor import heartbeat
         from minemonitor.access.service import detect_missed_searches
+        from minemonitor.breaches.service import check_breach_deadlines
         from minemonitor.config import get_settings
         from minemonitor.cycles.recompute import refresh
         from minemonitor.ingest.adapters.dahua_gate import DahuaHttpGateSource, poll_once
@@ -460,6 +461,11 @@ class MqttIngestor:
                 for ev in missed:
                     log.info(
                         "search missed",
+                        extra={"site_id": ev.site_id, "detail": ev.detail},
+                    )
+                for ev in check_breach_deadlines(session, self._site_id):
+                    log.warning(
+                        "breach notice due",
                         extra={"site_id": ev.site_id, "detail": ev.detail},
                     )
                 if gate_source is not None:

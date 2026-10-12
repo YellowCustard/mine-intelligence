@@ -314,6 +314,11 @@ def test_dashboard_renders_live_data_and_acknowledges(live_server: str) -> None:
         expect(page.locator("#sy-health")).to_contain_text("Verdict", timeout=10_000)
         expect(page.locator("#sy-dq")).to_contain_text("Confidence", timeout=10_000)
         expect(page.locator("#sy-version")).to_contain_text("Mine Monitor v", timeout=10_000)
+        # An admin gets the compliance pack in one click, as a zip.
+        with page.expect_download() as dl:
+            page.locator("#sy-pack").click()
+        assert dl.value.suggested_filename.startswith(f"compliance-pack-{_SITE}-")
+        assert dl.value.suggested_filename.endswith(".zip")
 
         # Back to Fleet to acknowledge the alarm.
         page.locator("#n-site").click()

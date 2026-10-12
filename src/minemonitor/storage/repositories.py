@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -120,10 +120,40 @@ def list_positions(
     return list(session.execute(stmt).scalars().all())
 
 
+# The newest fix per asset without reading the whole history. A GROUP BY max(ts) visits
+# every stored position for the site, so its cost grows with retention (a month of 1 Hz
+# fixes is millions of rows) on every dashboard frame. This walks the primary key
+# (site_id, asset_id, ts) instead: one index probe to find each next asset_id (a loose
+# index scan), then one backward probe for that asset's newest fix.
+_LATEST_POSITIONS_PG = text(
+    """
+    WITH RECURSIVE ids AS (
+        (SELECT asset_id FROM positions WHERE site_id = :site_id ORDER BY asset_id LIMIT 1)
+        UNION ALL
+        SELECT (
+            SELECT p.asset_id FROM positions p
+            WHERE p.site_id = :site_id AND p.asset_id > ids.asset_id
+            ORDER BY p.asset_id LIMIT 1
+        )
+        FROM ids WHERE ids.asset_id IS NOT NULL
+    )
+    SELECT latest.* FROM ids
+    CROSS JOIN LATERAL (
+        SELECT * FROM positions p
+        WHERE p.site_id = :site_id AND p.asset_id = ids.asset_id
+        ORDER BY p.ts DESC LIMIT 1
+    ) AS latest
+    """
+)
+
+
 def latest_positions(session: Session, site_id: str) -> list[Position]:
     """The most recent position for each asset at a site (for live markers)."""
     from sqlalchemy import and_, func
 
+    if session.get_bind().dialect.name == "postgresql":
+        stmt_pg = select(Position).from_statement(_LATEST_POSITIONS_PG.bindparams(site_id=site_id))
+        return list(session.execute(stmt_pg).scalars().all())
     latest = (
         select(Position.asset_id, func.max(Position.ts).label("mts"))
         .where(Position.site_id == site_id)

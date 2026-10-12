@@ -7,10 +7,9 @@ calculated separately and labelled as such (never presented as measured).
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 FuelDirection = Literal["dispense", "delivery"]
 FuelSource = Literal["manual", "dispenser", "tank_meter", "import"]
@@ -24,7 +23,7 @@ class FuelTransactionV1(BaseModel):
     schema_: Literal["fuel.transaction.v1"] = Field(default="fuel.transaction.v1", alias="schema")
     transaction_id: str = Field(min_length=1)
     site_id: str = Field(min_length=1)
-    ts: datetime
+    ts: AwareDatetime
     litres: float = Field(gt=0)
     direction: FuelDirection = "dispense"
     source: FuelSource = "manual"

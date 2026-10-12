@@ -20,7 +20,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from minemonitor import audit
@@ -218,8 +218,8 @@ class RecomputeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     camera_id: str = Field(min_length=1)
-    since: datetime
-    until: datetime
+    since: AwareDatetime
+    until: AwareDatetime
     rule_id: str = Field(min_length=1)
     rule_version: str = Field(min_length=1)
 
@@ -320,7 +320,7 @@ def list_vision_events(
     site_id: str,
     camera_id: str | None = Query(default=None),
     type: str | None = Query(default=None),  # noqa: A002 - query parameter name
-    since: datetime | None = Query(default=None),
+    since: AwareDatetime | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=1000),
     db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
@@ -335,8 +335,8 @@ def list_vision_rollups(
     site_id: str,
     camera_id: str | None = Query(default=None),
     zone_id: str | None = Query(default=None),
-    since: datetime | None = Query(default=None),
-    until: datetime | None = Query(default=None),
+    since: AwareDatetime | None = Query(default=None),
+    until: AwareDatetime | None = Query(default=None),
     limit: int = Query(default=2000, ge=1, le=10_000),
     db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
@@ -559,9 +559,9 @@ def _report_window(
 def vision_report(
     site_id: str,
     shift_id: str | None = Query(default=None),
-    at: datetime | None = Query(default=None),
-    since: datetime | None = Query(default=None),
-    until: datetime | None = Query(default=None),
+    at: AwareDatetime | None = Query(default=None),
+    since: AwareDatetime | None = Query(default=None),
+    until: AwareDatetime | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """People per camera × zone for a shift (default: the current shift) or explicit window."""
@@ -577,9 +577,9 @@ def vision_report(
 def vision_report_csv(
     site_id: str,
     shift_id: str | None = Query(default=None),
-    at: datetime | None = Query(default=None),
-    since: datetime | None = Query(default=None),
-    until: datetime | None = Query(default=None),
+    at: AwareDatetime | None = Query(default=None),
+    since: AwareDatetime | None = Query(default=None),
+    until: AwareDatetime | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> PlainTextResponse:
     start, end, sid = _report_window(db, site_id, shift_id, at, since, until)

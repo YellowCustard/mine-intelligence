@@ -5,8 +5,8 @@ stored position, and their first run starts a bounded window back from it, so th
 never triggers a whole-history rebuild and leaves derived history older than the window
 exactly as it was.
 
-Revision ID: 0028_recompute_cursors
-Revises: 0027_vision_models
+Revision ID: 0029_recompute_cursors
+Revises: 0028_breach_records
 Create Date: 2026-10-08
 """
 
@@ -17,8 +17,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0028_recompute_cursors"
-down_revision: str | None = "0027_vision_models"
+revision: str = "0029_recompute_cursors"
+down_revision: str | None = "0028_breach_records"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

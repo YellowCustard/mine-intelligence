@@ -15,6 +15,7 @@ from minemonitor import __version__
 from minemonitor.api.routers import (
     access,
     account,
+    breaches,
     cameras,
     cycles,
     delays,
@@ -190,6 +191,7 @@ def create_app() -> FastAPI:
         generators.router,
         reconciliation.router,
         vision.router,
+        breaches.router,
     ]
     for r in _domain_routers:
         app.include_router(r)  # legacy unprefixed
