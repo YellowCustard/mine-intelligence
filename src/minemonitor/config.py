@@ -164,6 +164,10 @@ class Settings(BaseSettings):
     # Close a Teltonika connection that stops sending for this long, so a half-open
     # socket cannot linger. Trackers report far more often; keep it generous.
     teltonika_idle_timeout_s: int = 900
+    # TLS for the listener (plan C-2): PEM certificate chain and private key paths. Both or
+    # neither; neither listens in plain TCP, and one without the other refuses to start.
+    teltonika_tls_cert: str = ""
+    teltonika_tls_key: str = ""
 
     @model_validator(mode="after")
     def _guard_production_defaults(self) -> Settings:
