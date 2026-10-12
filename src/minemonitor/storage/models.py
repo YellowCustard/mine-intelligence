@@ -21,6 +21,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -907,6 +908,18 @@ class AccessEvent(Base):
     """
 
     __tablename__ = "access_events"
+    # Selected searches neither completed nor yet escalated: all the missed-search check reads.
+    __table_args__ = (
+        Index(
+            "ix_access_events_search_pending",
+            "site_id",
+            "ts",
+            postgresql_where=text(
+                "search_selected IS TRUE AND search_completed IS NOT TRUE "
+                "AND search_escalated_at IS NULL"
+            ),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False, index=True)
@@ -921,6 +934,11 @@ class AccessEvent(Base):
     search_completed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     metal_detected: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # When the tick raised this passage's skipped search (``search_missed``): raised once,
+    # even after events retention purges the alarm.
+    search_escalated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class AccessQuarantine(Base):

@@ -18,7 +18,7 @@ import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Final
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -426,19 +426,22 @@ def detect_missed_searches(
     A passage flagged ``search_selected`` whose search is still not completed ``grace_s`` after
     the passage time raises one ``search_missed`` ``event.v1`` (warning), deduped per passage —
     the "a selected search was skipped" alert (FP-07). Runs on the maintenance tick.
+
+    The passage records its escalation (``search_escalated_at``), so the check reads only
+    searches still pending, through a partial index that holds just those, and an alarm that
+    events retention later purges is not raised again for the same passage.
     """
     now = now or datetime.now(UTC)
     grace = grace_s if grace_s is not None else get_settings().access_search_grace_s
     cutoff = now - timedelta(seconds=grace)
     rows = (
         session.execute(
+            # The predicate of ix_access_events_search_pending, so the planner can use it.
             select(AccessEvent).where(
                 AccessEvent.site_id == site_id,
                 AccessEvent.search_selected.is_(True),
-                or_(
-                    AccessEvent.search_completed.is_(None),
-                    AccessEvent.search_completed.is_(False),
-                ),
+                AccessEvent.search_completed.is_not(True),
+                AccessEvent.search_escalated_at.is_(None),
             )
         )
         .scalars()
@@ -449,9 +452,10 @@ def detect_missed_searches(
         ts = row.ts if row.ts.tzinfo else row.ts.replace(tzinfo=UTC)
         if ts > cutoff:  # still within the grace window
             continue
+        row.search_escalated_at = now
         ev_id = f"search-missed-{row.id}"
         if session.get(Event, ev_id) is not None:
-            continue  # already escalated (deduped)
+            continue  # raised before passages recorded it
         ev = EventV1(
             schema="event.v1",
             event_id=ev_id,
