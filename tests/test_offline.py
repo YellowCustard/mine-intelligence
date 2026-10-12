@@ -32,7 +32,7 @@ def session() -> Iterator[Session]:
         s.close()
 
 
-def _pos(session: Session, asset_id: str, minutes_ago: float, ignition: bool) -> None:
+def _pos(session: Session, asset_id: str, minutes_ago: float, ignition: bool | None) -> None:
     ts = _NOW - timedelta(minutes=minutes_ago)
     session.add(
         Position(
@@ -62,6 +62,23 @@ def test_parked_asset_is_not_offline(session: Session) -> None:
     _pos(session, "HT-102", minutes_ago=20, ignition=False)  # parked, engine off
     events = detect_offline(session, "kn-zw-01", now=_NOW, threshold_s=600)
     assert events == []
+
+
+def test_silence_from_a_source_without_ignition_is_raised_as_unknown(session: Session) -> None:
+    """No ignition reading is not "parked": the feed going quiet must not pass unseen (M1)."""
+    _pos(session, "HT-104", minutes_ago=20, ignition=None)
+    events = detect_offline(session, "kn-zw-01", now=_NOW, threshold_s=600)
+    assert [e.asset_id for e in events] == ["HT-104"]
+    assert events[0].type == "asset_offline"
+    assert "ignition unknown" in events[0].summary
+    assert events[0].detail["ignition"] is None
+
+
+def test_an_offline_alarm_says_the_machine_was_running(session: Session) -> None:
+    _pos(session, "HT-101", minutes_ago=20, ignition=True)
+    (ev,) = detect_offline(session, "kn-zw-01", now=_NOW, threshold_s=600)
+    assert "ignition unknown" not in ev.summary
+    assert ev.detail["ignition"] is True
 
 
 def test_recent_asset_is_not_offline(session: Session) -> None:

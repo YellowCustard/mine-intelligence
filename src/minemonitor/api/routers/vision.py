@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from minemonitor import audit
 from minemonitor.auth.deps import require_admin, require_device, require_viewer
 from minemonitor.contracts.vision import VisionRuleVersionV1
+from minemonitor.devices import service as devices
 from minemonitor.operations.shifts import resolve_shift, resolve_shift_by_id
 from minemonitor.storage.db import get_db
 from minemonitor.storage.models import User, VisionOperationalEvent, VisionZoneRollup
@@ -74,6 +75,13 @@ def ingest_vision(
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, "device not authorised to publish for this site"
             )
+        refusal = devices.vision_refusal(db, device, site_id)
+        if refusal is not None:
+            log.warning(
+                "rejected device vision ingest",
+                extra={"device": device.username, "site_id": site_id, "reason": refusal},
+            )
+            raise HTTPException(status.HTTP_403_FORBIDDEN, refusal)
         parsed.append(rec)
     received_at = datetime.now(UTC)
     results = []

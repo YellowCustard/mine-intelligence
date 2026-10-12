@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import AwareDatetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from minemonitor import audit
 from minemonitor.auth.deps import require_admin, require_viewer
 from minemonitor.cycles.recompute import recompute
-from minemonitor.cycles.shifts import shift_bounds
+from minemonitor.operations.shifts import resolve_shift_by_id
 from minemonitor.storage.db import get_db
 from minemonitor.storage.models import AssetMetrics, HaulCycle, User
 
@@ -80,8 +80,12 @@ def shift_summary(
     shift: str = Query(default="day"),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """Per-asset and site-wide cycle summary for a shift (local date + shift)."""
-    start, end = shift_bounds(shift_date, shift)
+    """Per-asset and site-wide cycle summary for a shift: the site's own shift ``shift``
+    starting on local date ``date``. A shift the site does not run is a 404."""
+    window = resolve_shift_by_id(db, site_id, f"{site_id}:{shift_date.isoformat()}:{shift}")
+    if window is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"site {site_id} has no shift {shift!r}")
+    start, end = window.start, window.end
     rows = list(
         db.execute(
             select(HaulCycle)
@@ -101,6 +105,7 @@ def shift_summary(
     return {
         "site_id": site_id,
         "shift": shift,
+        "shift_id": window.shift_id,
         "date": shift_date.isoformat(),
         "start": start,
         "end": end,

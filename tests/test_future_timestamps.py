@@ -161,6 +161,17 @@ def test_watermark_recovery_does_not_evaluate_historical_backfill(magazine: Sess
     assert _breaches(magazine) == 1
 
 
+def test_watermark_recovery_restarts_a_future_entry_run(magazine: Session) -> None:
+    """The bad-clock fix was inside the magazine, so it began an entry run in the future.
+    Live fixes start the run afresh: the breach is not held until that time comes round."""
+    now = datetime.now(UTC)
+    _poison(magazine, now, consec_in=1, entered_at=now + timedelta(days=365))
+    for i in range(2):
+        ts = now + timedelta(seconds=i)
+        _process(magazine, ts, ts)
+    assert _breaches(magazine) == 1
+
+
 def test_watermark_recovery_resets_future_dwell_episode(db_session: Session) -> None:
     upsert_zone(
         db_session,

@@ -149,6 +149,8 @@ The network and power **will** fail; the whole ingest side is designed around it
   anonymous broker. Above the broker, the ingestor still independently rejects any
   message whose topic and payload disagree (anti-spoof), and, when
   `MM_MQTT_REQUIRE_REGISTERED_DEVICE=true`, rejects assets with no enabled device row.
+  HTTP ingest holds a `device` account named after a provisioned `device_id` to the same
+  binding as the ACL, and applies strict mode to `device` accounts too.
 
 ---
 
@@ -156,8 +158,11 @@ The network and power **will** fail; the whole ingest side is designed around it
 
 - **Zone engine:** WGS84 polygons per site, point-in-polygon per incoming fix against
   that site's zones only. **Debounce is mandatory** — N consecutive fixes inside
-  (default 2) plus a minimum dwell to confirm entry, and a hysteresis buffer
-  (default 15 m) to confirm exit. Both configurable per zone. Emits `zone_entry` /
+  (`debounce_in`, default 2) plus a minimum time inside (`min_entry_dwell_s`, default
+  0 s: the fix count alone) to confirm entry, and a hysteresis buffer (`hysteresis_m`,
+  default 15 m) to confirm exit. All configurable per zone in its `rules`. Fixes either
+  side of a silence longer than `MM_OFFLINE_THRESHOLD_S` are not consecutive, so two
+  lone fixes around an outage confirm nothing. Emits `zone_entry` /
   `zone_exit` internally; emits `event.v1` only when a *rule* is breached. This is
   what stops GNSS jitter producing an alarm storm (M3 acceptance: the light vehicle in
   the magazine raises exactly **one** critical event; boundary-huggers raise none).
@@ -165,7 +170,8 @@ The network and power **will** fail; the whole ingest side is designed around it
   `restricted` (unauthorised class → critical), `speed_limited` (sustained speed over
   the limit *of the zone it is in*, N consecutive fixes), `dwell` (stationary beyond a
   threshold), `asset_offline` (no fix for N minutes while previously active —
-  distinguished from *parked with ignition off*).
+  distinguished from *parked with ignition off*; a source that reports no ignition is
+  raised too, marked "ignition unknown").
 - **Haul-cycle analytics** (the commercial payload): a per-asset state machine driven
   by zone transitions, `AT_FACE → HAULING_LOADED → AT_DUMP → RETURNING_EMPTY →
   AT_FACE`. **Queue time** = stationary + in-load-zone + ignition-on, *before* loading
