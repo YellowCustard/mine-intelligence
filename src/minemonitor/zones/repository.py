@@ -48,6 +48,17 @@ def delete_zone(session: Session, site_id: str, zone_id: str) -> bool:
     return True
 
 
+def load_states(session: Session, site_id: str, asset_id: str) -> list[AssetZoneState]:
+    """All of an asset's debounce state rows, one per zone it has been evaluated against."""
+    return list(
+        session.execute(
+            select(AssetZoneState).where(
+                AssetZoneState.site_id == site_id, AssetZoneState.asset_id == asset_id
+            )
+        ).scalars()
+    )
+
+
 def get_or_create_state(
     session: Session, site_id: str, asset_id: str, zone_id: str
 ) -> AssetZoneState:

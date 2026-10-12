@@ -26,7 +26,7 @@ from minemonitor.rules.evaluate import on_entry, on_inzone_fix
 from minemonitor.storage.models import Asset
 from minemonitor.zones import engine
 from minemonitor.zones.geometry import distance_to_polygon_m, point_in_polygon
-from minemonitor.zones.repository import get_or_create_state, list_zones
+from minemonitor.zones.repository import get_or_create_state, list_zones, load_states
 
 log = logging.getLogger("minemonitor.pipeline")
 
@@ -47,6 +47,8 @@ def process_position(session: Session, pos: AssetPositionV1, created: bool) -> l
         return []
 
     asset_class = _asset_class(session, pos.site_id, pos.asset_id)
+    # One query for the asset's state in every zone, not one per zone (soak).
+    states = {st.zone_id: st for st in load_states(session, pos.site_id, pos.asset_id)}
     events: list[EventV1] = []
     settings = get_settings()
     max_skew = timedelta(seconds=settings.max_future_skew_s)
@@ -54,7 +56,9 @@ def process_position(session: Session, pos: AssetPositionV1, created: bool) -> l
     max_gap_s = settings.offline_threshold_s
 
     for zone in zones:
-        state = get_or_create_state(session, pos.site_id, pos.asset_id, zone.zone_id)
+        state = states.get(zone.zone_id) or get_or_create_state(
+            session, pos.site_id, pos.asset_id, zone.zone_id
+        )
         # Skip late / out-of-order fixes for live evaluation (still stored).
         # Normalise last_ts: SQLite returns naive, Postgres returns aware.
         if state.last_ts is not None:
