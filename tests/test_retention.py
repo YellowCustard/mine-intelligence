@@ -253,6 +253,7 @@ def test_access_quarantine_follows_events_window(session: Session) -> None:
     from minemonitor.storage.models import AccessQuarantine, Site
 
     session.add(Site(site_id="kn-zw-01", name="T", timezone="Africa/Harare"))
+    session.flush()  # AccessQuarantine sorts before Site: write the site first
     for qid, days_ago in (("old", 400), ("new", 5)):
         seen = _NOW - timedelta(days=days_ago)
         session.add(

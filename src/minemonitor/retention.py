@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, exists, select
 from sqlalchemy.orm import Session
 
 from minemonitor import audit
@@ -31,8 +31,10 @@ from minemonitor.storage.models import (
     HaulCycle,
     Incident,
     IncidentNote,
+    Notification,
     Position,
     ShiftHandover,
+    ShiftReportDelivery,
     VisionCameraHealth,
     VisionNodeHealth,
     VisionObservation,
@@ -128,19 +130,44 @@ def run_retention(
         res = session.execute(delete(BreachRecord).where(BreachRecord.breach_id.in_(ids)))
         return res.rowcount or 0
 
+    def _purge_events(days: int) -> tuple[int, int]:
+        """Delete alarms past cutoff, with their notification rows.
+
+        ``notifications`` and ``incidents`` carry a foreign key to the alarm, so a plain
+        delete would fail and roll back the whole run. A notification is the alarm's
+        delivery record and goes with it. An alarm an incident still points at is kept:
+        the incident is live work or annotation history. Closed incidents are purged
+        before this, so the run that deletes an incident deletes its old alarm too.
+        """
+        if days <= 0:
+            return 0, 0
+        cutoff = now - timedelta(days=days)
+        due = (Event.ts < cutoff) & ~exists().where(Incident.event_id == Event.event_id)
+        notes = session.execute(
+            delete(Notification).where(Notification.event_id.in_(select(Event.event_id).where(due)))
+        ).rowcount
+        events = session.execute(delete(Event).where(due)).rowcount
+        return events or 0, notes or 0
+
     deleted["positions"] = _purge(Position, Position.ts, positions_days)
     deleted["asset_metrics"] = _purge(AssetMetrics, AssetMetrics.bucket_start, metrics_days)
     deleted["haul_cycles"] = _purge(HaulCycle, HaulCycle.end_ts, metrics_days)
-    deleted["events"] = _purge(Event, Event.ts, events_days)
+    # Incidents first: an alarm is deletable only once no retained incident points at it.
+    deleted["incidents"], deleted["incident_notes"] = _purge_closed_incidents(annotations_days)
+    deleted["events"], deleted["notifications"] = _purge_events(events_days)
     # Quarantined gate events are the evidence behind a clock-skew alarm: they follow events.
     deleted["access_quarantine"] = _purge(
         AccessQuarantine, AccessQuarantine.first_seen_at, events_days
+    )
+    # A queued shift report holds a recipient's address and the shift's figures: it is a
+    # record of something sent, like an alarm, and follows the events class.
+    deleted["shift_report_deliveries"] = _purge(
+        ShiftReportDelivery, ShiftReportDelivery.shift_end, events_days
     )
     deleted["delay_classifications"] = _purge(
         DelayClassification, DelayClassification.end_ts, annotations_days
     )
     deleted["shift_handovers"] = _purge(ShiftHandover, ShiftHandover.created_at, annotations_days)
-    deleted["incidents"], deleted["incident_notes"] = _purge_closed_incidents(annotations_days)
     # Vision classes: raw observations + health are their own classes; derived operational
     # events follow the events class and zone rollups the derived-analytics class.
     deleted["vision_observations"] = _purge(

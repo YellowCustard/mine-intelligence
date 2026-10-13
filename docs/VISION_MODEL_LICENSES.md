@@ -46,15 +46,25 @@ licence required? 7. SaaS restrictions? 8. On-prem restrictions?
 |---|---|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | **YOLOX** | Apache-2.0 | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | notice file | no | ✅ | ✅ | **✅** |
 | **RT-DETR / v2** (orig. Apache repo) | Apache-2.0 | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | notice file | no | ✅ | ✅ | **✅** |
-| **RF-DETR** (Roboflow) | Apache-2.0 | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | notice file | no | ✅ | ✅ | **✅** |
+| **RF-DETR** (Roboflow), Nano/Small/Medium/Large detection | Apache-2.0 (`rfdetr`) | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | notice file | no | ✅ | ✅ | **✅ these sizes only** |
+| RF-DETR XL/2XL (and Atto/Femto/Pico, unreleased) | **PML 1.0** (`rfdetr_plus`) | **PML 1.0** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | per licence | — | ⚠️ | ⚠️ | **⛔ not cleared** |
 | **RTMDet** (MMDet) | Apache-2.0 | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | notice file | no | ✅ | ✅ | **✅** |
-| **D-FINE** | Apache-2.0 | Apache-2.0 (verify per release) | ✅ | ✅ | ✅ | ✅ | notice file | no | ✅ | ✅ | ⚠️ verify weights |
+| **D-FINE** | Apache-2.0 | Apache-2.0 for COCO-only checkpoints (verify per release); **`*_obj365` / `*_obj2coco` are under the Objects365 dataset terms** | ✅ | ✅ | ✅ | ✅ | notice file | no | ✅ | ✅ | ⚠️ verify weights; ⛔ Objects365 checkpoints |
 | **PP-YOLOE** (PaddleDetection) | Apache-2.0 | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | notice file | no | ✅ | ✅ | **✅** |
 | Ultralytics YOLOv5/v8/v11 | **AGPL-3.0** | **AGPL-3.0** | ⛔ | ⛔ | ⛔ | (paid licence exists) | — | **yes, to avoid AGPL** | ⛔ | ⛔ | **⛔** |
 | YOLOv7 | **GPL-3.0** | GPL-3.0 | ⚠️ | ⛔ derivative risk | ⚠️ | ✅ | required | no | ⚠️ | ⚠️ | **⛔ (copyleft)** |
 | YOLO-NAS (super-gradients) | Apache-2.0 (code) | **non-commercial** | ⛔ (weights) | ⛔ | ⛔ | ⛔ | — | yes | ⛔ | ⛔ | **⛔ (weights)** |
+| DEIMv2 (Intellindust) | **DEIMv2 License** (non-commercial; was Apache-2.0 earlier) | same | ⛔ | ⛔ | ⛔ | ⛔ | — | yes | ⛔ | ⛔ | **⛔** |
+| EdgeCrafter / ECDet (Intellindust) | **EdgeCrafter License** (non-commercial) | same | ⛔ | ⛔ | ⛔ | ⛔ | — | yes | ⛔ | ⛔ | **⛔** |
 
 Notes:
+- **Licences split by size within a family.** RF-DETR's repository and `rfdetr` package are
+  Apache-2.0, but its XL and 2XL detection weights need the `rfdetr_plus` extension and are
+  PML 1.0 (README licence section, checked 2026-10-13); the Atto/Femto/Pico sizes on its
+  `develop` branch were also PML 1.0 (research log, 2026-10-08). D-FINE's README says its
+  Objects365-trained checkpoints "should not be assumed to be commercially cleared under the
+  D-FINE license". So a row here clears the sizes it names, not the family, and the registry
+  enforces it (§8, step 2).
 - Apache/MIT "attribution" = keep the licence/NOTICE file in the distribution; it does
   **not** require public-facing credit. We satisfy it by shipping the NOTICE and listing
   the model here and in `LICENCES.md`.
@@ -196,8 +206,14 @@ rejected outright.
 
 1. Before any model enters the registry at `experimental`, its licence line is added
    here (code licence, weights licence, dataset licence, the eight answers).
-2. A registry constraint / review checklist blocks promotion to `production` for any row
-   not marked ✅ ship on **all three** of code, weights, and training data.
+2. The registry enforces it (`src/minemonitor/vision/registry.py`, `AUDITED`): a model
+   reaches `production` only when its `architecture` (or, without one, its `model_id`) is an
+   audited model and size, written `<model>-<size>` (`yolox-nano`, `rfdetr-small`), whose
+   audited licence is the one declared and is permissive or accepted. A declared licence the
+   audit contradicts (`rfdetr-2xl` declared Apache-2.0) is refused at registration, and a
+   known AGPL, GPL or non-commercial model is refused under either name. Deny by default:
+   a family marked ✅ above gets its sizes into `AUDITED` when one is adopted and its code,
+   weights and training data are checked, not before. Training data stays a review step.
 3. On every model version bump, re-audit — licences change per release.
 4. `LICENCES.md` gets a one-line pointer per shipped vision component at build time (not
    before — nothing is shipped yet).

@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 
 from minemonitor.breaches import service as breaches
 from minemonitor.config import Settings, get_settings
+from minemonitor.operations.shift_reports import report_targets
 from minemonitor.storage.models import AuditLog, BreachOperator, BreachRecord, Operator, Site
 
 AUDIT_COLUMNS = ["id", "ts", "actor", "action", "entity_type", "entity_id", "site_id", "detail"]
@@ -85,6 +86,21 @@ def recipients(settings: Settings) -> list[dict[str, str]]:
         out.append(
             {
                 "purpose": "alarm notifications (WhatsApp): alarm summary and severity",
+                "host": _host(settings.notify_whatsapp_url),
+            }
+        )
+    reports = {channel for channel, _ in report_targets(settings)}
+    if "email" in reports:
+        out.append(
+            {
+                "purpose": "shift reports (email relay): shift figures and machine ids",
+                "host": settings.notify_smtp_host,
+            }
+        )
+    if "whatsapp" in reports:
+        out.append(
+            {
+                "purpose": "shift reports (WhatsApp): shift figures and machine ids",
                 "host": _host(settings.notify_whatsapp_url),
             }
         )

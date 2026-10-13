@@ -28,6 +28,7 @@ from minemonitor.config import Settings
 from minemonitor.cycles import recompute
 from minemonitor.ingest.adapters import dahua_gate
 from minemonitor.notifications import dispatch
+from minemonitor.operations import shift_reports
 from minemonitor.rules import occupancy, offline
 from minemonitor.storage.models import ServiceHeartbeat
 from minemonitor.storage.repositories import served_site_ids
@@ -130,7 +131,10 @@ def plan(
             )
         )
     steps += [Step("cycles", site, partial(_cycles, site)) for site in sites]
+    # After the cycles step, so a shift's report counts the cycles that closed in it.
+    steps += [Step("shift_reports", site, partial(_queue_reports, site)) for site in sites]
     steps.append(Step("notifications", None, lambda s: _dispatch(s, notify_sender)))
+    steps.append(Step("report_delivery", None, lambda s: _send_reports(s, notify_sender)))
     if retention_due:
         steps.append(Step("retention", None, _retention))
     return steps
@@ -146,6 +150,16 @@ def _dispatch(session: Session, sender: dispatch.Sender) -> None:
     outcome = dispatch.dispatch_pending(session, sender=sender)
     if outcome["sent"] or outcome["failed"]:
         log.info("notifications dispatched", extra=outcome)
+
+
+def _queue_reports(site: str, session: Session) -> None:
+    shift_reports.queue_due_reports(session, site)
+
+
+def _send_reports(session: Session, sender: dispatch.Sender) -> None:
+    outcome = shift_reports.send_due_reports(session, sender=sender)
+    if outcome["sent"] or outcome["failed"]:
+        log.info("shift reports dispatched", extra=outcome)
 
 
 def _retention(session: Session) -> None:

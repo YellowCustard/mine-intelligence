@@ -57,6 +57,7 @@ from minemonitor.config import Settings, get_settings
 from minemonitor.ingest import tick
 from minemonitor.ingest.adapters.simulator import FACE, MAGAZINE, ROM, WASTE, WORKSHOP, Simulator
 from minemonitor.ingest.service import PositionIngest, reject_if_future, store_and_process
+from minemonitor.notifications.dispatch import WhatsAppTemplate
 from minemonitor.storage.models import (
     Asset,
     Position,
@@ -439,7 +440,7 @@ class _NoSend:
     def email(self, to: str, subject: str, body: str) -> None:
         raise RuntimeError("the soak sends no notifications")
 
-    def whatsapp(self, to: str, text: str) -> None:
+    def whatsapp(self, to: str, text: str, template: WhatsAppTemplate | None) -> None:
         raise RuntimeError("the soak sends no notifications")
 
 

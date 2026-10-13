@@ -41,9 +41,17 @@ def test_forbidden_licences_refused_at_any_status(db_session: Session, licence: 
 
 
 def test_unknown_or_weak_copyleft_licence_never_reaches_production(db_session: Session) -> None:
-    _reg(db_session, licence="LGPL-2.1")  # registrable for evaluation …
-    with pytest.raises(RegistryError, match="not cleared for production"):
-        registry.set_status(db_session, "yolox-nano", "0.1.1rc0", "production")
+    registry.register_model(  # registrable for evaluation …
+        db_session,
+        model_id="lgpl-detector",
+        version="1",
+        task="detect",
+        licence="LGPL-2.1",
+        weights_sha256=SHA,
+        classes=["person"],
+    )
+    with pytest.raises(RegistryError, match="not an audited model"):
+        registry.set_status(db_session, "lgpl-detector", "1", "production")
     registry.register_model(
         db_session,
         model_id="custom",

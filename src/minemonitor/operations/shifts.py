@@ -44,7 +44,8 @@ class ShiftWindow:
         }
 
 
-def _site_tz(session: Session, site_id: str) -> ZoneInfo:
+def site_timezone(session: Session, site_id: str) -> ZoneInfo:
+    """The site's local timezone (Africa/Harare unless the site says otherwise)."""
     site = session.get(Site, site_id)
     return ZoneInfo(site.timezone if site and site.timezone else "Africa/Harare")
 
@@ -94,7 +95,7 @@ def resolve_shift_by_id(session: Session, site_id: str, shift_id: str) -> ShiftW
         return None
     if sid != site_id:
         return None
-    tz = _site_tz(session, site_id)
+    tz = site_timezone(session, site_id)
     for def_name, start_hour, duration_h in definitions(session, site_id):
         if def_name == name:
             return _window(site_id, name, start_hour, duration_h, base_day, tz)
@@ -108,7 +109,7 @@ def resolve_shift(session: Session, site_id: str, at: datetime) -> ShiftWindow |
     so a shift that crosses midnight is matched to the day it started on.
     """
     at = at if at.tzinfo is not None else at.replace(tzinfo=UTC)
-    tz = _site_tz(session, site_id)
+    tz = site_timezone(session, site_id)
     defs = definitions(session, site_id)
     at_local_date = at.astimezone(tz).date()
     for base_day in (at_local_date, at_local_date - timedelta(days=1)):
@@ -117,3 +118,26 @@ def resolve_shift(session: Session, site_id: str, at: datetime) -> ShiftWindow |
             if window.start <= at < window.end:
                 return window
     return None
+
+
+def windows_ending_between(
+    session: Session, site_id: str, after: datetime, until: datetime
+) -> list[ShiftWindow]:
+    """Every shift instance whose end falls in ``(after, until]``, oldest end first.
+
+    A shift is attributed to the local date it starts on and may end the next day, so the
+    search starts a day before ``after``'s local date.
+    """
+    tz = site_timezone(session, site_id)
+    defs = definitions(session, site_id)
+    longest_days = max((d for _, _, d in defs), default=0) // 24 + 1
+    day = after.astimezone(tz).date() - timedelta(days=longest_days)
+    last = until.astimezone(tz).date()
+    out: list[ShiftWindow] = []
+    while day <= last:
+        for name, start_hour, duration_h in defs:
+            window = _window(site_id, name, start_hour, duration_h, day, tz)
+            if after < window.end <= until:
+                out.append(window)
+        day += timedelta(days=1)
+    return sorted(out, key=lambda w: (w.end, w.name))
