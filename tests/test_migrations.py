@@ -13,7 +13,7 @@ from pathlib import Path
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
-HEAD = "0032_cycle_zones"
+HEAD = "0033_shift_report_deliveries"
 
 
 def test_migrations_have_one_head() -> None:

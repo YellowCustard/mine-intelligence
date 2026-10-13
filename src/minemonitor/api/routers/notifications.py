@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from minemonitor.auth.deps import require_supervisor
 from minemonitor.storage.db import get_db
-from minemonitor.storage.models import Notification, User
+from minemonitor.storage.models import Notification, ShiftReportDelivery, User
 
 router = APIRouter(tags=["notifications"])
 
@@ -48,4 +48,38 @@ def list_notifications(
             "last_error": n.last_error,
         }
         for n in rows
+    ]
+
+
+@router.get("/sites/{site_id}/shift-report-deliveries")
+def list_shift_report_deliveries(
+    site_id: str,
+    state: str | None = None,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_supervisor),
+) -> list[dict[str, Any]]:
+    """List queued shift reports for a site (newest shift first). Optional state filter."""
+    stmt = select(ShiftReportDelivery).where(ShiftReportDelivery.site_id == site_id)
+    if state is not None:
+        stmt = stmt.where(ShiftReportDelivery.state == state)
+    stmt = stmt.order_by(ShiftReportDelivery.shift_end.desc(), ShiftReportDelivery.channel).limit(
+        min(limit, 500)
+    )
+    return [
+        {
+            "id": r.id,
+            "shift_id": r.shift_id,
+            "shift_end": r.shift_end,
+            "channel": r.channel,
+            "target": r.target,
+            "subject": r.subject,
+            "state": r.state,
+            "attempts": r.attempts,
+            "created_at": r.created_at,
+            "next_attempt_at": r.next_attempt_at,
+            "sent_at": r.sent_at,
+            "last_error": r.last_error,
+        }
+        for r in db.execute(stmt).scalars()
     ]

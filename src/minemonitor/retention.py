@@ -33,6 +33,7 @@ from minemonitor.storage.models import (
     IncidentNote,
     Position,
     ShiftHandover,
+    ShiftReportDelivery,
     VisionCameraHealth,
     VisionNodeHealth,
     VisionObservation,
@@ -135,6 +136,11 @@ def run_retention(
     # Quarantined gate events are the evidence behind a clock-skew alarm: they follow events.
     deleted["access_quarantine"] = _purge(
         AccessQuarantine, AccessQuarantine.first_seen_at, events_days
+    )
+    # A queued shift report holds a recipient's address and the shift's figures: it is a
+    # record of something sent, like an alarm, and follows the events class.
+    deleted["shift_report_deliveries"] = _purge(
+        ShiftReportDelivery, ShiftReportDelivery.shift_end, events_days
     )
     deleted["delay_classifications"] = _purge(
         DelayClassification, DelayClassification.end_ts, annotations_days

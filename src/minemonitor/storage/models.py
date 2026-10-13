@@ -583,6 +583,45 @@ class Notification(Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class ShiftReportDelivery(Base):
+    """A shift report queued for one recipient: the report outbox.
+
+    After a shift ends the maintenance tick writes one row per (shift, channel, recipient)
+    with the report already rendered, and a dispatcher sends it with retry and backoff as
+    alarm notifications are sent. The unique key makes queueing idempotent, so a restart or
+    a second tick never sends a shift's report twice to anyone, and a row written before a
+    power cut is sent after it (brief §3).
+
+    The message holds aggregate figures and machine ids only: no operator name and no
+    handover or incident free text, because it leaves the mine by email or WhatsApp (brief
+    §4). ``params`` are the values of the WhatsApp template's body placeholders.
+    """
+
+    __tablename__ = "shift_report_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "site_id", "shift_id", "channel", "target", name="uq_shift_report_deliveries"
+        ),
+        Index("ix_shift_report_deliveries_state_next", "state", "next_attempt_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    site_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    shift_id: Mapped[str] = mapped_column(String, nullable=False)
+    shift_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    channel: Mapped[str] = mapped_column(String, nullable=False)  # "email" | "whatsapp"
+    target: Mapped[str] = mapped_column(String, nullable=False)  # address or number
+    subject: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    params: Mapped[list[str]] = mapped_column(JsonType, nullable=False, default=list)
+    state: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class FuelTank(Base):
     """A bulk fuel tank at a site (fuel domain, Phase 3). Reference data."""
 
