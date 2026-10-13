@@ -17,6 +17,8 @@ import json
 import logging
 import smtplib
 import urllib.request
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from typing import Any, Protocol
@@ -38,7 +40,48 @@ class Sender(Protocol):
 
     def email(self, to: str, subject: str, body: str) -> None: ...
 
-    def whatsapp(self, to: str, text: str) -> None: ...
+    def whatsapp(self, to: str, text: str, template: WhatsAppTemplate | None) -> None: ...
+
+
+@dataclass(frozen=True)
+class WhatsAppTemplate:
+    """An approved WhatsApp message template and the values for its body placeholders."""
+
+    name: str
+    language: str
+    params: Sequence[str]
+
+
+def _template_param(value: str) -> str:
+    # One line, single-spaced: a value is a phrase inside the approved template's sentence.
+    return " ".join(value.split()) or "-"
+
+
+def whatsapp_body(to: str, text: str, template: WhatsAppTemplate | None) -> dict[str, Any]:
+    """The Cloud API request for one message: the template if there is one, else plain text.
+
+    WhatsApp delivers plain text only within 24 h of the recipient's last message to the
+    business number; outside that window only a template is delivered.
+    """
+    if template is None:
+        return {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
+    return {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "template",
+        "template": {
+            "name": template.name,
+            "language": {"code": template.language},
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": _template_param(p)} for p in template.params
+                    ],
+                }
+            ],
+        },
+    }
 
 
 def event_payload(ev: Event) -> dict[str, Any]:
@@ -90,17 +133,11 @@ class UrllibSmtpSender:
                 smtp.login(s.notify_smtp_user, s.notify_smtp_password)
             smtp.send_message(msg)
 
-    def whatsapp(self, to: str, text: str) -> None:
+    def whatsapp(self, to: str, text: str, template: WhatsAppTemplate | None) -> None:
         s = self._s
-        body = {
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "text",
-            "text": {"body": text},
-        }
         req = urllib.request.Request(
             s.notify_whatsapp_url,
-            data=json.dumps(body).encode(),
+            data=json.dumps(whatsapp_body(to, text, template)).encode(),
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {s.notify_whatsapp_token}",
@@ -112,7 +149,7 @@ class UrllibSmtpSender:
                 raise RuntimeError(f"whatsapp returned {resp.status}")
 
 
-def _deliver(sender: Sender, n: Notification, ev: Event) -> None:
+def _deliver(sender: Sender, n: Notification, ev: Event, s: Settings) -> None:
     payload = event_payload(ev)
     if n.channel == "webhook":
         sender.webhook(n.target, payload)
@@ -125,7 +162,16 @@ def _deliver(sender: Sender, n: Notification, ev: Event) -> None:
     elif n.channel == "whatsapp":
         # Concise, PII-free advisory line (no operator names; event.v1 fields only).
         text = f"[{ev.severity}] {ev.site_id}: {ev.summary} (advisory)"
-        sender.whatsapp(n.target, text)
+        template = (
+            WhatsAppTemplate(
+                name=s.notify_whatsapp_template.strip(),
+                language=s.notify_whatsapp_template_lang.strip(),
+                params=(ev.severity, ev.site_id, ev.summary),
+            )
+            if s.notify_whatsapp_template.strip()
+            else None
+        )
+        sender.whatsapp(n.target, text, template)
     else:  # pragma: no cover - guarded by enqueue
         raise RuntimeError(f"unknown channel {n.channel!r}")
 
@@ -157,7 +203,7 @@ def dispatch_pending(
         try:
             if ev is None:
                 raise RuntimeError("event no longer exists")
-            _deliver(sender, n, ev)
+            _deliver(sender, n, ev, s)
         except Exception as exc:  # noqa: BLE001 - any delivery error is retryable
             n.attempts += 1
             n.last_error = str(exc)[:500]

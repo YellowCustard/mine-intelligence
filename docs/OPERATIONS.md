@@ -246,6 +246,27 @@ turn it on in `.env`:
   operator name. All channels are self-hostable except WhatsApp, which uses the operator's
   own Cloud API credentials.
 
+**WhatsApp needs an approved template.** WhatsApp delivers a free-text message only within
+24 hours of the recipient's last message to the business number; outside that window only a
+template message is delivered. A supervisor who receives alarms rarely writes to the mine's
+number, so alarms are sent as a template:
+
+1. In WhatsApp Manager, create a **Utility** template, for example `mm_alarm`, language
+   English, with this body (three variables, in this order):
+   `Mine Monitor advisory alarm [{{1}}] at {{2}}: {{3}}. This system warns; it never controls plant.`
+2. When Meta approves it, set `MM_NOTIFY_WHATSAPP_TEMPLATE=mm_alarm` and
+   `MM_NOTIFY_WHATSAPP_TEMPLATE_LANG` to the language code it was approved under (`en`,
+   `en_US`, ...).
+3. Restart the stack, raise a test alarm, and check it arrives on a phone that has not
+   written to the number in the last day.
+
+The variables are filled with the severity, the site id and the alarm summary, each on one
+line. With no template the alarm goes as plain text, which is only useful for trying the
+channel from a phone that has just written to the number; `MM_ENV=prod` refuses to start
+that way. WhatsApp accepting a message is not delivery: a message it accepts can still fail
+on the way to the phone, and that failure is reported only to a webhook this install does
+not receive. Treat WhatsApp as a second channel beside email or the webhook, not the only one.
+
 Delivery is **store-and-forward**: a notification is written in the same transaction
 as its event, then a background dispatcher sends it with exponential backoff
 (`MM_NOTIFY_RETRY_BASE_S`), so an outage delays but never loses an alert. After

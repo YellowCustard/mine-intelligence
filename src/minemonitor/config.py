@@ -154,6 +154,12 @@ class Settings(BaseSettings):
     notify_whatsapp_url: str = ""
     notify_whatsapp_token: str = ""  # bearer token
     notify_whatsapp_to: str = ""  # comma-separated recipient phone numbers (E.164)
+    # The approved message template alarms are sent as, with body parameters {{1}} severity,
+    # {{2}} site and {{3}} summary. WhatsApp delivers free text only within 24 h of the
+    # recipient's last message to the business number; anything else must be a template.
+    # Blank = plain text, for trying the channel out; production refuses that.
+    notify_whatsapp_template: str = ""
+    notify_whatsapp_template_lang: str = "en"  # the template's language code, as approved
     notify_max_attempts: int = 5  # then the row is marked failed (visible in the queue)
     notify_retry_base_s: int = 60  # exponential backoff base between attempts
 
@@ -196,6 +202,14 @@ class Settings(BaseSettings):
                 "MM_MQTT_USERNAME is not set — the broker would accept anonymous "
                 "publishers; set MM_MQTT_USERNAME/MM_MQTT_PASSWORD and run the broker "
                 "with allow_anonymous=false (docker/mosquitto.auth.conf)"
+            )
+        whatsapp_on = self.notify_whatsapp_url and self.notify_whatsapp_to
+        if whatsapp_on and not self.notify_whatsapp_template.strip():
+            problems.append(
+                "MM_NOTIFY_WHATSAPP_TEMPLATE is not set — WhatsApp delivers a business-initiated "
+                "message only as an approved template; plain text reaches a recipient only within "
+                "24 h of their last message to the business number, so most alarms would not "
+                "arrive (docs/OPERATIONS.md, Notifications)"
             )
         if problems:
             raise ValueError(
