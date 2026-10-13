@@ -98,6 +98,45 @@ docker compose exec -T api uv run python -m minemonitor.smoke
 
 It exits 0 on success, 1 on any failed check, and prints a per-check report.
 
+**Capacity soak** — run once on the mine's box before go-live, and again after a hardware
+change. It answers whether this machine keeps up with a full fleet once a month of history
+has built up: it seeds a scratch database with 50 machines and 30 days of history, then
+feeds the same fleet live at 1 Hz through the real ingest path for 10 minutes, running the
+real maintenance tick and building the dashboard snapshot (`/state`) every minute.
+
+It writes synthetic data, so it refuses any database that holds telemetry or an account,
+and runs in a scratch database of its own beside the real one. The commands below derive
+that database's URL from the API container's own, so no password goes on the command line:
+
+```bash
+docker compose exec -T db sh -c 'createdb -U "$POSTGRES_USER" mm_soak'
+docker compose exec -T api sh -c \
+  'MM_DATABASE_URL="${MM_DATABASE_URL%/*}/mm_soak" uv run alembic upgrade head'
+docker compose exec -T api sh -c \
+  'MM_DATABASE_URL="${MM_DATABASE_URL%/*}/mm_soak" uv run python -m minemonitor.soak --report /tmp/soak.json'
+echo "exit $?"                                    # 0 within budget, 1 over, 2 refused
+docker compose cp api:/tmp/soak.json ./soak.json  # synthetic data only: safe to share
+docker compose exec -T db sh -c 'dropdb -U "$POSTGRES_USER" --force mm_soak'
+```
+
+Allow 4 GB of free disk and half an hour (a 4-core test machine took 14 minutes and
+2.8 GB). Run it before go-live or with the ingestor stopped: it shares the database
+server and CPU with the live services, and each skews the other. The report and its exit
+status check these budgets (each one is a `--budget-*` flag):
+
+| Measure | Budget | What it means |
+|---|---|---|
+| `tick.p95` | 6 s | The maintenance tick for the site (cycles, rules, offline, gate checks). |
+| `state.p95` | 0.5 s | Building and encoding the dashboard snapshot. |
+| `ingest.headroom` | 2.0 | Live fixes the box stores per second, over the 50 the fleet sends. Under 2, a backlog after an outage drains slowly: at 1.5, an hour offline takes two more to catch up. |
+| `ingest.statements_per_fix` | 9 | SQL round trips per stored fix. Machine-independent: a rise is a code regression. |
+| `memory.tick_mib`, `memory.state_mib` | 256, 64 MiB | Python heap peak of one tick and one `/state`. |
+
+A failed budget prints a `soak:` line naming it. `--explain` adds the shared buffers each
+query of the tick and `/state` reads; CI runs the soak over 6 hours and over 30 days of
+history and fails if any query reads more as history grows
+(`tests/test_soak_postgres.py`).
+
 ---
 
 ## 4. Reading the alarm queue
@@ -566,6 +605,7 @@ either to `POST /api/v1/ingest/vision` (one record or a batch of up to 500) or o
 - **Per shift:** review the alarm queue, resolve/acknowledge, complete handover.
 - **Weekly:** confirm scheduled backup pruning is sane; skim the audit log.
 - **After any deploy/restore:** run the smoke test (§3).
+- **Before go-live, and after a hardware change:** run the capacity soak (§3).
 - **When devices change:** regenerate and reload the broker ACL (§7).
 
 ---

@@ -21,6 +21,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -155,7 +156,12 @@ class Event(Base):
     __tablename__ = "events"
     # The alarm queue is read as "this site's events, newest first" on every
     # dashboard poll — a composite index keeps that ordered scan off the heap.
-    __table_args__ = (Index("ix_events_site_ts", "site_id", "ts"),)
+    # The tick's checks ask for one type of event ("the latest occupancy alarm for this
+    # zone", "an offline alarm since"): by type, they read that type only, not the history.
+    __table_args__ = (
+        Index("ix_events_site_ts", "site_id", "ts"),
+        Index("ix_events_site_type_ts", "site_id", "type", "ts"),
+    )
 
     event_id: Mapped[str] = mapped_column(String, primary_key=True)
     site_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
@@ -950,6 +956,18 @@ class AccessEvent(Base):
     """
 
     __tablename__ = "access_events"
+    # Selected searches neither completed nor yet escalated: all the missed-search check reads.
+    __table_args__ = (
+        Index(
+            "ix_access_events_search_pending",
+            "site_id",
+            "ts",
+            postgresql_where=text(
+                "search_selected IS TRUE AND search_completed IS NOT TRUE "
+                "AND search_escalated_at IS NULL"
+            ),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     site_id: Mapped[str] = mapped_column(ForeignKey("sites.site_id"), nullable=False, index=True)
@@ -964,6 +982,11 @@ class AccessEvent(Base):
     search_completed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     metal_detected: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # When the tick raised this passage's skipped search (``search_missed``): raised once,
+    # even after events retention purges the alarm.
+    search_escalated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class AccessQuarantine(Base):
