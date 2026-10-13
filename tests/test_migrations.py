@@ -13,7 +13,7 @@ from pathlib import Path
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
-HEAD = "0032_bounded_tick_reads"
+HEAD = "0033_bounded_tick_reads"
 
 
 def test_migrations_have_one_head() -> None:

@@ -20,6 +20,8 @@ _BASE = (-17.8252, 31.0335)
 _LOAD = box_polygon(*_BASE, 70)  # loader spot at 0 m; the line forms south of it
 _DUMP_AT = offset_m(*_BASE, 400, 0)
 _DUMP = box_polygon(*_DUMP_AT, 50)
+_LOADS = [("pit-face", _LOAD)]
+_DUMPS = [("rom-pad", _DUMP)]
 T0 = datetime(2026, 9, 5, 6, 0, 0, tzinfo=UTC)
 
 
@@ -63,7 +65,7 @@ class _Track:
 
 
 def _one_cycle(track: _Track) -> Cycle:
-    cycles = compute_cycles("HT-1", track.fixes, load_geom=_LOAD, dump_geom=_DUMP)
+    cycles = compute_cycles("HT-1", track.fixes, load_zones=_LOADS, dump_zones=_DUMPS)
     assert len(cycles) == 1
     return cycles[0]
 

@@ -72,6 +72,7 @@ Complete the Stage K firmware and isolation rows for each device before connecti
 | C3 | Confirm enabled | `GET /sites/{id}/devices` | device present, `enabled: true` | |
 | C4 | Point the tracker at the edge server | tracker config (SIM APN, server host, **port 5027**, protocol TCP, Codec 8 or 8E) | tracker configured | |
 | C5 | Strict mode (recommended for production) | `.env` `MM_MQTT_REQUIRE_REGISTERED_DEVICE=true`, restart ingestor + teltonika | only provisioned IMEIs accepted | |
+| C6 | TLS on the tracker link (recommended) | PEM certificate and key in `var/teltonika-tls/`; `.env` `MM_TELTONIKA_TLS_CERT=/run/teltonika-tls/<cert>` and `MM_TELTONIKA_TLS_KEY=/run/teltonika-tls/<key>`; restart teltonika. On each tracker, switch the server link to TLS per Teltonika's guide for the model (FMB firmware added TLS in 03.27.07); confirm on the first unit before the rest | `teltonika listener up` logs `"tls": true`; D1 passes over TLS; a tracker left on plain TCP is not accepted (switch them all) | |
 
 ## Stage D — Connectivity & telemetry
 

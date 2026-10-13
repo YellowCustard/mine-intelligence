@@ -238,6 +238,10 @@ class HaulCycle(Base):
     haul_s: Mapped[float] = mapped_column(Float, nullable=False)
     dump_s: Mapped[float] = mapped_column(Float, nullable=False)
     return_s: Mapped[float] = mapped_column(Float, nullable=False)
+    # Where it loaded and where it dumped (audit M3). Plain ids, not foreign keys: a zone
+    # deleted later leaves its cycles' history as it was. NULL on cycles stored before.
+    load_zone_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    dump_zone_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class RecomputeCursor(Base):

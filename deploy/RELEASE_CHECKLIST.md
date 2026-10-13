@@ -17,7 +17,9 @@ Tick every box. A red box is a blocked release, not a note for later.
 - [ ] `mypy src` clean.
 - [ ] `pytest` green (unit zone-geometry + cycle state machine; integration over the
       simulator).
-- [ ] No secrets in the diff. `.env.example` documents every new `MM_*` variable.
+- [ ] No secrets in the diff. `.env.example` documents every new `MM_*` variable, and
+      `docker-compose.yml` passes it to every service that reads it: a container never
+      reads `.env` itself (`tests/test_compose_env.py`).
 - [ ] Type hints everywhere; no bare `except`; all timestamps timezone-aware UTC.
 
 ## 2. Migrations

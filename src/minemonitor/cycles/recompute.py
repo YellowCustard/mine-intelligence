@@ -41,7 +41,13 @@ from sqlalchemy.orm import Session
 
 from minemonitor.config import get_settings
 from minemonitor.cycles.metrics import BUCKET_S, MetricsBucket, compute_metrics, floor_bucket
-from minemonitor.cycles.statemachine import MIN_VISIT_S, Cycle, Resume, analyse_cycles
+from minemonitor.cycles.statemachine import (
+    MIN_VISIT_S,
+    Cycle,
+    Resume,
+    ZoneShape,
+    analyse_cycles,
+)
 from minemonitor.storage.models import AssetMetrics, HaulCycle, Position, RecomputeCursor, Zone
 from minemonitor.zones.geometry import point_in_polygon
 
@@ -67,17 +73,20 @@ class _Window:
     cycles_from: datetime
     entry_known: bool
     metrics_from: datetime
-    # The cursor's open load visit is still in progress: if every new fix is in the load
+    # The cursor's open load visit is still in progress: if every new fix is in a load
     # zone too, the cycles cannot have changed and only buckets are rebuilt.
     open_visit_through: datetime | None = None
 
 
 @dataclass(frozen=True)
 class _Zones:
-    load: Zone | None
-    dump: Zone | None
-    geoms: list[tuple[str, dict]]
+    loads: list[ZoneShape]  # every loading zone, by zone id
+    dumps: list[ZoneShape]  # every unloading zone, by zone id
+    geoms: list[ZoneShape]
     sig: str
+
+    def in_load(self, lat: float, lon: float) -> bool:
+        return any(point_in_polygon(lat, lon, geom) for _, geom in self.loads)
 
 
 def _aware(dt: datetime) -> datetime:
@@ -85,12 +94,16 @@ def _aware(dt: datetime) -> datetime:
 
 
 def _zones(session: Session, site_id: str) -> _Zones:
-    zones = list(session.execute(select(Zone).where(Zone.site_id == site_id)).scalars().all())
-    load = next((z for z in zones if z.kind == "loading"), None)
-    dump = next((z for z in zones if z.kind == "unloading"), None)
-    basis = [[z.zone_id, z.geometry] if z is not None else None for z in (load, dump)]
+    zones = list(
+        session.execute(select(Zone).where(Zone.site_id == site_id).order_by(Zone.zone_id))
+        .scalars()
+        .all()
+    )
+    loads = [(z.zone_id, z.geometry) for z in zones if z.kind == "loading"]
+    dumps = [(z.zone_id, z.geometry) for z in zones if z.kind == "unloading"]
+    basis = {"loading": loads, "unloading": dumps}
     sig = hashlib.sha256(json.dumps(basis, sort_keys=True).encode()).hexdigest()
-    return _Zones(load=load, dump=dump, geoms=[(z.zone_id, z.geometry) for z in zones], sig=sig)
+    return _Zones(loads=loads, dumps=dumps, geoms=[(z.zone_id, z.geometry) for z in zones], sig=sig)
 
 
 def _lookback(max_cycle_s: float) -> timedelta:
@@ -210,8 +223,13 @@ def _window_incremental(
         return None
 
     start = _aware(cur.cycles_from)
-    # After a load-zone edit the stored entry may be no entry at all.
-    known = cur.entry_known and not zones_changed
+    # After a load or dump zone edit the stored entry may be no entry at all: whether it
+    # is one depends on the fix before it, under the zones as they are now.
+    known = (
+        _entry_known_at(session, site_id, asset_id, zones, start, [])
+        if zones_changed
+        else cur.entry_known
+    )
     metrics_from = _aware(cur.metrics_from)
     if dirty is not None:
         if dirty < start + _MIN_VISIT:
@@ -221,7 +239,7 @@ def _window_incremental(
         metrics_from = min(
             metrics_from, floor_bucket(dirty, bucket_s) - timedelta(seconds=bucket_s)
         )
-    elif known and cur.in_open_visit and through is not None:
+    elif known and cur.in_open_visit and through is not None and not zones_changed:
         return _Window(start, known, metrics_from, open_visit_through=through)
     return _Window(start, known, metrics_from)
 
@@ -271,9 +289,9 @@ def _entry_known_at(
 ) -> bool:
     """Whether a load visit starting at the first fix from ``ts`` on starts there.
 
-    True unless the fix just before ``ts`` was already in the load zone.
+    True unless the fix just before ``ts`` was already in a load zone.
     """
-    if zones.load is None:
+    if not zones.loads:
         return True
     before = [r for r in rows if _aware(r.ts) < ts]
     prev = (
@@ -286,24 +304,20 @@ def _entry_known_at(
             .limit(1)
         ).first()
     )
-    return prev is None or not point_in_polygon(prev.lat, prev.lon, zones.load.geometry)
+    return prev is None or not zones.in_load(prev.lat, prev.lon)
 
 
 def _still_in_open_visit(rows: list[Any], win: _Window, zones: _Zones, max_cycle_s: float) -> bool:
-    """Every fix after the cursor's newest is in the load zone, within the cycle cap.
+    """Every fix after the cursor's newest is in a load zone, within the cycle cap.
 
     Then the open visit simply continued: no visit began or ended, so no cycle closed,
     and the open one can still finish within the cap. Re-analysing would change nothing.
     """
-    if win.open_visit_through is None or zones.load is None or not rows:
+    if win.open_visit_through is None or not zones.loads or not rows:
         return False
     if (_aware(rows[-1].ts) - win.cycles_from).total_seconds() >= max_cycle_s:
         return False  # the open cycle has run past the cap: let analysis retire it
-    return all(
-        point_in_polygon(r.lat, r.lon, zones.load.geometry)
-        for r in rows
-        if _aware(r.ts) > win.open_visit_through
-    )
+    return all(zones.in_load(r.lat, r.lon) for r in rows if _aware(r.ts) > win.open_visit_through)
 
 
 @dataclass(frozen=True)
@@ -344,12 +358,12 @@ def _apply(
     resume: Resume | None = None
     if not rebuild_cycles:
         resume = Resume(ts=win.cycles_from, entry_known=True, inside=True)
-    elif zones.load is not None and zones.dump is not None:
+    elif zones.loads and zones.dumps:
         cycles, resume = analyse_cycles(
             asset_id,
             [r for r in rows if _aware(r.ts) >= win.cycles_from],
-            load_geom=zones.load.geometry,
-            dump_geom=zones.dump.geometry,
+            load_zones=zones.loads,
+            dump_zones=zones.dumps,
             max_cycle_s=max_cycle_s,
             leading_entry_known=win.entry_known,
         )
@@ -401,7 +415,7 @@ def _apply(
         known = _entry_known_at(session, site_id, asset_id, zones, end, rows)
         return _Applied(len(cycles), len(buckets), None, None, _Window(end, known, end))
     last = _aware(rows[-1].ts) if rows else None
-    if last is not None and resume is None:  # no load/dump pair: no cycle in progress
+    if last is not None and resume is None:  # no load or no dump zone: no cycle in progress
         resume = Resume(ts=last, entry_known=False)
     return _Applied(len(cycles), len(buckets), last, resume, None)
 
@@ -460,6 +474,8 @@ def _replace_cycles(
                 haul_s=c.haul_s,
                 dump_s=c.dump_s,
                 return_s=c.return_s,
+                load_zone_id=c.load_zone_id,
+                dump_zone_id=c.dump_zone_id,
             )
         )
 

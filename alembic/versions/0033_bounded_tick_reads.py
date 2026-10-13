@@ -9,8 +9,8 @@ Additive and safe for an existing install: one nullable column and two indexes.
 - ``events (site_id, type, ts)``: the occupancy check's "latest alarm of this type for this
   zone" read the site's whole alarm history backwards whenever the zone had none.
 
-Revision ID: 0032_bounded_tick_reads
-Revises: 0031_source_status
+Revision ID: 0033_bounded_tick_reads
+Revises: 0032_cycle_zones
 Create Date: 2026-10-12
 """
 
@@ -21,8 +21,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0032_bounded_tick_reads"
-down_revision: str | None = "0031_source_status"
+revision: str = "0033_bounded_tick_reads"
+down_revision: str | None = "0032_cycle_zones"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
