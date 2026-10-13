@@ -46,9 +46,7 @@ def upgrade() -> None:
             "site_id", "shift_id", "channel", "target", name="uq_shift_report_deliveries"
         ),
     )
-    op.create_index(
-        "ix_shift_report_deliveries_site_id", "shift_report_deliveries", ["site_id"]
-    )
+    op.create_index("ix_shift_report_deliveries_site_id", "shift_report_deliveries", ["site_id"])
     op.create_index(
         "ix_shift_report_deliveries_state_next",
         "shift_report_deliveries",
