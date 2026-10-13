@@ -36,8 +36,8 @@ recorded decision — **not** auto-permissive; see `VISION_MODEL_LICENSES.md`) �
 | Model | Provider | Code licence | Weights | Size / speed | Edge | ONNX | TensorRT | Train/finetune | Mining fit | Verdict |
 |---|---|---|---|---|---|---|---|---|---|---|
 | **RT-DETR / RT-DETRv2** | Baidu (PaddlePaddle) + PyTorch port (`lyuwenyu/RT-DETR`) | Apache-2.0 ✅ | Apache ✅ | R18–R101; real-time on GPU | GPU-good | yes | yes | yes | strong: anchor-free, robust to scale (near/far trucks) | **✅ default (GPU-accuracy)** |
-| **RF-DETR** | Roboflow | Apache-2.0 ✅ | Apache ✅ | small/base; real-time | GPU-good | yes | yes | yes | strong; modern, good small-object | **✅ strong alternate** |
-| **D-FINE** | open (`Peterande/D-FINE`) | Apache-2.0 ✅ | Apache ✅ (check per release) | S–X; SOTA-adjacent real-time | GPU-good | yes | partial | yes | strong regression-based DETR | ⚠️ track; promising alternate |
+| **RF-DETR** | Roboflow | Apache-2.0 ✅ (`rfdetr`) | Apache ✅ Nano/Small/Medium/Large only; **XL/2XL are PML 1.0 ⛔** (`rfdetr_plus`) | N–L; real-time | GPU-good | yes | yes | yes | strong; modern, good small-object | **✅ strong alternate** |
+| **D-FINE** | open (`Peterande/D-FINE`) | Apache-2.0 ✅ | Apache ✅ COCO-only (check per release); **Objects365 checkpoints ⛔ not cleared** | S–X; SOTA-adjacent real-time | GPU-good | yes | partial | yes | strong regression-based DETR | ⚠️ track; promising alternate |
 | **YOLOX** | Megvii | Apache-2.0 ✅ | Apache ✅ | Nano→X; fast on CPU too | **CPU/edge-good** | yes | yes | yes | good; mature, anchor-free | **✅ default (CPU-small / edge)** |
 | **PP-YOLOE / PP-YOLOE+** | Baidu (PaddleDetection) | Apache-2.0 ✅ | Apache ✅ | S–X | GPU-good | via Paddle→ONNX | yes | yes | good | ⚠️ viable; Paddle toolchain overhead |
 | **RTMDet** | OpenMMLab (MMDetection) | Apache-2.0 ✅ | Apache ✅ | tiny→X | GPU-good | yes | yes | yes | good; strong train ecosystem | **✅ viable (via MMDet)** |
