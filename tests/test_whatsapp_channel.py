@@ -11,7 +11,7 @@ from minemonitor.config import Settings
 from minemonitor.contracts import EventV1
 from minemonitor.events.repository import persist_event
 from minemonitor.notifications import outbox
-from minemonitor.notifications.dispatch import dispatch_pending
+from minemonitor.notifications.dispatch import WhatsAppTemplate, dispatch_pending
 
 _NOW = datetime(2026, 9, 12, 12, 0, tzinfo=UTC)
 SITE = "kn-zw-01"
@@ -53,7 +53,7 @@ class _FakeSender:
     def email(self, to: str, subject: str, body: str) -> None:  # pragma: no cover
         raise AssertionError("email not configured in this test")
 
-    def whatsapp(self, to: str, text: str) -> None:
+    def whatsapp(self, to: str, text: str, template: WhatsAppTemplate | None) -> None:
         self.sent.append((to, text))
 
 

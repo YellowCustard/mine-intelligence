@@ -246,12 +246,69 @@ turn it on in `.env`:
   operator name. All channels are self-hostable except WhatsApp, which uses the operator's
   own Cloud API credentials.
 
+**WhatsApp needs an approved template.** WhatsApp delivers a free-text message only within
+24 hours of the recipient's last message to the business number; outside that window only a
+template message is delivered. A supervisor who receives alarms rarely writes to the mine's
+number, so alarms are sent as a template:
+
+1. In WhatsApp Manager, create a **Utility** template, for example `mm_alarm`, language
+   English, with this body (three variables, in this order):
+   `Mine Monitor advisory alarm [{{1}}] at {{2}}: {{3}}. This system warns; it never controls plant.`
+2. When Meta approves it, set `MM_NOTIFY_WHATSAPP_TEMPLATE=mm_alarm` and
+   `MM_NOTIFY_WHATSAPP_TEMPLATE_LANG` to the language code it was approved under (`en`,
+   `en_US`, ...).
+3. Restart the stack, raise a test alarm, and check it arrives on a phone that has not
+   written to the number in the last day.
+
+The variables are filled with the severity, the site id and the alarm summary, each on one
+line. With no template the alarm goes as plain text, which is only useful for trying the
+channel from a phone that has just written to the number; `MM_ENV=prod` refuses to start
+that way. WhatsApp accepting a message is not delivery: a message it accepts can still fail
+on the way to the phone, and that failure is reported only to a webhook this install does
+not receive. Treat WhatsApp as a second channel beside email or the webhook, not the only one.
+
 Delivery is **store-and-forward**: a notification is written in the same transaction
 as its event, then a background dispatcher sends it with exponential backoff
 (`MM_NOTIFY_RETRY_BASE_S`), so an outage delays but never loses an alert. After
 `MM_NOTIFY_MAX_ATTEMPTS` a row is marked `failed` and stays visible. Notifications are
 **advisory** and carry only `event.v1` fields — never an operator name. Watch the
 outbox at `GET /sites/{id}/notifications?state=failed` (supervisor+).
+
+**Shift reports.** After each shift the ingestor sends its headline figures by email and
+WhatsApp, so a manager reads the shift without opening the dashboard. Off until recipients
+are set:
+
+- `MM_REPORT_EMAIL_TO` (uses the `MM_NOTIFY_SMTP_*` relay) and/or `MM_REPORT_WHATSAPP_TO`
+  (uses `MM_NOTIFY_WHATSAPP_URL` and its token).
+- `MM_REPORT_DELAY_S` (default 1800): how long after a shift ends it is reported. Trackers
+  buffer fixes through a network drop and send them late; the wait lets them arrive and the
+  shift's last cycles close. The report still names any machine that had not reported up to
+  the end of the shift, and says its figures may change.
+- `MM_REPORT_CATCHUP_H` (default 24): after an outage, shifts that ended up to this long ago
+  are reported; older ones are not sent late (they remain on the dashboard). Turning reports
+  on, or adding a recipient, also sends that recipient the shifts of the last day.
+- `MM_PUBLIC_URL`: the dashboard's address as recipients reach it. When set, the email links
+  the full printable report, which needs a dashboard login.
+
+A report carries cycles, mean cycle time, queue at the face, utilisation, alarm counts by
+severity, incident counts and classified downtime by category, all observed or derived as the
+scorecard labels them, plus machine ids. It never carries an operator name, handover notes or
+incident text: those stay behind the login. It is queued once per shift and recipient, and
+sent with the same retry and backoff as alarms (`MM_NOTIFY_MAX_ATTEMPTS`,
+`MM_NOTIFY_RETRY_BASE_S`). Watch it at `GET /sites/{id}/shift-report-deliveries?state=failed`
+(supervisor+).
+
+WhatsApp needs its own approved template, as alarms do. Create a **Utility** template, for
+example `mm_shift_report`, in the language `MM_NOTIFY_WHATSAPP_TEMPLATE_LANG` names, with this
+body (eight variables, in this order) and set `MM_REPORT_WHATSAPP_TEMPLATE` to its name:
+
+`Mine Monitor shift report for {{1}}, {{2}}: {{3}} haul cycles, mean cycle time {{4}}, queue at
+the face {{5}} of cycle time, {{6}} alarms of which {{7}} critical. {{8}} Advisory only; this
+system never controls plant.`
+
+`{{1}}` is the site, `{{2}}` the shift and its local hours, `{{8}}` a sentence on whether every
+machine reported to the end of the shift. `MM_ENV=prod` refuses to start with WhatsApp report
+recipients and no template.
 
 ---
 

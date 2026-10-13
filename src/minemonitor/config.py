@@ -154,8 +154,30 @@ class Settings(BaseSettings):
     notify_whatsapp_url: str = ""
     notify_whatsapp_token: str = ""  # bearer token
     notify_whatsapp_to: str = ""  # comma-separated recipient phone numbers (E.164)
+    # The approved message template alarms are sent as, with body parameters {{1}} severity,
+    # {{2}} site and {{3}} summary. WhatsApp delivers free text only within 24 h of the
+    # recipient's last message to the business number; anything else must be a template.
+    # Blank = plain text, for trying the channel out; production refuses that.
+    notify_whatsapp_template: str = ""
+    notify_whatsapp_template_lang: str = "en"  # the template's language code, as approved
     notify_max_attempts: int = 5  # then the row is marked failed (visible in the queue)
     notify_retry_base_s: int = 60  # exponential backoff base between attempts
+
+    # Shift reports sent after each shift, through the email and WhatsApp transports above.
+    # Blank recipients = not sent. Delivery retries like alarm notifications do.
+    report_email_to: str = ""  # comma-separated; needs MM_NOTIFY_SMTP_HOST
+    report_whatsapp_to: str = ""  # comma-separated E.164; needs MM_NOTIFY_WHATSAPP_URL
+    # The approved template the report is sent as (8 body parameters, see OPERATIONS.md), in
+    # the language MM_NOTIFY_WHATSAPP_TEMPLATE_LANG names. Blank = plain text; prod refuses.
+    report_whatsapp_template: str = ""
+    # Wait this long after a shift ends before reporting it, so fixes a tracker buffered
+    # through a network drop have arrived and the shift's last cycles have closed.
+    report_delay_s: int = Field(default=1800, ge=0)
+    # After an outage, report shifts that ended up to this long ago; older ones are skipped
+    # rather than sent days late (they stay available on the dashboard).
+    report_catchup_h: int = Field(default=24, ge=1)
+    # The dashboard's address as recipients reach it, for the report link. Blank = no link.
+    public_url: str = ""
 
     # Teltonika TCP listener (M7). Trackers speak Codec 8/8E over raw TCP; the
     # listener decodes and republishes into MQTT like any other adapter.
@@ -197,6 +219,30 @@ class Settings(BaseSettings):
                 "publishers; set MM_MQTT_USERNAME/MM_MQTT_PASSWORD and run the broker "
                 "with allow_anonymous=false (docker/mosquitto.auth.conf)"
             )
+        whatsapp_on = self.notify_whatsapp_url and self.notify_whatsapp_to
+        if whatsapp_on and not self.notify_whatsapp_template.strip():
+            problems.append(
+                "MM_NOTIFY_WHATSAPP_TEMPLATE is not set — WhatsApp delivers a business-initiated "
+                "message only as an approved template; plain text reaches a recipient only within "
+                "24 h of their last message to the business number, so most alarms would not "
+                "arrive (docs/OPERATIONS.md, Notifications)"
+            )
+        if self.report_email_to.strip() and not self.notify_smtp_host:
+            problems.append(
+                "MM_REPORT_EMAIL_TO is set but MM_NOTIFY_SMTP_HOST is not — no shift report "
+                "would be emailed"
+            )
+        if self.report_whatsapp_to.strip():
+            if not self.notify_whatsapp_url:
+                problems.append(
+                    "MM_REPORT_WHATSAPP_TO is set but MM_NOTIFY_WHATSAPP_URL is not — no shift "
+                    "report would be sent on WhatsApp"
+                )
+            elif not self.report_whatsapp_template.strip():
+                problems.append(
+                    "MM_REPORT_WHATSAPP_TEMPLATE is not set — WhatsApp delivers a shift report "
+                    "only as an approved template (docs/OPERATIONS.md, Shift reports)"
+                )
         if problems:
             raise ValueError(
                 "refusing to start with MM_ENV=prod and unsafe configuration:\n  - "

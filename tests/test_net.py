@@ -120,5 +120,5 @@ def test_webhook_and_whatsapp_refuse_redirect(redirecting: str) -> None:
     with pytest.raises(urllib.error.HTTPError):
         sender.webhook(redirecting + "/hook", {"event_id": "e1"})
     with pytest.raises(urllib.error.HTTPError):
-        sender.whatsapp("+263000000000", "alarm")
+        sender.whatsapp("+263000000000", "alarm", None)
     assert _Sink.hits == []  # a redirect is a failed delivery, retried later — never "sent"
