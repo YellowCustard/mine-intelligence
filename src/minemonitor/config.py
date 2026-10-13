@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # and is not reported as a cycle. It also bounds how far back the maintenance tick's
     # incremental recompute reads when late data arrives.
     cycle_max_s: int = Field(default=14400, ge=600)
+    # Loader and truck pairing: assets of these classes are loaders, and a truck's stop
+    # within MM_LOADER_PAIRING_M of one (median over the stop) is where it loaded. Run a
+    # recompute after changing either, or an asset's class, to re-pair past cycles.
+    loader_classes: str = "excavator,loader,wheel_loader,shovel"  # comma-separated
+    loader_pairing_m: float = Field(default=12.0, gt=0, le=100)
     # First-party vision (Stage B). A commissioned camera whose health heartbeat is silent this
     # long raises ``camera_offline`` (the "missed" lane).
     vision_camera_stale_s: int = 300

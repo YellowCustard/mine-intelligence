@@ -18,6 +18,12 @@ fixes before its start, so a visit that began just before it is seen to have (au
 M12). Neither deletes a cycle or bucket older than its window, so derived history
 outlives raw-position retention as configured (audit H4).
 
+A truck's queue/load split also reads the site's loaders (assets of a class in
+``MM_LOADER_CLASSES``) around its load-zone visits. A loader's fixes that reach the
+tick after a truck's cycle beside it was stored (its tracker buffered through a network
+drop) mark that truck from the cycle's start, in the same transaction as the loader's
+own rebuild, so the next tick re-pairs it exactly as a whole-history rebuild would.
+
 Assets are processed one at a time, in short transactions, and one asset's failure does
 not stall the others. Rebuilders of one asset (the tick, on-demand slices) exclude each
 other with a transaction-scoped advisory lock that ingest never takes. Only a rebuild
@@ -36,7 +42,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -44,14 +50,24 @@ from sqlalchemy.orm import Session
 from minemonitor.config import get_settings
 from minemonitor.cycles.metrics import BUCKET_S, MetricsBucket, compute_metrics, floor_bucket
 from minemonitor.cycles.statemachine import (
+    LOADER_MATCH_S,
     MIN_EXIT_S,
     MIN_VISIT_S,
+    PAIRING_M,
     Cycle,
+    LoaderFix,
     Resume,
     ZoneShape,
     analyse_cycles,
 )
-from minemonitor.storage.models import AssetMetrics, HaulCycle, Position, RecomputeCursor, Zone
+from minemonitor.storage.models import (
+    Asset,
+    AssetMetrics,
+    HaulCycle,
+    Position,
+    RecomputeCursor,
+    Zone,
+)
 from minemonitor.zones.geometry import point_in_polygon
 
 log = logging.getLogger("minemonitor.cycles")
@@ -64,6 +80,9 @@ _CHUNK = timedelta(hours=12)
 _CHUNK_MIN = timedelta(hours=1)
 _MIN_VISIT = timedelta(seconds=MIN_VISIT_S)
 _MIN_EXIT = timedelta(seconds=MIN_EXIT_S)
+_MATCH = timedelta(seconds=LOADER_MATCH_S)
+# Loader fixes are read for this many spans of a truck's load-zone time per query.
+_SPANS_PER_READ = 50
 
 
 @dataclass(frozen=True)
@@ -343,6 +362,121 @@ def _still_in_open_visit(rows: list[Any], win: _Window, zones: _Zones, max_cycle
     return all(zones.in_load(r.lat, r.lon) for r in rows if _aware(r.ts) > win.open_visit_through)
 
 
+def _loader_ids(session: Session, site_id: str) -> frozenset[str]:
+    """The site's loaders: its assets of a class in ``MM_LOADER_CLASSES``."""
+    classes = sorted({c.strip() for c in get_settings().loader_classes.split(",") if c.strip()})
+    if not classes:
+        return frozenset()
+    return frozenset(
+        session.execute(
+            select(Asset.asset_id).where(Asset.site_id == site_id, Asset.asset_class.in_(classes))
+        ).scalars()
+    )
+
+
+def _load_spans(rows: list[Any], zones: _Zones) -> list[tuple[datetime, datetime]]:
+    """The times a stop in a load zone among ``rows`` can pair over: each run of fixes in
+    a load zone, ``LOADER_MATCH_S`` either side, overlapping spans merged.
+
+    A load visit's fixes outside the zone (briefly read outside, less than ``MIN_EXIT_S``)
+    lie between two runs within ``LOADER_MATCH_S`` of each, so the spans cover every stop
+    of every visit, and depend only on the visit's own fixes: an incremental window reads
+    the same loader fixes for a visit as a whole-history rebuild.
+    """
+    spans: list[list[datetime]] = []
+    in_run = False
+    for r in rows:
+        if not zones.in_load(r.lat, r.lon):
+            in_run = False
+            continue
+        t = _aware(r.ts)
+        if in_run or (spans and t - _MATCH <= spans[-1][1]):
+            spans[-1][1] = t + _MATCH
+        else:
+            spans.append([t - _MATCH, t + _MATCH])
+        in_run = True
+    return [(lo, hi) for lo, hi in spans]
+
+
+def _loader_fixes(
+    session: Session,
+    site_id: str,
+    asset_id: str,
+    rows: list[Any],
+    zones: _Zones,
+    loader_ids: frozenset[str],
+) -> list[LoaderFix]:
+    """The site's loaders' fixes around the asset's load-zone time in ``rows``: all that
+    pairing its stops there can read. None for a loader itself."""
+    if not loader_ids or asset_id in loader_ids:
+        return []
+    spans = _load_spans(rows, zones)
+    out: list[LoaderFix] = []
+    for k in range(0, len(spans), _SPANS_PER_READ):
+        chunk = spans[k : k + _SPANS_PER_READ]
+        out.extend(
+            LoaderFix(r.asset_id, _aware(r.ts), r.lat, r.lon)
+            for r in session.execute(
+                select(Position.asset_id, Position.ts, Position.lat, Position.lon).where(
+                    Position.site_id == site_id,
+                    Position.asset_id.in_(sorted(loader_ids)),
+                    or_(*(Position.ts.between(lo, hi) for lo, hi in chunk)),
+                )
+            )
+        )
+    return out
+
+
+def _mark_paired(session: Session, site_id: str, since: datetime, ctx: _Ctx) -> None:
+    """A loader's fixes from ``since`` on are new to the cycles: mark every other asset
+    with a stored cycle whose load visit they could pair, from that cycle's start.
+
+    Stored cycles are closed, so a loader fix that reaches the tick after one was built
+    (a buffered tracker's backfill, or a late fix) would otherwise never be read for it.
+    Called under the loader's cursor lock, which ingest of its fixes waits on, before
+    the cursor moves past them. Cycles still open are rebuilt on the next tick anyway.
+    """
+    lo = since - _MATCH  # a stop paired by a fix at ``since`` ended no earlier than this
+    rows = session.execute(
+        select(HaulCycle.asset_id, HaulCycle.start_ts, HaulCycle.queue_s, HaulCycle.load_s).where(
+            HaulCycle.site_id == site_id,
+            # The load visit lies within the cycle, which lasts at most max_cycle_s.
+            HaulCycle.start_ts >= lo - timedelta(seconds=ctx.max_cycle_s),
+            HaulCycle.asset_id.not_in(sorted(ctx.loader_ids)),
+        )
+    ).all()
+    earliest: dict[str, datetime] = {}
+    for asset_id, start, queue_s, load_s in rows:
+        start = _aware(start)
+        if start + timedelta(seconds=queue_s + load_s) >= lo:  # its load visit's end
+            earliest[asset_id] = min(start, earliest.get(asset_id, start))
+    for asset_id, ts in sorted(earliest.items()):
+        session.execute(
+            update(RecomputeCursor)
+            .where(
+                RecomputeCursor.site_id == site_id,
+                RecomputeCursor.asset_id == asset_id,
+                or_(RecomputeCursor.dirty_from.is_(None), RecomputeCursor.dirty_from > ts),
+            )
+            .values(dirty_from=ts)
+        )
+    if earliest:
+        log.info(
+            "late loader fixes re-pair stored cycles",
+            extra={"site_id": site_id, "assets": len(earliest), "since": since.isoformat()},
+        )
+
+
+def _new_from(cur: RecomputeCursor, *, late: bool) -> datetime | None:
+    """The earliest of the cursor's asset's fixes that its rebuild moves the cursor past
+    and no earlier rebuild had: those after ``through_ts``, and with ``late`` (the run
+    clears the mark) the late fix ingest marked. None when the cursor has never moved,
+    as a first fix leaves it marked."""
+    marks = [cur.through_ts] + ([cur.dirty_from] if late else [])
+    present = [_aware(t) for t in marks if t is not None]
+    return min(present) if present else None
+
+
 @dataclass(frozen=True)
 class _Applied:
     cycles: int
@@ -362,6 +496,8 @@ def _apply(
     bucket_s: int,
     max_cycle_s: float,
     end: datetime | None = None,
+    loader_ids: frozenset[str] = frozenset(),
+    pairing_m: float = PAIRING_M,
 ) -> _Applied:
     """Rebuild one asset's cycles and buckets from ``win``.
 
@@ -383,14 +519,17 @@ def _apply(
     if not rebuild_cycles:
         resume = Resume(ts=win.cycles_from, entry_known=True, inside=True)
     elif zones.loads and zones.dumps:
+        fixes = _cycle_fixes(session, site_id, asset_id, win.cycles_from, rows)
         cycles, resume = analyse_cycles(
             asset_id,
-            _cycle_fixes(session, site_id, asset_id, win.cycles_from, rows),
+            fixes,
             load_zones=zones.loads,
             dump_zones=zones.dumps,
             max_cycle_s=max_cycle_s,
             leading_entry_known=win.entry_known,
             opens_from=win.cycles_from,
+            loaders=_loader_fixes(session, site_id, asset_id, fixes, zones, loader_ids),
+            pairing_m=pairing_m,
         )
         if end is not None:
             cycles = [c for c in cycles if c.start_ts < end]
@@ -502,6 +641,7 @@ def _replace_cycles(
                 return_s=c.return_s,
                 load_zone_id=c.load_zone_id,
                 dump_zone_id=c.dump_zone_id,
+                loader_id=c.loader_id,
             )
         )
 
@@ -547,6 +687,8 @@ class _Ctx:
     max_cycle_s: float
     lookback: timedelta
     now: datetime
+    loader_ids: frozenset[str]
+    pairing_m: float
 
 
 def _run(
@@ -558,13 +700,16 @@ def _run(
     bucket_s: int,
     now: datetime | None,
 ) -> dict[str, int]:
-    max_cycle_s = float(get_settings().cycle_max_s)
+    settings = get_settings()
+    max_cycle_s = float(settings.cycle_max_s)
     ctx = _Ctx(
         zones=_zones(session, site_id),
         bucket_s=bucket_s,
         max_cycle_s=max_cycle_s,
         lookback=_lookback(max_cycle_s),
         now=now or datetime.now(UTC),
+        loader_ids=_loader_ids(session, site_id),
+        pairing_m=settings.loader_pairing_m,
     )
     session.commit()  # end the read transaction: each asset takes its own
     out = {"cycles": 0, "buckets": 0, "assets": 0, "failed": 0}
@@ -619,7 +764,12 @@ def refresh(
             ctx.zones,
             bucket_s=ctx.bucket_s,
             max_cycle_s=ctx.max_cycle_s,
+            loader_ids=ctx.loader_ids,
+            pairing_m=ctx.pairing_m,
         )
+        since = _new_from(cur, late=True) if asset_id in ctx.loader_ids else None
+        if since is not None:
+            _mark_paired(session, site_id, since, ctx)
         _advance(cur, done, ctx.zones, bucket_s=ctx.bucket_s, now=ctx.now, clear_dirty=True)
         session.commit()
         return done.cycles, done.buckets
@@ -687,8 +837,15 @@ def recompute(
                 bucket_s=ctx.bucket_s,
                 max_cycle_s=ctx.max_cycle_s,
                 end=end,
+                loader_ids=ctx.loader_ids,
+                pairing_m=ctx.pairing_m,
             )
             if cur is not None:
+                # Assets rebuilt before a loader in this run read its fixes as they stood
+                # then. Those since are past the cursor this moves, or (late) stay marked.
+                since = _new_from(cur, late=False) if asset_id in ctx.loader_ids else None
+                if since is not None:
+                    _mark_paired(session, site_id, since, ctx)
                 # A fix ingest marked while older slices ran may lie behind this run's
                 # newest fix: leave the mark for the next tick rather than lose it.
                 _advance(

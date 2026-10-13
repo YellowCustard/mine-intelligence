@@ -19,6 +19,15 @@ least ``MIN_LOAD_S`` before it leaves the zone, and the move onto it is the spot
 closer together than ``MIN_STEP_M`` are one stop (a speed spike or a shuffle under the
 bucket is not a move), so the split uses position alone.
 
+Where the loader itself is tracked, its position decides instead (loader and truck
+pairing): loading begins at the truck's first stop of at least ``MIN_LOAD_S`` within
+``pairing_m`` of a loader, and the cycle records which loader. That also gets right the
+truck that stops again after loading (waiting at the zone exit, giving way) for longer
+than ``MIN_LOAD_S``, which the rule above takes for the loading, counting the real
+loading as queue. With no loader beside any stop (none tracked, its tracker offline, or
+it is out of range), the rule above stands. Segment semantics are the same either way:
+load time runs from the end of the queue until the truck leaves the zone.
+
 A cycle longer than ``max_cycle_s`` is not a haul cycle (a breakdown, or a truck
 parked overnight between a dump and the next load) and is not reported. The cap also
 bounds how far back an incremental recompute ever has to look (audit H3).
@@ -32,10 +41,12 @@ the whole history and get exactly the same cycles.
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from statistics import median
 from typing import Protocol
 
 from minemonitor.ingest.geo import haversine_m
@@ -66,6 +77,17 @@ MIN_LOAD_S = 30.0
 # A move up the line is at least a truck length (~10 m).
 MIN_STEP_M = 5.0
 
+# A truck stopped with a loader's median position within this of its own is beside it,
+# being loaded. A truck under an excavator's bucket or at a wheel loader stands a few
+# metres from the loader's GNSS antenna; the truck waiting behind it a truck length
+# (~15 m) further. Calibrate per site against the real loading geometry.
+PAIRING_M = 12.0
+
+# Loader fixes this long either side of a truck's stop count toward its position during
+# the stop, so a loader reporting less often than the truck (or a fix or two late) still
+# pairs.
+LOADER_MATCH_S = 30.0
+
 # A zone as the analysis sees it: its id and its GeoJSON polygon.
 ZoneShape = tuple[str, dict]
 
@@ -75,6 +97,16 @@ class Fix(Protocol):
     lat: float
     lon: float
     speed_kph: float | None
+
+
+@dataclass(frozen=True)
+class LoaderFix:
+    """A position of a loading machine (excavator, wheel loader), for pairing."""
+
+    asset_id: str
+    ts: datetime
+    lat: float
+    lon: float
 
 
 @dataclass(frozen=True)
@@ -93,6 +125,8 @@ class Cycle:
     return_s: float
     load_zone_id: str | None = None
     dump_zone_id: str | None = None
+    # The loader the truck stood beside while it loaded; None when no tracked loader was.
+    loader_id: str | None = None
 
     @property
     def queue_pct(self) -> float:
@@ -204,26 +238,84 @@ def _stops(fixes: list[Fix], moving: list[bool], visit: _Visit) -> list[_Stop]:
     return out
 
 
+class _Loaders:
+    """Loader fixes per loader, in time order, for looking up a stop's neighbours."""
+
+    def __init__(self, fixes: Sequence[LoaderFix], exclude: str) -> None:
+        by_id: dict[str, list[LoaderFix]] = {}
+        for f in fixes:
+            if f.asset_id != exclude:  # a machine is never its own loader
+                by_id.setdefault(f.asset_id, []).append(f)
+        self._fixes = {
+            aid: sorted(fx, key=lambda f: _aware(f.ts)) for aid, fx in sorted(by_id.items())
+        }
+        self._times = {aid: [_aware(f.ts) for f in fx] for aid, fx in self._fixes.items()}
+
+    def __bool__(self) -> bool:
+        return bool(self._fixes)
+
+    def beside(
+        self, lat: float, lon: float, since: datetime, until: datetime, pairing_m: float
+    ) -> str | None:
+        """The loader whose median distance from (lat, lon) over [since, until] is least
+        and within ``pairing_m``; on a tie, the lowest asset id."""
+        best: tuple[float, str] | None = None
+        for aid, fx in self._fixes.items():
+            times = self._times[aid]
+            lo, hi = bisect_left(times, since), bisect_right(times, until)
+            if lo == hi:
+                continue  # no fix from this loader then: it cannot say where it was
+            d = median(haversine_m(lat, lon, f.lat, f.lon) for f in fx[lo:hi])
+            if d <= pairing_m and (best is None or (d, aid) < best):
+                best = (d, aid)
+        return best[1] if best is not None else None
+
+
 def _queue_seconds(
-    times: list[datetime], fixes: list[Fix], moving: list[bool], visit: _Visit
-) -> float:
-    """Time spent waiting in a load-zone visit: first stop until the spot to the loader."""
+    times: list[datetime],
+    fixes: list[Fix],
+    moving: list[bool],
+    visit: _Visit,
+    loaders: _Loaders,
+    pairing_m: float,
+) -> tuple[float, str | None]:
+    """Time spent waiting in a load-zone visit (first stop until the spot to the loader),
+    and the tracked loader the truck stood beside to load, if any."""
     stops = _stops(fixes, moving, visit)
     if not stops:
-        return 0.0  # never stopped — drove through, no queue
+        return 0.0, None  # never stopped — drove through, no queue
     last = len(times) - 1
+    match = timedelta(seconds=LOADER_MATCH_S)
 
     def _length_s(stop: _Stop) -> float:
         return (times[min(stop.end, last)] - times[stop.start]).total_seconds()
 
-    loading = next(
-        (k for k in range(len(stops) - 1, -1, -1) if _length_s(stops[k]) >= MIN_LOAD_S),
-        len(stops) - 1,
-    )
+    loading: int | None = None
+    loader_id: str | None = None
+    if loaders:
+        for k, stop in enumerate(stops):
+            if _length_s(stop) < MIN_LOAD_S:
+                continue
+            # The stop's stationary fixes run to the one before ``end``.
+            loader_id = loaders.beside(
+                stop.lat,
+                stop.lon,
+                times[stop.start] - match,
+                times[stop.end - 1] + match,
+                pairing_m,
+            )
+            if loader_id is not None:
+                loading = k
+                break
+    if loading is None:
+        loading = next(
+            (k for k in range(len(stops) - 1, -1, -1) if _length_s(stops[k]) >= MIN_LOAD_S),
+            len(stops) - 1,
+        )
     if loading == 0:
-        return 0.0  # its first stop was the loading: no wait
+        return 0.0, loader_id  # its first stop was the loading: no wait
     # Waiting ends when the truck leaves its last place in line for the loading spot.
-    return (times[stops[loading - 1].end] - times[stops[0].start]).total_seconds()
+    return (times[stops[loading - 1].end] - times[stops[0].start]).total_seconds(), loader_id
 
 
 def compute_cycles(
@@ -238,6 +330,8 @@ def compute_cycles(
     max_cycle_s: float | None = None,
     leading_entry_known: bool = True,
     opens_from: datetime | None = None,
+    loaders: Sequence[LoaderFix] = (),
+    pairing_m: float = PAIRING_M,
 ) -> list[Cycle]:
     """Compute complete haul cycles for one asset from an ordered position stream."""
     cycles, _ = analyse_cycles(
@@ -251,6 +345,8 @@ def compute_cycles(
         max_cycle_s=max_cycle_s,
         leading_entry_known=leading_entry_known,
         opens_from=opens_from,
+        loaders=loaders,
+        pairing_m=pairing_m,
     )
     return cycles
 
@@ -267,6 +363,8 @@ def analyse_cycles(
     max_cycle_s: float | None = None,
     leading_entry_known: bool = True,
     opens_from: datetime | None = None,
+    loaders: Sequence[LoaderFix] = (),
+    pairing_m: float = PAIRING_M,
 ) -> tuple[list[Cycle], Resume | None]:
     """Cycles in ``fixes``, and the point a later recompute must restart from.
 
@@ -278,6 +376,12 @@ def analyse_cycles(
     whether a visit after it began earlier (a run inside less than ``min_exit_s`` before
     rejoins it), and a visit that began before it opens no cycle. A recompute window
     passes the ``min_exit_s`` of fixes before its start, and the fix before those.
+
+    ``loaders`` are fixes of the site's loading machines around the stream's load-zone
+    visits (at least ``LOADER_MATCH_S`` either side of each): a stop of at least
+    ``MIN_LOAD_S`` with one within ``pairing_m`` is where the truck loaded. Pairing moves
+    only the split between queue and load inside a visit, never a cycle's boundaries, so
+    the resume point does not depend on it.
 
     Returns ``(cycles, None)`` for an empty stream.
     """
@@ -291,6 +395,7 @@ def analyse_cycles(
     in_load = [z is not None for z in load_at]
     in_dump = [z is not None for z in dump_at]
     moving = [(f.speed_kph or 0.0) >= move_threshold_kph for f in fixes]
+    beside = _Loaders(loaders, exclude=asset_id)
 
     def _long_enough(v: _Visit) -> bool:
         return (v.exit_ts - v.enter_ts).total_seconds() >= min_visit_s
@@ -320,7 +425,7 @@ def analyse_cycles(
         if dv is None:
             continue  # incomplete cycle (no dump in between) — skip
 
-        queue_s = _queue_seconds(times, fixes, moving, lv)
+        queue_s, loader_id = _queue_seconds(times, fixes, moving, lv, beside, pairing_m)
         load_zone_s = (lv.exit_ts - lv.enter_ts).total_seconds()
         cycles.append(
             Cycle(
@@ -336,6 +441,7 @@ def analyse_cycles(
                 return_s=(lv_next.enter_ts - dv.exit_ts).total_seconds(),
                 load_zone_id=_credited_zone(lv, load_at),
                 dump_zone_id=_credited_zone(dv, dump_at),
+                loader_id=loader_id,
             )
         )
 

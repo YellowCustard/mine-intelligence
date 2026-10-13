@@ -45,6 +45,8 @@ FACE = _pt(0, 0)  # pit face — load point
 _STAGING_NORTH_M = -15.0
 FACE_QUEUE = _pt(_STAGING_NORTH_M, 0)  # head of the line: next truck to load waits here
 FACE_LOAD = FACE  # loader spot: trucks spot forward to here to be loaded
+DIGGER = _pt(0, 8)  # where the excavator stands, loading over the truck at FACE_LOAD
+FACE_EXIT = _pt(0, -20)  # where a loaded truck waits to leave (``exit_wait_s``)
 ROM = _pt(600, 200)  # ROM pad / crusher — ore dump
 WASTE = _pt(-400, 800)  # waste dump
 MAGAZINE = _pt(200, -500)  # restricted: explosives magazine
@@ -101,6 +103,7 @@ class Simulator(DeviceAdapter):
         dump_s: float = 40.0,
         jitter_m: float = 2.5,
         queue_step_m: float = QUEUE_STEP_M,
+        exit_wait_s: float = 0.0,
     ) -> None:
         self.site_id = site_id
         self.tick_s = tick_s
@@ -108,6 +111,9 @@ class Simulator(DeviceAdapter):
         self.dump_s = dump_s
         self.jitter_m = jitter_m
         self.queue_step_m = queue_step_m
+        # A loaded truck that pulls forward and waits this long before it leaves the
+        # face (giving way at the zone exit). Its stop is not loading and not queue.
+        self.exit_wait_s = exit_wait_s
         self._rng = random.Random(seed)
         self.now = start or datetime(2026, 9, 5, 6, 0, 0, tzinfo=UTC)
 
@@ -144,12 +150,12 @@ class Simulator(DeviceAdapter):
                 state="RETURNING_EMPTY",
             )
 
-        # Excavator working the face — small local shuffles.
+        # Excavator working the face beside the loading spot — small local shuffles.
         self.assets["EX-01"] = _Asset(
             asset_id="EX-01",
             asset_class="excavator",
-            lat=FACE[0] + self._jit(6),
-            lon=FACE[1] + self._jit(6),
+            lat=DIGGER[0] + self._jit(1.5),
+            lon=DIGGER[1] + self._jit(1.5),
             speed_kph=3.0,
             state="WORKING",
         )
@@ -275,6 +281,19 @@ class Simulator(DeviceAdapter):
         elif a.state == "LOADING":
             a.ignition = True
             if self._loading != a.asset_id:  # loader finished with us
+                a.state = "PULLING_OUT" if self.exit_wait_s > 0 else "HAULING_LOADED"
+        elif a.state == "PULLING_OUT":
+            a.ignition = True
+            a.lat, a.lon, a.heading, arrived = _move_towards(
+                a.lat, a.lon, FACE_EXIT, self._speed_mps(SPOT_KPH), self.tick_s
+            )
+            if arrived:
+                a.state = "EXIT_WAIT"
+                a.dwell_left_s = self.exit_wait_s
+        elif a.state == "EXIT_WAIT":
+            a.ignition = True
+            a.dwell_left_s -= self.tick_s
+            if a.dwell_left_s <= 0:
                 a.state = "HAULING_LOADED"
         elif a.state == "HAULING_LOADED":
             a.ignition = True
@@ -291,10 +310,10 @@ class Simulator(DeviceAdapter):
                 a.state = "RETURNING_EMPTY"
 
     def _step_excavator(self, a: _Asset) -> None:
-        # Small shuffles around the face; occasionally idle with engine on.
+        # Small shuffles on its bench beside the loading spot; idle with engine on.
         a.ignition = True
-        a.lat = FACE[0] + self._jit(8)
-        a.lon = FACE[1] + self._jit(8)
+        a.lat = DIGGER[0] + self._jit(1.5)
+        a.lon = DIGGER[1] + self._jit(1.5)
         a.heading = self._rng.uniform(0, 360)
 
     def _step_patrol(self, a: _Asset) -> None:
@@ -313,9 +332,10 @@ class Simulator(DeviceAdapter):
             "PATROL",
             "WORKING",
             "SPOTTING",
+            "PULLING_OUT",
         }
         speed = a.speed_kph if a.state in {"RETURNING_EMPTY", "HAULING_LOADED", "PATROL"} else 0.0
-        if a.state == "SPOTTING" or a.creeping:
+        if a.state in {"SPOTTING", "PULLING_OUT"} or a.creeping:
             speed = SPOT_KPH
         if a.asset_class == "excavator":
             speed = self._rng.uniform(0, 3)
