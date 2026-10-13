@@ -170,6 +170,7 @@ def test_an_operator_of_another_site_cannot_be_named(
     client: TestClient, db_session: Session
 ) -> None:
     db_session.add(Site(site_id="other-site", name="Other", timezone="Africa/Harare"))
+    db_session.flush()  # Operator sorts before Site: write the site first
     db_session.add(
         Operator(operator_id="op-x", site_id="other-site", display_name="X", created_at=T0)
     )

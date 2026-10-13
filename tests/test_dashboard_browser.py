@@ -54,6 +54,7 @@ def _seed(db_url: str) -> None:
     now = datetime.now(UTC)
     lat, lon = -17.8252, 31.0335
     s.add(Site(site_id=_SITE, name="Smoke Site", timezone="Africa/Harare"))
+    s.flush()  # Asset sorts before Site: write the site first
     s.add(Asset(asset_id="HT-102", site_id=_SITE, asset_class="haul_truck"))
     s.commit()
     upsert_zone(

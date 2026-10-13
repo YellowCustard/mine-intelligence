@@ -8,12 +8,15 @@ integration run against the compose stack.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -30,6 +33,20 @@ ADMIN = ("admin", "testpass123")
 VIEWER = ("viewer", "testpass123")
 SUPERVISOR = ("sup", "testpass123")
 DEVICE = ("device", "testpass123")
+
+
+@event.listens_for(Engine, "connect")
+def _enforce_sqlite_foreign_keys(dbapi_conn: Any, _record: Any) -> None:
+    """Check foreign keys on every SQLite connection a test opens, as PostgreSQL does.
+
+    SQLite ignores foreign keys unless asked, so a delete that orphans a row, or a row
+    that names a missing parent, passed here and failed only on PostgreSQL. Checks are
+    per statement, like PostgreSQL's: with no ``relationship()`` between the models, the
+    ORM flushes mappers in class-name order, so a parent and its child added in one
+    flush reach the database child first when the child's class name sorts first.
+    """
+    if isinstance(dbapi_conn, sqlite3.Connection):
+        dbapi_conn.execute("PRAGMA foreign_keys=ON")
 
 
 @pytest.fixture
@@ -49,6 +66,7 @@ def db_session() -> Iterator[Session]:
     factory = sessionmaker(bind=engine, expire_on_commit=False, future=True)
     session = factory()
     session.add(Site(site_id="kn-zw-01", name="Test Site", timezone="Africa/Harare"))
+    session.flush()  # Asset sorts before Site: write the site first
     session.add(Asset(asset_id="HT-102", site_id="kn-zw-01", asset_class="haul_truck"))
     session.commit()
     create_user(session, username=ADMIN[0], password=ADMIN[1], role="admin")

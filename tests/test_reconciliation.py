@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from minemonitor.platform import contracts
 from minemonitor.reconciliation import service
-from minemonitor.storage.models import MaterialMeasurement
+from minemonitor.storage.models import MaterialMeasurement, Site
 from tests.conftest import ADMIN, SUPERVISOR, VIEWER, make_client
 
 SITE = "kn-zw-01"
@@ -69,6 +69,8 @@ def test_measurement_id_is_deterministic() -> None:
 
 
 def test_list_filters_by_stage_and_site(db_session: Session) -> None:
+    db_session.add(Site(site_id="other-site", name="Other", timezone="Africa/Harare"))
+    db_session.flush()
     _record(db_session, stage="crusher", source_ref="W-1")
     _record(db_session, stage="mill", source_ref="W-2")
     _record(db_session, site_id="other-site", stage="crusher", source_ref="W-3")
