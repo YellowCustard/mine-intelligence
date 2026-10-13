@@ -322,7 +322,7 @@ The mine is the data controller; eigenstate is the processor. Retention is
 |---|---|---|
 | Raw positions | `MM_RETAIN_POSITIONS_DAYS` | 90 |
 | Derived metrics + cycles | `MM_RETAIN_METRICS_DAYS` | 365 (kept after their raw positions are deleted) |
-| Events (and quarantined gate events) | `MM_RETAIN_EVENTS_DAYS` | 365 |
+| Events (with their notification records, and quarantined gate events) | `MM_RETAIN_EVENTS_DAYS` | 365 |
 | Operational annotations | `MM_RETAIN_ANNOTATIONS_DAYS` | 365 |
 | Audit trail, and closed breach records | `MM_RETAIN_AUDIT_DAYS` | 730 |
 
@@ -331,6 +331,9 @@ incidents (with their notes). An open or in-progress incident is live work and i
 never age-deleted regardless of the window — only its close time starts the clock.
 The same holds for breach records: an open breach is never deleted, and a closed one
 follows the audit window from its close.
+
+An alarm that an incident still points at is kept while that incident is kept, even past
+the events window; the run that deletes the incident deletes the alarm with it.
 
 Force a retention pass now: `POST /admin/retention/run` (admin).
 
