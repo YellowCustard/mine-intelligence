@@ -274,3 +274,69 @@ def test_access_quarantine_follows_events_window(session: Session) -> None:
     assert deleted["access_quarantine"] == 1
     left = session.execute(select(AccessQuarantine.id)).scalars().all()
     assert left == ["new"]
+
+
+def _passage(s: Session, pid: str, days_ago: float, operator_ref: str | None = "op-1") -> None:
+    from minemonitor.storage.models import AccessEvent
+
+    ts = _NOW - timedelta(days=days_ago)
+    s.add(
+        AccessEvent(
+            id=pid,
+            site_id="kn-zw-01",
+            ts=ts,
+            source_system="dahua_gate",
+            gate_id="main-gate",
+            operator_ref=operator_ref,
+            decision="granted",
+            search_selected=True,
+            search_completed=True,
+            metal_detected=False,
+            created_at=ts,
+        )
+    )
+
+
+def test_gate_passages_follow_their_own_window(session: Session) -> None:
+    """Passages are personal data: deleted past ``access_days``, not kept forever."""
+    from minemonitor.storage.models import AccessEvent, Site
+
+    session.add(Site(site_id="kn-zw-01", name="T", timezone="Africa/Harare"))
+    session.flush()  # AccessEvent sorts before Site: write the site first
+    _passage(session, "old", 400)
+    _passage(session, "new", 5)
+    session.commit()
+    deleted = run_retention(
+        session,
+        now=_NOW,
+        positions_days=90,
+        metrics_days=365,
+        events_days=0,
+        access_days=365,
+    )
+    assert deleted["access_events"] == 1
+    assert session.execute(select(AccessEvent.id)).scalars().all() == ["new"]
+    run = session.execute(select(AuditLog).where(AuditLog.action == "retention.run")).scalar_one()
+    assert run.detail["policy_days"]["access"] == 365
+
+
+def test_gate_passages_zero_days_keeps_forever(session: Session) -> None:
+    from minemonitor.storage.models import AccessEvent, Site
+
+    session.add(Site(site_id="kn-zw-01", name="T", timezone="Africa/Harare"))
+    session.flush()
+    _passage(session, "ancient", 4000)
+    session.commit()
+    deleted = run_retention(
+        session, now=_NOW, positions_days=90, metrics_days=365, events_days=365, access_days=0
+    )
+    assert deleted["access_events"] == 0
+    assert session.execute(select(func.count()).select_from(AccessEvent)).scalar_one() == 1
+
+
+def test_gate_passage_window_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minemonitor.config import Settings
+
+    assert Settings().retain_access_days == 365
+    monkeypatch.setenv("MM_RETAIN_ACCESS_DAYS", "90")
+    assert Settings().retain_access_days == 90

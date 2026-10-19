@@ -459,3 +459,33 @@ def test_an_event_repeated_within_one_batch_does_not_wedge_the_poller(
     db_session.expire_all()
     assert len(db_session.execute(select(AccessEvent)).scalars().all()) == 2
     assert len(db_session.execute(select(AccessQuarantine)).scalars().all()) == 1
+
+
+# -- retention floor: a purged feed never refetches what retention deleted -------------
+
+
+def test_empty_cursor_is_floored_at_the_retention_window(db_session: Session) -> None:
+    """Retention deleted the source's last passage, so the cursor is empty: the next poll asks
+    only for the retained window, and drops anything older a source returns regardless."""
+    from datetime import timedelta
+
+    _operator(db_session)
+    src = _FakeSource(  # ignores `since`, like a vendor that returns its whole history
+        [
+            _graw(id="purged", time=_iso(_NOW - timedelta(days=400))),
+            _graw(id="recent", time=_iso(_NOW - timedelta(days=1))),
+        ]
+    )
+    new, _ = poll_once(db_session, SITE, src, source_system="dahua_gate", now=_NOW, retain_days=365)
+    assert src.since_seen == _NOW - timedelta(days=365)
+    assert [r.id.removeprefix(f"access-{SITE}-dahua_gate-") for r in new] == ["recent"]
+
+
+def test_zero_day_window_keeps_the_full_first_fetch(db_session: Session) -> None:
+    from datetime import timedelta
+
+    _operator(db_session)
+    src = _FakeSource([_graw(id="old", time=_iso(_NOW - timedelta(days=400)))])
+    new, _ = poll_once(db_session, SITE, src, source_system="dahua_gate", now=_NOW, retain_days=0)
+    assert src.since_seen is None
+    assert len(new) == 1
