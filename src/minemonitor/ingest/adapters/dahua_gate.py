@@ -174,6 +174,7 @@ def poll_once(
     overlap_s: int = 30,
     now: datetime | None = None,
     offline_after_s: int | None = None,
+    retain_days: int | None = None,
 ) -> tuple[list[AccessEvent], list[EventV1]]:
     """Fetch new gate events since the stored cursor, ingest each, return (new, alarms). Commits.
 
@@ -184,10 +185,19 @@ def poll_once(
     one malformed/biometric event is skipped (logged), never blocking the rest of the batch. An
     event dated too far ahead of ``now`` is quarantined (with at most one ``source_clock_skew``
     alarm per gate while it is unacknowledged), not stored.
+
+    Passages older than the retention window (``retain_days``, default
+    ``MM_RETAIN_ACCESS_DAYS``; 0 = keep forever) are never fetched or stored. Retention can
+    delete a quiet source's last passage, leaving no cursor; without this floor the next poll
+    would refetch the vendor's whole history and re-store what retention removed.
     """
     now = now or datetime.now(UTC)
     feed = f"access_feed:{source_system}"
+    days = retain_days if retain_days is not None else get_settings().retain_access_days
+    floor = now - timedelta(days=days) if days > 0 else None
     since = _since_cursor(session, site_id, source_system, overlap_s)
+    if floor is not None and (since is None or since < floor):
+        since = floor
     try:
         raws = source.fetch(since)
     except Exception as exc:  # noqa: BLE001 - the mine link fails; retry next poll
@@ -219,6 +229,8 @@ def poll_once(
         except ValueError as exc:
             log.warning("gate event rejected", extra={"site_id": site_id, "error": str(exc)})
             continue
+        if floor is not None and kwargs["ts"] < floor:
+            continue  # past retention: a source that ignores `since` cannot re-store it
         try:
             row, created, alarm = service.ingest_access_event(session, site_id, now=now, **kwargs)
         except FutureTimestampError as exc:
