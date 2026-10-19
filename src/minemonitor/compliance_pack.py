@@ -238,6 +238,7 @@ def build(
             "metrics_and_cycles": settings.retain_metrics_days,
             "events": settings.retain_events_days,
             "annotations": settings.retain_annotations_days,
+            "gate_passages": settings.retain_access_days,
             "audit_log_and_closed_breaches": settings.retain_audit_days,
             "vision_observations": settings.retain_vision_observations_days,
             "vision_health": settings.retain_vision_health_days,

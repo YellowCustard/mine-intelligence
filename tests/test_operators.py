@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from minemonitor.storage.models import Event, HaulCycle, Operator
+from minemonitor.storage.models import AccessEvent, Event, HaulCycle, Operator
 from tests.conftest import make_client
 
 _NOW = datetime(2026, 9, 5, 8, 0, 0, tzinfo=UTC)
@@ -92,6 +92,45 @@ def test_export_returns_record_and_references_and_is_audited(
     assert any(
         a["action"] == "personal_data.export" and a["entity_id"] == operator_id for a in audit
     )
+
+
+def test_export_includes_the_persons_gate_passages(client: TestClient, db_session: Session) -> None:
+    """A gate passage is the person's data: it is in their export, and only theirs."""
+    operator_id = _seed_operator(client)
+    for pid, site_id, ref in (
+        ("pass-1", "kn-zw-01", operator_id),
+        ("pass-other-person", "kn-zw-01", "op-someone-else"),
+    ):
+        db_session.add(
+            AccessEvent(
+                id=pid,
+                site_id=site_id,
+                ts=_NOW,
+                source_system="dahua_gate",
+                gate_id="main-gate",
+                credential_ref="card-77",
+                operator_ref=ref,
+                decision="granted",
+                search_selected=True,
+                search_completed=False,
+                metal_detected=None,
+                created_at=_NOW,
+            )
+        )
+    db_session.commit()
+
+    r = client.get(f"/sites/kn-zw-01/operators/{operator_id}/export")
+    assert r.status_code == 200, r.text
+    passages = r.json()["references"]["access_events"]
+    assert [p["id"] for p in passages] == ["pass-1"]
+    assert passages[0]["gate_id"] == "main-gate"
+    assert passages[0]["decision"] == "granted"
+    assert passages[0]["search_selected"] is True
+    assert passages[0]["search_completed"] is False
+
+    audit = client.get("/sites/kn-zw-01/audit").json()
+    entry = next(a for a in audit if a["action"] == "personal_data.export")
+    assert entry["detail"]["access_events"] == 1
 
 
 def test_read_is_audited_as_personal_data_access(client: TestClient) -> None:

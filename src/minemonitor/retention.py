@@ -2,7 +2,7 @@
 
 Retention is configurable per class — raw positions, derived analytics (metrics
 and haul cycles, which share one window), events, operational annotations
-(incidents, delay classifications and shift handovers), and the audit trail —
+(incidents, delay classifications and shift handovers), gate passages, and the audit trail —
 with generous defaults. A value of 0 days means "keep forever" (skip). The job is
 idempotent and logs an audit entry, so deletion is accountable.
 
@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from minemonitor import audit
 from minemonitor.config import get_settings
 from minemonitor.storage.models import (
+    AccessEvent,
     AccessQuarantine,
     AssetMetrics,
     AuditLog,
@@ -53,6 +54,7 @@ def run_retention(
     metrics_days: int,
     events_days: int,
     annotations_days: int = 0,
+    access_days: int = 0,
     audit_days: int = 0,
     vision_observations_days: int = 0,
     vision_health_days: int = 0,
@@ -64,7 +66,9 @@ def run_retention(
     analytics" class, both recomputable from stored positions. ``annotations_days``
     governs the operational-annotation tables (delay classifications by their end,
     shift handovers by creation, and **closed** incidents by their close time —
-    open incidents are live work and are never age-deleted). ``audit_days`` prunes
+    open incidents are live work and are never age-deleted). ``access_days`` governs gate
+    passages (``access_events``) by their time: each names a person, so it is personal data
+    with its own window. ``audit_days`` prunes
     the audit trail itself (0 = keep forever), and closed breach records by their close
     time; the entry written for this run is created after the cutoff, so a run never
     deletes its own record.
@@ -164,6 +168,8 @@ def run_retention(
     deleted["shift_report_deliveries"] = _purge(
         ShiftReportDelivery, ShiftReportDelivery.shift_end, events_days
     )
+    # Gate passages name a person (operator_ref): personal data, in their own class.
+    deleted["access_events"] = _purge(AccessEvent, AccessEvent.ts, access_days)
     deleted["delay_classifications"] = _purge(
         DelayClassification, DelayClassification.end_ts, annotations_days
     )
@@ -200,6 +206,7 @@ def run_retention(
                 "metrics": metrics_days,
                 "events": events_days,
                 "annotations": annotations_days,
+                "access": access_days,
                 "audit": audit_days,
                 "vision_observations": vision_observations_days,
                 "vision_health": vision_health_days,
@@ -221,6 +228,7 @@ def run_from_config(session: Session, *, now: datetime | None = None) -> dict[st
         metrics_days=s.retain_metrics_days,
         events_days=s.retain_events_days,
         annotations_days=s.retain_annotations_days,
+        access_days=s.retain_access_days,
         audit_days=s.retain_audit_days,
         vision_observations_days=s.retain_vision_observations_days,
         vision_health_days=s.retain_vision_health_days,

@@ -15,7 +15,7 @@ from minemonitor import audit, retention
 from minemonitor.auth.deps import require_admin, require_viewer
 from minemonitor.auth.service import ROLES, create_user
 from minemonitor.storage.db import get_db
-from minemonitor.storage.models import AuditLog, Event, HaulCycle, Operator, User
+from minemonitor.storage.models import AccessEvent, AuditLog, Event, HaulCycle, Operator, User
 
 router = APIRouter(tags=["account"])
 
@@ -230,6 +230,16 @@ def export_operator(
             )
         ).all()
     )
+    # Gate passages name the person by operator_ref (a soft reference, not a foreign key).
+    passages = (
+        db.execute(
+            select(AccessEvent)
+            .where(AccessEvent.site_id == site_id, AccessEvent.operator_ref == operator_id)
+            .order_by(AccessEvent.ts)
+        )
+        .scalars()
+        .all()
+    )
     audit.record(
         db,
         actor=admin.username,
@@ -237,7 +247,7 @@ def export_operator(
         entity_type="operator",
         entity_id=operator_id,
         site_id=site_id,
-        detail={"events": len(event_ids), "cycles": len(cycles)},
+        detail={"events": len(event_ids), "cycles": len(cycles), "access_events": len(passages)},
     )
     db.commit()
     return {
@@ -245,6 +255,20 @@ def export_operator(
         "references": {
             "events": event_ids,
             "cycles": [{"asset_id": a, "start_ts": s} for a, s in cycles],
+            "access_events": [
+                {
+                    "id": p.id,
+                    "ts": p.ts,
+                    "gate_id": p.gate_id,
+                    "credential_ref": p.credential_ref,
+                    "decision": p.decision,
+                    "reason": p.reason,
+                    "search_selected": p.search_selected,
+                    "search_completed": p.search_completed,
+                    "metal_detected": p.metal_detected,
+                }
+                for p in passages
+            ],
         },
     }
 

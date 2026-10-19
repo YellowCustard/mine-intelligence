@@ -430,6 +430,7 @@ The mine is the data controller; eigenstate is the processor. Retention is
 | Derived metrics + cycles | `MM_RETAIN_METRICS_DAYS` | 365 (kept after their raw positions are deleted) |
 | Events (with their notification records, and quarantined gate events) | `MM_RETAIN_EVENTS_DAYS` | 365 |
 | Operational annotations | `MM_RETAIN_ANNOTATIONS_DAYS` | 365 |
+| Gate passages | `MM_RETAIN_ACCESS_DAYS` | 365 |
 | Audit trail, and closed breach records | `MM_RETAIN_AUDIT_DAYS` | 730 |
 
 Operational annotations are delay classifications, shift handovers, and **closed**
@@ -445,7 +446,8 @@ Force a retention pass now: `POST /admin/retention/run` (admin).
 
 **Personal-data requests.** Operator identity lives only in the `operators` table
 (events reference it by foreign key, never by name). Export or erase per operator via
-the operators endpoints; erasure is a tombstone that leaves history intact. There are
+the operators endpoints (the export lists the person's alarms, haul cycles and gate
+passages); erasure is a tombstone that leaves history intact. There are
 **no biometric templates** in this database — the gate face terminal yields only an
 access event, never an image or template.
 

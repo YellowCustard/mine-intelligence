@@ -104,6 +104,9 @@ class Settings(BaseSettings):
     # Operational annotations: incidents (closed only), delay classifications, shift
     # handovers. These hold PII-adjacent notes/assignees, so they are pruned too.
     retain_annotations_days: int = 365
+    # Gate passages (access_events): each names a person, gate, decision and search result.
+    # A year covers investigations into theft at the gate; the period is the mine's choice.
+    retain_access_days: int = 365
     # Audit trail is retained longer than the data it describes — accountability
     # outlives the records (brief §4). 0 = keep forever.
     retain_audit_days: int = 730
