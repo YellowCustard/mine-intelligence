@@ -299,6 +299,14 @@ number, so alarms are sent as a template:
 3. Restart the stack, raise a test alarm, and check it arrives on a phone that has not
    written to the number in the last day.
 
+**The Graph API version in `MM_NOTIFY_WHATSAPP_URL` expires.** The URL names a version
+(`https://graph.facebook.com/v26.0/<phone-id>/messages`). Meta retires versions on a
+schedule (v20.0 on 24 Sep 2026, v21.0 on 21 Jan 2027), and a call to a retired version is
+answered by the oldest version still available, so behaviour can change under an install
+nobody touched. At commissioning use the newest version on Meta's
+[Graph API changelog](https://developers.facebook.com/docs/graph-api/changelog) and note its
+expiry date; move to a newer version before then (§9), and send a test alarm after the change.
+
 The variables are filled with the severity, the site id and the alarm summary, each on one
 line. With no template the alarm goes as plain text, which is only useful for trying the
 channel from a phone that has just written to the number; `MM_ENV=prod` refuses to start
@@ -609,6 +617,9 @@ either to `POST /api/v1/ingest/vision` (one record or a batch of up to 500) or o
 - **After any deploy/restore:** run the smoke test (§3).
 - **Before go-live, and after a hardware change:** run the capacity soak (§3).
 - **When devices change:** regenerate and reload the broker ACL (§7).
+- **Quarterly, if WhatsApp is on:** check the Graph API version in `MM_NOTIFY_WHATSAPP_URL`
+  against Meta's changelog; if it expires within six months, move to the newest version
+  and send a test alarm (§4).
 
 ---
 
