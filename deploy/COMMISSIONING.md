@@ -60,7 +60,7 @@ that 5027 answers on the tracker network.
 | B3 | Create zones | zones API | load face, ROM pad, dump, restricted magazine, speed-limited — polygons match the survey | |
 | B4 | Set zone rules | zone `rules` payload | restricted/overspeed/dwell thresholds per zone | |
 | B5 | Create the asset | assets | the machine the first tracker will ride | |
-| B6 | Confirm the OSH registers live elsewhere | ask the mine's SHEQ lead | the mine names where it keeps its accident and disease registers (Occupational Safety and Health Act 7 of 2026, s.22: kept 50 years); Mine Monitor is not that register (`docs/OPERATIONS.md` §6) | |
+| B6 | Confirm the OSH registers live elsewhere | ask the mine's SHEQ lead | the mine names where it keeps its accident and disease registers (Occupational Safety and Health Act 7 of 2026, s.22: kept 50 years) and the SHEQ procedure that records qualifying events and makes the required notifications; Mine Monitor is neither the register nor that procedure (`docs/OPERATIONS.md` §6) | |
 
 ## Stage C — First tracker: provisioning & installation
 
