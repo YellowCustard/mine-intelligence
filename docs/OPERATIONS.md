@@ -441,6 +441,14 @@ follows the audit window from its close.
 An alarm that an incident still points at is kept while that incident is kept, even past
 the events window; the run that deletes the incident deletes the alarm with it.
 
+**Mine Monitor is not the statutory accident register.** The Occupational Safety and Health
+Act (Act 7 of 2026, s.22) has the employer keep accident and disease registers for at least
+50 years. That duty is the mine's, and the mine keeps those registers in its own SHEQ
+system. Incidents and alarms here follow the retention windows above and are deleted when
+they expire, so copy anything that belongs in a statutory register into it at the time;
+do not rely on this system to hold it. Commissioning check B6 records where the mine keeps
+them.
+
 Force a retention pass now: `POST /admin/retention/run` (admin).
 
 **Personal-data requests.** Operator identity lives only in the `operators` table
