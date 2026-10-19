@@ -242,6 +242,9 @@ class HaulCycle(Base):
     # deleted later leaves its cycles' history as it was. NULL on cycles stored before.
     load_zone_id: Mapped[str | None] = mapped_column(String, nullable=True)
     dump_zone_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The tracked loader the truck stood beside to load (loader and truck pairing); NULL
+    # when none was, and the queue/load split fell back to the stop rule.
+    loader_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class RecomputeCursor(Base):

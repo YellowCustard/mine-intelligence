@@ -26,6 +26,7 @@ def _seed_cycle(db: Session) -> None:
             haul_s=200.0,
             dump_s=80.0,
             return_s=80.0,
+            loader_id="EX-01",
         )
     )
     db.add(
@@ -52,6 +53,7 @@ def test_get_cycles_returns_queue_pct(client: TestClient, db_session: Session) -
     body = r.json()
     assert len(body) == 1
     assert body[0]["queue_pct"] == 20.0  # 120/600
+    assert body[0]["loader_id"] == "EX-01"  # the loader it stood beside to load
 
 
 def test_shift_summary_no_target_or_benchmark(client: TestClient, db_session: Session) -> None:
