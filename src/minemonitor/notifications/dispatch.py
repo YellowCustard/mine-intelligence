@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import smtplib
+import ssl
 import urllib.request
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -128,7 +129,12 @@ class UrllibSmtpSender:
         msg.set_content(body)
         with smtplib.SMTP(s.notify_smtp_host, s.notify_smtp_port, timeout=self._timeout) as smtp:
             if s.notify_smtp_starttls:
-                smtp.starttls()
+                # Verify the server: smtplib's default STARTTLS context checks nothing, and
+                # the password goes over this channel next.
+                ctx = ssl.create_default_context()
+                if s.notify_smtp_cafile:
+                    ctx.load_verify_locations(cafile=s.notify_smtp_cafile)
+                smtp.starttls(context=ctx)
             if s.notify_smtp_user:
                 smtp.login(s.notify_smtp_user, s.notify_smtp_password)
             smtp.send_message(msg)
