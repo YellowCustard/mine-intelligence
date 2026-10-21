@@ -238,3 +238,30 @@ def test_smtp_starttls_verifies_the_server_certificate(monkeypatch: Any) -> None
     assert ctx.verify_mode == ssl.CERT_REQUIRED
     assert ctx.check_hostname is True
     assert [c[0] for c in _RecordingSMTP.calls] == ["starttls", "login", "send"]
+
+
+def test_smtp_trusts_an_extra_ca_file_for_a_private_relay(monkeypatch: Any) -> None:
+    """A mine relay on an internal CA is trusted through MM_NOTIFY_SMTP_CAFILE, added to the
+    system store rather than replacing it, and verification stays on."""
+    import ssl
+
+    from minemonitor.notifications import dispatch
+
+    loaded: list[str] = []
+    real = ssl.create_default_context
+
+    def _ctx(*args: Any, **kwargs: Any) -> ssl.SSLContext:
+        ctx = real(*args, **kwargs)
+        monkeypatch.setattr(ctx, "load_verify_locations", lambda cafile: loaded.append(cafile))
+        return ctx
+
+    monkeypatch.setattr(dispatch.ssl, "create_default_context", _ctx)
+    monkeypatch.setattr(dispatch.smtplib, "SMTP", _RecordingSMTP)
+    sender = dispatch.UrllibSmtpSender(
+        _settings(notify_smtp_host="smtp.mine.local", notify_smtp_cafile="/run/smtp-ca/ca.pem")
+    )
+    sender.email("supervisor@mine.local", "subject", "body")
+
+    _, ctx = _RecordingSMTP.calls[0]
+    assert loaded == ["/run/smtp-ca/ca.pem"]
+    assert ctx.verify_mode == ssl.CERT_REQUIRED

@@ -278,7 +278,9 @@ turn it on in `.env`:
 
 - `MM_NOTIFY_MIN_SEVERITY` — `info` | `warning` | `critical` (blank = off).
 - A **webhook** (`MM_NOTIFY_WEBHOOK_URL`, POSTs the event JSON), **email**
-  (`MM_NOTIFY_SMTP_*`, `MM_NOTIFY_EMAIL_TO`), and/or **WhatsApp**
+  (`MM_NOTIFY_SMTP_*`, `MM_NOTIFY_EMAIL_TO`; STARTTLS verifies the relay's certificate, and a
+  relay on the mine's own CA needs that CA in `var/smtp-ca/` with `MM_NOTIFY_SMTP_CAFILE`
+  pointing at it), and/or **WhatsApp**
   (`MM_NOTIFY_WHATSAPP_URL` + `MM_NOTIFY_WHATSAPP_TOKEN` + `MM_NOTIFY_WHATSAPP_TO`, the
   WhatsApp Cloud API). WhatsApp is off unless both URL and recipients are set; its
   message is a single advisory line (`[severity] site: summary (advisory)`), never an

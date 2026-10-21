@@ -155,6 +155,9 @@ class Settings(BaseSettings):
     notify_smtp_user: str = ""
     notify_smtp_password: str = ""
     notify_smtp_starttls: bool = True
+    # Extra CA certificate(s) (PEM) to trust for the relay, e.g. the mine's internal CA; added
+    # to the system store, never replacing it. Blank = system store only.
+    notify_smtp_cafile: str = ""
     notify_email_from: str = ""
     notify_email_to: str = ""  # comma-separated recipients
     # WhatsApp Cloud API (or a compatible gateway). Blank url or recipients = no WhatsApp.

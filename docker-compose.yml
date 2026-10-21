@@ -184,6 +184,7 @@ services:
       MM_NOTIFY_SMTP_USER: ${MM_NOTIFY_SMTP_USER:-}
       MM_NOTIFY_SMTP_PASSWORD: ${MM_NOTIFY_SMTP_PASSWORD:-}
       MM_NOTIFY_SMTP_STARTTLS: ${MM_NOTIFY_SMTP_STARTTLS:-true}
+      MM_NOTIFY_SMTP_CAFILE: ${MM_NOTIFY_SMTP_CAFILE:-}
       MM_NOTIFY_EMAIL_FROM: ${MM_NOTIFY_EMAIL_FROM:-}
       MM_NOTIFY_EMAIL_TO: ${MM_NOTIFY_EMAIL_TO:-}
       MM_NOTIFY_WHATSAPP_URL: ${MM_NOTIFY_WHATSAPP_URL:-}
@@ -279,6 +280,7 @@ services:
       MM_NOTIFY_SMTP_USER: ${MM_NOTIFY_SMTP_USER:-}
       MM_NOTIFY_SMTP_PASSWORD: ${MM_NOTIFY_SMTP_PASSWORD:-}
       MM_NOTIFY_SMTP_STARTTLS: ${MM_NOTIFY_SMTP_STARTTLS:-true}
+      MM_NOTIFY_SMTP_CAFILE: ${MM_NOTIFY_SMTP_CAFILE:-}
       MM_NOTIFY_EMAIL_FROM: ${MM_NOTIFY_EMAIL_FROM:-}
       MM_NOTIFY_EMAIL_TO: ${MM_NOTIFY_EMAIL_TO:-}
       MM_NOTIFY_WHATSAPP_URL: ${MM_NOTIFY_WHATSAPP_URL:-}
@@ -305,6 +307,9 @@ services:
       MM_RETAIN_VISION_HEALTH_DAYS: ${MM_RETAIN_VISION_HEALTH_DAYS:-30}
       MM_RETENTION_INTERVAL_S: ${MM_RETENTION_INTERVAL_S:-86400}
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.mqtt"]
+    volumes:
+      # The SMTP relay's own CA, if it has one (MM_NOTIFY_SMTP_CAFILE). var/ survives upgrades.
+      - ./var/smtp-ca:/run/smtp-ca:ro
     healthcheck:
       # The ingestor has no HTTP endpoint; it is healthy while its heartbeat is fresh.
       test: ["CMD", "uv", "run", "python", "-m", "minemonitor.healthcheck"]

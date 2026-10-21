@@ -131,7 +131,10 @@ class UrllibSmtpSender:
             if s.notify_smtp_starttls:
                 # Verify the server: smtplib's default STARTTLS context checks nothing, and
                 # the password goes over this channel next.
-                smtp.starttls(context=ssl.create_default_context())
+                ctx = ssl.create_default_context()
+                if s.notify_smtp_cafile:
+                    ctx.load_verify_locations(cafile=s.notify_smtp_cafile)
+                smtp.starttls(context=ctx)
             if s.notify_smtp_user:
                 smtp.login(s.notify_smtp_user, s.notify_smtp_password)
             smtp.send_message(msg)
