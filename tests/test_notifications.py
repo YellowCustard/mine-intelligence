@@ -186,3 +186,55 @@ def test_supervisor_can_list_notifications(db_session: Session) -> None:
 def test_viewer_cannot_list_notifications(db_session: Session) -> None:
     c = make_client(db_session, VIEWER)
     assert c.get("/sites/kn-zw-01/notifications").status_code == 403
+
+
+# -- SMTP: STARTTLS must verify the server before the password is sent ---------------
+
+
+class _RecordingSMTP:
+    """Stands in for ``smtplib.SMTP``: records the STARTTLS context and the login order."""
+
+    calls: list[tuple[str, Any]] = []
+
+    def __init__(self, host: str, port: int, timeout: float) -> None:
+        type(self).calls = []
+
+    def __enter__(self) -> _RecordingSMTP:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def starttls(self, context: Any = None) -> None:
+        type(self).calls.append(("starttls", context))
+
+    def login(self, user: str, password: str) -> None:
+        type(self).calls.append(("login", user))
+
+    def send_message(self, msg: Any) -> None:
+        type(self).calls.append(("send", msg["To"]))
+
+
+def test_smtp_starttls_verifies_the_server_certificate(monkeypatch: Any) -> None:
+    """Without a context, smtplib's STARTTLS uses an unverified context (CERT_NONE), so an
+    on-path attacker could take the SMTP password sent by ``login`` right after it."""
+    import ssl
+
+    from minemonitor.notifications import dispatch
+
+    monkeypatch.setattr(dispatch.smtplib, "SMTP", _RecordingSMTP)
+    sender = dispatch.UrllibSmtpSender(
+        _settings(
+            notify_smtp_host="smtp.mine.local",
+            notify_smtp_user="alerts",
+            notify_smtp_password="secret",
+        )
+    )
+    sender.email("supervisor@mine.local", "subject", "body")
+
+    kind, ctx = _RecordingSMTP.calls[0]
+    assert kind == "starttls"
+    assert isinstance(ctx, ssl.SSLContext)
+    assert ctx.verify_mode == ssl.CERT_REQUIRED
+    assert ctx.check_hostname is True
+    assert [c[0] for c in _RecordingSMTP.calls] == ["starttls", "login", "send"]
