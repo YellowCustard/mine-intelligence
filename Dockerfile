@@ -1,6 +1,14 @@
 # Mine Monitor API image. uv-based, slim, self-hostable (brief §3).
 FROM python:3.11-slim
 
+# Distrust emSign ECC Root CA - G3: eMudhra intermediates under it had their keys compromised
+# (Oct 2026). Debian dropped it in ca-certificates 20250419+deb13u1 (python:3.11-slim from
+# 2026-10-21), but `docker compose up --build` on a server reuses its cached older base, which
+# still trusts it. A no-op on a fresh base; remove once every site has rebuilt from one.
+RUN sed -i 's|^mozilla/emSign_ECC_Root_CA_-_G3\.crt$|!&|' /etc/ca-certificates.conf \
+    && update-ca-certificates --fresh >/dev/null \
+    && ! test -e /etc/ssl/certs/emSign_ECC_Root_CA_-_G3.pem
+
 # uv for fast, reproducible installs.
 COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /uvx /bin/
 
