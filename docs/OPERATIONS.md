@@ -203,8 +203,10 @@ alarm; one that is `running` while `expected_running` is false raises a `generat
 warning (both deduped per reading, both advisory — the platform never controls a genset).
 Run-hours **health** reuses the deterministic maintenance indicator over the latest reported
 engine hours (`GET .../generators/{asset_id}/health`; `Unknown` until a plan + baseline exist).
-Simulator-first (`ingest/adapters/dse_sim.py`); the live DSE **Modbus** poller and register map
-(`MM_GENERATOR_MODBUS_*`) are confirmed per DSE model on site before go-live.
+Simulator-first (`ingest/adapters/dse_sim.py`). **Nothing polls a DSE controller yet:** readings
+arrive only through the endpoint above or the simulator, so a generator nobody posts readings for
+shows no data and raises no alarm. The live Modbus poller, its settings and the register map come
+later, once the DSE model and its network are confirmed on site.
 
 **Gold reconciliation (FP-09, groundwork).** Measured material quantities through the circuit
 (ore→crusher→mill→tanks→carbon→furnace→output→gate) are ingested as `material.measurement.v1`
