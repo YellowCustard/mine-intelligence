@@ -87,7 +87,9 @@ _CONFIG = _SRC / "config.py"
 # name once code reads it (or the field is deleted), and never add one to get a new setting past
 # this test.
 _KNOWN_UNUSED: dict[str, str] = {
-    "default_site_tz": "unused on main as of 2026-10-22, see report",
+    # Documented for operators to set (COMMISSIONING A2), but each site's timezone comes from
+    # sites.timezone; awaiting a decision to wire it into site creation or remove it.
+    "default_site_tz": "unread on main as of 2026-10-22; sites.timezone is used instead",
 }
 
 
