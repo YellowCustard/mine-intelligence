@@ -83,13 +83,6 @@ class Settings(BaseSettings):
     # ``source_offline`` alarm, so "no one came through" is never confused with "the feed is down".
     access_gate_offline_s: int = Field(default=600, ge=60)
 
-    # Live DSE generator poller (FP-11). Blank host = off (the simulator and the HTTP-ingest
-    # endpoint still work). When set, the ingestor polls the DSE controller(s) over Modbus TCP
-    # each tick and ingests readings. The register map is confirmed per DSE model on site before
-    # go-live; until then this stays off and the path is exercised simulator-first.
-    generator_modbus_host: str = ""
-    generator_modbus_port: int = 502
-
     # Laboratory anomaly bounds (FP-08). A JSON object mapping element → [min, max] in the
     # result's unit; a measured value outside its element's range raises an advisory
     # `lab_anomaly` event.v1 for review (flag, never alter). Blank = anomaly detection off.

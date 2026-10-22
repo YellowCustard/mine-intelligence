@@ -91,7 +91,7 @@ implemented and tested in this repo today; **specified** = designed, lands when 
 | **Drones (DJI)** | drone bridge | `drone.event.v1` *(propose)* / reuse `event.v1` | **specified** | intrusion snippet + advisory deploy recommendation |
 | Spectrometer (lab) | SpectrAA CSV/watch-folder | `laboratory.result.v1` + `laboratory.correction.v1` | **built** | `lab_anomaly·lab_result_conflict` |
 | Weighbridge / weightometer | REST/CSV/serial | `weighbridge.transaction.v1` · `material.measurement.v1` | **built** | reconciliation inputs |
-| DSE generators | Modbus (sim-first) | `generator.reading.v1` | **built** | `generator_fault·generator_unexpected_run` |
+| DSE generators | HTTP / simulator (Modbus poller later) | `generator.reading.v1` | **built** | `generator_fault·generator_unexpected_run` |
 | Fuel | manual/dispenser | `fuel.transaction.v1` | **built** | consumption/reconciliation inputs |
 | Gold reconciliation | derived (L3) | `reconciliation.exception.v1` *(propose)* | **specified** | `reconciliation_exception` |
 | HR / roster | Excel export → CSV import | (operators + shift defs) | **built** (identity model) | drives access authorisation rules |
