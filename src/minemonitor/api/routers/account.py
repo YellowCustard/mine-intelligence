@@ -15,7 +15,15 @@ from minemonitor import audit, retention
 from minemonitor.auth.deps import require_admin, require_viewer
 from minemonitor.auth.service import ROLES, create_user
 from minemonitor.storage.db import get_db
-from minemonitor.storage.models import AccessEvent, AuditLog, Event, HaulCycle, Operator, User
+from minemonitor.storage.models import (
+    AccessEvent,
+    AuditLog,
+    Event,
+    HaulCycle,
+    Operator,
+    User,
+    WeighTicket,
+)
 
 router = APIRouter(tags=["account"])
 
@@ -240,6 +248,16 @@ def export_operator(
         .scalars()
         .all()
     )
+    # Weigh tickets name the driver the same way.
+    tickets = (
+        db.execute(
+            select(WeighTicket)
+            .where(WeighTicket.site_id == site_id, WeighTicket.operator_ref == operator_id)
+            .order_by(WeighTicket.ts)
+        )
+        .scalars()
+        .all()
+    )
     audit.record(
         db,
         actor=admin.username,
@@ -247,7 +265,12 @@ def export_operator(
         entity_type="operator",
         entity_id=operator_id,
         site_id=site_id,
-        detail={"events": len(event_ids), "cycles": len(cycles), "access_events": len(passages)},
+        detail={
+            "events": len(event_ids),
+            "cycles": len(cycles),
+            "access_events": len(passages),
+            "weigh_tickets": len(tickets),
+        },
     )
     db.commit()
     return {
@@ -268,6 +291,25 @@ def export_operator(
                     "metal_detected": p.metal_detected,
                 }
                 for p in passages
+            ],
+            "weigh_tickets": [
+                {
+                    "id": t.id,
+                    "ticket_no": t.ticket_no,
+                    "ts": t.ts,
+                    "scale_id": t.scale_id,
+                    "direction": t.direction,
+                    "gross_kg": t.gross_kg,
+                    "tare_kg": t.tare_kg,
+                    "net_kg": t.net_kg,
+                    "asset_id": t.asset_id,
+                    "trailer": t.trailer,
+                    "material": t.material,
+                    "destination": t.destination,
+                    "customer": t.customer,
+                    "source": t.source,
+                }
+                for t in tickets
             ],
         },
     }

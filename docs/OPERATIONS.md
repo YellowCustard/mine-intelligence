@@ -438,10 +438,14 @@ The mine is the data controller; eigenstate is the processor. Retention is
 |---|---|---|
 | Raw positions | `MM_RETAIN_POSITIONS_DAYS` | 90 |
 | Derived metrics + cycles | `MM_RETAIN_METRICS_DAYS` | 365 (kept after their raw positions are deleted) |
-| Events (with their notification records, and quarantined gate events) | `MM_RETAIN_EVENTS_DAYS` | 365 |
+| Events (with their notification records, quarantined gate events, and vendor NVR events) | `MM_RETAIN_EVENTS_DAYS` | 365 |
 | Operational annotations | `MM_RETAIN_ANNOTATIONS_DAYS` | 365 |
 | Gate passages | `MM_RETAIN_ACCESS_DAYS` | 365 |
 | Audit trail, and closed breach records | `MM_RETAIN_AUDIT_DAYS` | 730 |
+| Vision observations | `MM_RETAIN_VISION_OBSERVATIONS_DAYS` | 30 |
+| Vision node and camera health | `MM_RETAIN_VISION_HEALTH_DAYS` | 30 |
+| Operational records | `MM_RETAIN_RECORDS_DAYS` | 2555 (7 years) |
+| Equipment readings (generators) | `MM_RETAIN_READINGS_DAYS` | 90 |
 
 Operational annotations are delay classifications, shift handovers, and **closed**
 incidents (with their notes). An open or in-progress incident is live work and is
@@ -451,6 +455,21 @@ follows the audit window from its close.
 
 An alarm that an incident still points at is kept while that incident is kept, even past
 the events window; the run that deletes the incident deletes the alarm with it.
+
+Operational records are weigh tickets, fuel transactions and tank dips, laboratory results
+(with their corrections, whatever the correction's age), material measurements, dispatch
+jobs that are complete or cancelled (with their assignments), and closed work orders. They
+back production and gold accounting and may be statutory records, so the default is a
+generous 7 years; it is configuration, and the mine's lawyer and accountant should confirm
+it. An open dispatch job or an open or in-progress work order is live work and is never
+age-deleted. The latest completed service of each asset component is kept until a newer
+service replaces it, because the maintenance health indicator measures from it. Tank dips
+sit with the records rather than the readings because fuel reconciliation needs them beside
+the transactions they reconcile.
+
+Equipment readings are the generator controllers' telemetry: high-volume, like raw
+positions, with the same default. Each generator's latest reading is kept whatever its age,
+because it carries the engine hours the maintenance health indicator reads.
 
 **Mine Monitor is not the statutory accident register.** The Occupational Safety and Health
 Act (Act 7 of 2026, s.22) has the employer keep accident and disease registers for at least
@@ -466,8 +485,8 @@ Force a retention pass now: `POST /admin/retention/run` (admin).
 
 **Personal-data requests.** Operator identity lives only in the `operators` table
 (events reference it by foreign key, never by name). Export or erase per operator via
-the operators endpoints (the export lists the person's alarms, haul cycles and gate
-passages); erasure is a tombstone that leaves history intact. There are
+the operators endpoints (the export lists the person's alarms, haul cycles, gate
+passages and the weigh tickets that name them as driver); erasure is a tombstone that leaves history intact. There are
 **no biometric templates** in this database — the gate face terminal yields only an
 access event, never an image or template.
 

@@ -21,7 +21,7 @@ from minemonitor.storage.models import Asset, DispatchAssignment, DispatchJob
 _TRUCK_CLASS = "haul_truck"
 _COMMITTED = ("approved", "active")
 # A job in one of these states has ended; trucks committed to it are freed.
-_TERMINAL_JOB_STATUSES = {"complete", "cancelled"}
+TERMINAL_JOB_STATUSES = {"complete", "cancelled"}
 
 
 # --- jobs --------------------------------------------------------------------
@@ -72,7 +72,7 @@ def set_job_status(session: Session, site_id: str, job_id: str, status: str) -> 
     if job is None or job.site_id != site_id:
         return None
     job.status = status
-    if status in _TERMINAL_JOB_STATUSES:
+    if status in TERMINAL_JOB_STATUSES:
         # Release trucks committed to a job that has ended, so they return to the available
         # pool for future recommendations. Without this, approved assignments stay committed
         # forever and dispatch eventually runs out of trucks (they are never freed).
