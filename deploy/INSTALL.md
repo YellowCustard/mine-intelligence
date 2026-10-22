@@ -216,5 +216,6 @@ Where they say `docker compose exec api ...`, use `sudo mmctl compose exec api .
 ```
 
 Docker holds the data in the volumes of the compose project `minemonitor` (`minemonitor_db_data`
-is the database). Upgrades replace only `releases/` and `current`; nothing in `shared/` or the
-volumes is replaced except by a rollback or a restore, which ask first.
+is the database; `minemonitor_teltonika_spool` buffers tracker fixes not yet handed to the
+broker). Upgrades replace only `releases/` and `current`; nothing in `shared/` or the volumes is
+replaced except by a rollback or a restore, which ask first.

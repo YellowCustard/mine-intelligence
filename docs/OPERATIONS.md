@@ -410,6 +410,12 @@ then starts the API. With broker auth on it writes the broker files from the res
 devices table, then brings up the rest of the stack. Verify with `docker compose ps` and
 `curl -fsS http://127.0.0.1:8000/health`, then run the smoke test (§3).
 
+The publisher spool volumes (`teltonika_spool`, `simulator_spool`) are not backed up and need not
+be. Each holds only the fixes its publisher has not yet handed to the broker, normally none, and
+survives restarts, upgrades and container recreation on its own box. A restore onto a clean box
+starts them empty: fixes still buffered on the old box are not carried over, and trackers do not
+resend fixes the listener had already acknowledged to them.
+
 **TimescaleDB upgrades.** When the `db` image moves to a new TimescaleDB release, `deploy.sh`
 runs `ALTER EXTENSION timescaledb UPDATE` before the API starts, prints
 `Updated the TimescaleDB extension to <version>`, and closes the sessions still on the old

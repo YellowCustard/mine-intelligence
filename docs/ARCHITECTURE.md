@@ -132,7 +132,12 @@ The network and power **will** fail; the whole ingest side is designed around it
 
 - **Publisher spool** (`MM_SPOOL_PATH`, a local SQLite file): the device/simulator
   side buffers fixes crash-safely and backfills on reconnect. Accepts out-of-order
-  and late-arriving data without corrupting derived analytics.
+  and late-arriving data without corrupting derived analytics. Under compose each
+  publishing service (`teltonika`, `simulator`) keeps its spool at
+  `/var/lib/mm-spool/spool.sqlite` on a named volume of its own (`teltonika_spool`,
+  `simulator_spool`), so buffered fixes survive the container being recreated (an
+  upgrade, `--force-recreate`) and two publishers never share one file. Compose fixes
+  that path; `MM_SPOOL_PATH` in `.env` applies only to a publisher run outside it.
 - **Idempotent ingest:** replaying the same position must not duplicate it or
   double-count a cycle. The ingestor acks MQTT messages manually, only once a fix is
   durably stored or rejected for good, so a **database restart loses nothing and

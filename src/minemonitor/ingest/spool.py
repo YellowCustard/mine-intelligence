@@ -18,6 +18,9 @@ class Spool:
 
     def __init__(self, path: str | Path) -> None:
         self.path = str(path)
+        # The default sits in a directory compose mounts a volume on; anywhere else (a host run, a
+        # custom MM_SPOOL_PATH) create it, so a missing directory is not an opaque sqlite error.
+        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False: the drain loop and producer may differ; we
         # serialise access ourselves and each op is a short committed transaction.
         self._conn = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
