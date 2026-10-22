@@ -40,3 +40,10 @@ def test_delete_empty_is_noop(tmp_path: Path) -> None:
     spool.delete([])  # must not raise
     assert len(spool) == 0
     spool.close()
+
+
+def test_spool_creates_its_directory(tmp_path: Path) -> None:
+    spool = Spool(tmp_path / "mm-spool" / "spool.sqlite")
+    spool.append("p")
+    assert len(spool) == 1
+    spool.close()

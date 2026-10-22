@@ -342,7 +342,10 @@ services:
       MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
       MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
       MM_MQTT_REQUIRE_REGISTERED_DEVICE: ${MM_MQTT_REQUIRE_REGISTERED_DEVICE:-false}
-      MM_SPOOL_PATH: ${MM_SPOOL_PATH:-/tmp/mm-spool.sqlite}
+      # Store-and-forward spool: on the teltonika_spool volume below, so fixes still waiting for
+      # the broker survive the container being recreated (an upgrade, --force-recreate). Fixed
+      # here, not taken from .env: a site's .env from an older .env.example still says /tmp.
+      MM_SPOOL_PATH: /var/lib/mm-spool/spool.sqlite
       MM_TELTONIKA_PORT: ${MM_TELTONIKA_PORT:-5027}
       MM_TELTONIKA_IDLE_TIMEOUT_S: ${MM_TELTONIKA_IDLE_TIMEOUT_S:-900}
       # TLS (blank = plain TCP): paths inside the container, under the mount below.
@@ -351,6 +354,8 @@ services:
     volumes:
       # var/ survives upgrades (the installer links it to shared/var).
       - ./var/teltonika-tls:/run/teltonika-tls:ro
+      # The publisher spool (MM_SPOOL_PATH). Its own volume: never shared with the simulator's.
+      - teltonika_spool:/var/lib/mm-spool
     ports:
       # Trackers dial in, so this one faces the network. ufw cannot narrow it (Docker-published
       # ports bypass ufw); set MM_TELTONIKA_BIND to the host address the trackers reach.
@@ -378,8 +383,11 @@ services:
       MM_MQTT_TOPIC_PREFIX: ${MM_MQTT_TOPIC_PREFIX:-mm}
       MM_MQTT_USERNAME: ${MM_MQTT_USERNAME:-}
       MM_MQTT_PASSWORD: ${MM_MQTT_PASSWORD:-}
-      MM_SPOOL_PATH: ${MM_SPOOL_PATH:-/tmp/mm-spool.sqlite}
+      MM_SPOOL_PATH: /var/lib/mm-spool/spool.sqlite
     entrypoint: ["uv", "run", "python", "-m", "minemonitor.ingest.adapters.simulator"]
+    volumes:
+      # The publisher spool, as for teltonika, on a volume of its own.
+      - simulator_spool:/var/lib/mm-spool
     # As for teltonika: the image's API healthcheck cannot pass in this container.
     healthcheck:
       disable: true
@@ -509,6 +517,9 @@ volumes:
   caddy_data:
   caddy_config:
   vision_state:
+  # Publisher spools (MM_SPOOL_PATH): one per publishing service, so two never share a file.
+  teltonika_spool:
+  simulator_spool:
 
 networks:
   evidence:

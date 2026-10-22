@@ -40,8 +40,9 @@ _HOST_SIDE = {
     "MM_EDGE_STATE_DIR",
 }
 # Compose sets these for the container; a value in .env is not meant to reach it. The database
-# URL is built from POSTGRES_*, and the broker is the compose service.
-_FIXED = {"MM_DATABASE_URL", "MM_MQTT_HOST"}
+# URL is built from POSTGRES_*, the broker is the compose service, and the spool sits on the
+# service's volume (sites' .env files from older releases still put it in /tmp).
+_FIXED = {"MM_DATABASE_URL", "MM_MQTT_HOST", "MM_SPOOL_PATH"}
 # The tracker listener's own settings go to it alone, and the publisher spool to the services
 # that publish (the listener and the simulator).
 _LISTENER = {
@@ -153,3 +154,36 @@ def test_every_documented_variable_reaches_a_container_or_is_read_on_the_host() 
     assert sorted(_documented() - passed - _HOST_SIDE) == []
     # And the host-side list holds nothing a container does get.
     assert sorted(_HOST_SIDE & passed) == []
+
+
+def _mount(volume: str | dict[str, Any]) -> tuple[str, str]:
+    """(target, source) of a service volume, in short (``src:dst[:ro]``) or long syntax."""
+    if isinstance(volume, dict):
+        return str(volume["target"]), str(volume.get("source"))
+    source, target, *_ = volume.split(":")
+    return target, source
+
+
+def test_each_publisher_spool_is_on_its_own_named_volume() -> None:
+    # The spool is the store-and-forward buffer (brief §3). In a container's /tmp, or anywhere not
+    # mounted, it is lost whenever compose recreates the container (an upgrade, --force-recreate),
+    # taking every fix still waiting for the broker with it.
+    declared = set(yaml.safe_load(COMPOSE.read_text()).get("volumes") or {})
+    spools: dict[str, str] = {}
+    for name, service in _services().items():
+        path = _environment(name).get("MM_SPOOL_PATH")
+        if path is None:
+            continue
+        # Not from .env, where a site's older copy of .env.example still says /tmp; and the same
+        # path the code defaults to.
+        assert "$" not in path, f"{name}: MM_SPOOL_PATH={path} is taken from .env"
+        assert path == Settings.model_fields["spool_path"].default, name
+        directory = str(Path(path).parent)
+        assert not directory.startswith("/tmp"), f"{name}: spool in {directory}"
+        mounted = dict(_mount(v) for v in service.get("volumes", []))
+        assert directory in mounted, f"{name}: spool directory {directory} is not mounted"
+        assert mounted[directory] in declared, f"{name}: {mounted[directory]} is not a named volume"
+        spools[name] = mounted[directory]
+    assert sorted(spools) == ["simulator", "teltonika"]
+    # Two publishers on one SQLite file would each forward, and delete, the other's fixes.
+    assert len(set(spools.values())) == len(spools), spools
