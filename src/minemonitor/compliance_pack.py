@@ -242,6 +242,8 @@ def build(
             "audit_log_and_closed_breaches": settings.retain_audit_days,
             "vision_observations": settings.retain_vision_observations_days,
             "vision_health": settings.retain_vision_health_days,
+            "operational_records": settings.retain_records_days,
+            "equipment_readings": settings.retain_readings_days,
         },
         "zero_means": "kept until deleted by hand",
         "job_interval_s": settings.retention_interval_s,

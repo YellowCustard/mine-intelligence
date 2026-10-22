@@ -2,7 +2,9 @@
 
 Retention is configurable per class — raw positions, derived analytics (metrics
 and haul cycles, which share one window), events, operational annotations
-(incidents, delay classifications and shift handovers), gate passages, and the audit trail —
+(incidents, delay classifications and shift handovers), gate passages, operational
+records (weigh tickets, fuel, laboratory, material, dispatch and maintenance records),
+equipment readings (generator telemetry), vision data, and the audit trail —
 with generous defaults. A value of 0 days means "keep forever" (skip). The job is
 idempotent and logs an audit entry, so deletion is accountable.
 
@@ -16,10 +18,11 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, exists, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from minemonitor import audit
 from minemonitor.config import get_settings
+from minemonitor.dispatch.service import TERMINAL_JOB_STATUSES
 from minemonitor.storage.models import (
     AccessEvent,
     AccessQuarantine,
@@ -28,10 +31,18 @@ from minemonitor.storage.models import (
     BreachOperator,
     BreachRecord,
     DelayClassification,
+    DispatchAssignment,
+    DispatchJob,
     Event,
+    FuelTankReading,
+    FuelTransaction,
+    GeneratorReading,
     HaulCycle,
     Incident,
     IncidentNote,
+    LaboratoryCorrection,
+    LaboratoryResult,
+    MaterialMeasurement,
     Notification,
     Position,
     ShiftHandover,
@@ -40,7 +51,10 @@ from minemonitor.storage.models import (
     VisionNodeHealth,
     VisionObservation,
     VisionOperationalEvent,
+    VisionVendorEvent,
     VisionZoneRollup,
+    WeighTicket,
+    WorkOrder,
 )
 
 log = logging.getLogger("minemonitor.retention")
@@ -58,6 +72,8 @@ def run_retention(
     audit_days: int = 0,
     vision_observations_days: int = 0,
     vision_health_days: int = 0,
+    records_days: int = 0,
+    readings_days: int = 0,
     actor: str = "system",
 ) -> dict[str, int]:
     """Delete data older than each class's retention window. Commits.
@@ -68,7 +84,10 @@ def run_retention(
     shift handovers by creation, and **closed** incidents by their close time —
     open incidents are live work and are never age-deleted). ``access_days`` governs gate
     passages (``access_events``) by their time: each names a person, so it is personal data
-    with its own window. ``audit_days`` prunes
+    with its own window. ``records_days`` governs the operational records (weigh tickets,
+    fuel transactions and tank dips, laboratory results, material measurements, ended
+    dispatch jobs and closed work orders); ``readings_days`` the generator readings, keeping
+    each generator's latest. ``audit_days`` prunes
     the audit trail itself (0 = keep forever), and closed breach records by their close
     time; the entry written for this run is created after the cutoff, so a run never
     deletes its own record.
@@ -153,6 +172,94 @@ def run_retention(
         events = session.execute(delete(Event).where(due)).rowcount
         return events or 0, notes or 0
 
+    def _purge_lab_results(days: int) -> tuple[int, int]:
+        """Delete laboratory results measured before cutoff, with their corrections.
+
+        A correction carries a FK to its result and means nothing without it, so it goes with
+        the result whatever its own age; corrections are removed first.
+        """
+        if days <= 0:
+            return 0, 0
+        due = LaboratoryResult.ts < now - timedelta(days=days)
+        fixes = session.execute(
+            delete(LaboratoryCorrection).where(
+                LaboratoryCorrection.result_id.in_(select(LaboratoryResult.id).where(due))
+            )
+        ).rowcount
+        results = session.execute(delete(LaboratoryResult).where(due)).rowcount
+        return results or 0, fixes or 0
+
+    def _purge_dispatch(days: int) -> tuple[int, int]:
+        """Delete ended dispatch jobs created before cutoff, with their assignments.
+
+        Only a complete or cancelled job is eligible: an open job is live work regardless of
+        age. Assignments carry a FK to the job, so they are removed first.
+        """
+        if days <= 0:
+            return 0, 0
+        due = DispatchJob.status.in_(TERMINAL_JOB_STATUSES) & (
+            DispatchJob.created_at < now - timedelta(days=days)
+        )
+        assignments = session.execute(
+            delete(DispatchAssignment).where(
+                DispatchAssignment.job_id.in_(select(DispatchJob.id).where(due))
+            )
+        ).rowcount
+        jobs = session.execute(delete(DispatchJob).where(due)).rowcount
+        return jobs or 0, assignments or 0
+
+    def _purge_work_orders(days: int) -> int:
+        """Delete work orders closed before cutoff, keeping each component's latest service.
+
+        An open or in-progress work order has no close time and is never age-deleted. The
+        latest completed service of an asset component is the baseline the maintenance health
+        indicator measures from, so it is kept until a newer service replaces it.
+        """
+        if days <= 0:
+            return 0
+        newer = aliased(WorkOrder)
+        latest_service = (
+            (WorkOrder.type == "service")
+            & (WorkOrder.status == "done")
+            & ~exists().where(
+                newer.site_id == WorkOrder.site_id,
+                newer.asset_id == WorkOrder.asset_id,
+                newer.component == WorkOrder.component,
+                newer.type == "service",
+                newer.status == "done",
+                newer.closed_at > WorkOrder.closed_at,
+            )
+        )
+        res = session.execute(
+            delete(WorkOrder).where(
+                WorkOrder.closed_at.is_not(None),
+                WorkOrder.closed_at < now - timedelta(days=days),
+                ~latest_service,
+            )
+        )
+        return res.rowcount or 0
+
+    def _purge_generator_readings(days: int) -> int:
+        """Delete generator readings before cutoff, keeping each generator's latest.
+
+        The latest reading carries the engine hours the maintenance health indicator reads; a
+        generator that has gone quiet keeps its last known figure rather than none.
+        """
+        if days <= 0:
+            return 0
+        newer = aliased(GeneratorReading)
+        res = session.execute(
+            delete(GeneratorReading).where(
+                GeneratorReading.ts < now - timedelta(days=days),
+                exists().where(
+                    newer.site_id == GeneratorReading.site_id,
+                    newer.asset_id == GeneratorReading.asset_id,
+                    newer.ts > GeneratorReading.ts,
+                ),
+            )
+        )
+        return res.rowcount or 0
+
     deleted["positions"] = _purge(Position, Position.ts, positions_days)
     deleted["asset_metrics"] = _purge(AssetMetrics, AssetMetrics.bucket_start, metrics_days)
     deleted["haul_cycles"] = _purge(HaulCycle, HaulCycle.end_ts, metrics_days)
@@ -189,6 +296,22 @@ def run_retention(
         VisionOperationalEvent, VisionOperationalEvent.ts, events_days
     )
     deleted["vision_zone_rollups"] = _purge(VisionZoneRollup, VisionZoneRollup.ts, metrics_days)
+    # Vendor NVR events are the basis of an alarm, like first-party operational events.
+    deleted["vision_vendor_events"] = _purge(VisionVendorEvent, VisionVendorEvent.ts, events_days)
+    # Operational records back production and gold accounting: one long window.
+    deleted["weigh_tickets"] = _purge(WeighTicket, WeighTicket.ts, records_days)
+    deleted["fuel_transactions"] = _purge(FuelTransaction, FuelTransaction.ts, records_days)
+    deleted["fuel_tank_readings"] = _purge(FuelTankReading, FuelTankReading.ts, records_days)
+    deleted["laboratory_results"], deleted["laboratory_corrections"] = _purge_lab_results(
+        records_days
+    )
+    deleted["material_measurements"] = _purge(
+        MaterialMeasurement, MaterialMeasurement.ts, records_days
+    )
+    deleted["dispatch_jobs"], deleted["dispatch_assignments"] = _purge_dispatch(records_days)
+    deleted["work_orders"] = _purge_work_orders(records_days)
+    # Equipment readings are high-volume telemetry, like raw positions.
+    deleted["generator_readings"] = _purge_generator_readings(readings_days)
     deleted["breach_records"] = _purge_closed_breaches(audit_days)
     deleted["audit_log"] = _purge(AuditLog, AuditLog.ts, audit_days)
 
@@ -210,6 +333,8 @@ def run_retention(
                 "audit": audit_days,
                 "vision_observations": vision_observations_days,
                 "vision_health": vision_health_days,
+                "records": records_days,
+                "readings": readings_days,
             },
         },
     )
@@ -232,4 +357,6 @@ def run_from_config(session: Session, *, now: datetime | None = None) -> dict[st
         audit_days=s.retain_audit_days,
         vision_observations_days=s.retain_vision_observations_days,
         vision_health_days=s.retain_vision_health_days,
+        records_days=s.retain_records_days,
+        readings_days=s.retain_readings_days,
     )

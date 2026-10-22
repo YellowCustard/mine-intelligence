@@ -115,6 +115,17 @@ class Settings(BaseSettings):
     # Operational events and zone rollups follow ``retain_events_days`` / ``retain_metrics_days``.
     retain_vision_observations_days: int = 30
     retain_vision_health_days: int = 30
+    # Vendor NVR events (vision_vendor_events) follow ``retain_events_days``, like the
+    # first-party operational events: both are the basis of an alarm.
+    # Operational records: weigh tickets, fuel transactions and tank dips, lab results (with
+    # their corrections), material measurements, ended dispatch jobs and closed work orders.
+    # They back production and gold accounting and may be statutory records, so 7 years.
+    # Tank dips sit here, not with readings: fuel reconciliation needs them beside the
+    # transactions they reconcile. Open work and the latest service of each component are kept.
+    retain_records_days: int = 2555
+    # Equipment readings: generator controller telemetry. High volume, like raw positions;
+    # each generator's latest reading is kept (it is the engine hours maintenance reads).
+    retain_readings_days: int = 90
     retention_interval_s: int = 86_400  # the ingestor runs retention ~daily
 
     # Personal-data breach notices (CDPA, SI 155 of 2024). The reported obligation is 24 h to

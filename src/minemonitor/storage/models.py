@@ -927,7 +927,7 @@ class LaboratoryCorrection(Base):
     corrected value, the **actor** who made it and the reason. The original measured record is
     preserved untouched, so the full history — and "who changed it, when, and why" — is always
     reconstructable (the audit backbone FP-09 reconciliation depends on). Rows are never
-    updated or deleted.
+    updated, and deleted only by retention, together with their result.
     """
 
     __tablename__ = "laboratory_corrections"

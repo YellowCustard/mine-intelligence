@@ -454,6 +454,8 @@ def test_the_compliance_pack_holds_what_an_inspector_asks_for(
     assert processing["breach_notice"]["regulator_notice_h"] == 24
     retention = json.loads(zf.read("retention.json"))
     assert retention["days_kept_by_class"]["positions"] == 45
+    assert retention["days_kept_by_class"]["operational_records"] == 2555
+    assert retention["days_kept_by_class"]["equipment_readings"] == 90
 
     breaches_rows = list(csv.DictReader(io.StringIO(zf.read("breaches.csv").decode())))
     assert [b["breach_id"] for b in breaches_rows] == [breach.breach_id]

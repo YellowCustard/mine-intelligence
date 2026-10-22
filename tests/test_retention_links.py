@@ -225,3 +225,49 @@ def test_closed_incident_and_its_old_alarm_go_in_the_same_run(session: Session) 
     assert _ids(session, Event.event_id) == []
     assert _ids(session, Incident.incident_id) == []
     assert _ids(session, Notification.id) == []
+
+
+def test_old_records_go_with_their_children_without_rolling_back_the_run(
+    session: Session,
+) -> None:
+    """Lab corrections and dispatch assignments point at their parent by foreign key.
+
+    An old lab result with a recent correction, and an old ended job with its assignment, are
+    deleted with those children; the rest of the run (here, positions) still happens. The
+    self-referencing work-order and generator deletes run on PostgreSQL too.
+    """
+    from minemonitor.storage.models import (
+        DispatchAssignment,
+        DispatchJob,
+        GeneratorReading,
+        LaboratoryCorrection,
+        LaboratoryResult,
+        WorkOrder,
+    )
+    from tests.test_retention import _gen, _seed_records
+
+    _seed_records(session, "old", 2600)
+    _seed_records(session, "new", 30)
+    _gen(session, "GEN-1", 200)
+    _gen(session, "GEN-1", 5)
+    _old_fix(session)
+    session.commit()
+
+    deleted = run_retention(
+        session,
+        now=_NOW,
+        positions_days=90,
+        metrics_days=365,
+        events_days=365,
+        records_days=2555,
+        readings_days=90,
+    )
+
+    assert deleted["positions"] == 1
+    assert deleted["laboratory_corrections"] == 1
+    assert _ids(session, LaboratoryResult.id) == ["lab-new"]
+    assert _ids(session, LaboratoryCorrection.id) == ["labc-new"]
+    assert _ids(session, DispatchJob.id) == ["job-new"]
+    assert _ids(session, DispatchAssignment.id) == ["da-new"]
+    assert _ids(session, WorkOrder.id) == ["wo-new"]
+    assert _ids(session, GeneratorReading.id) == ["gen-GEN-1-5"]

@@ -188,3 +188,50 @@ def test_operator_is_site_scoped(db_session: Session) -> None:
     db_session.commit()
     other = make_client(db_session, ("other-admin", "testpass123"))
     assert other.get("/sites/kn-zw-01/operators").status_code == 403
+
+
+def test_export_includes_the_persons_weigh_tickets(client: TestClient, db_session: Session) -> None:
+    """A weigh ticket names its driver: it is in their export, and only theirs, at this site."""
+    from minemonitor.storage.models import Site, WeighTicket
+
+    operator_id = _seed_operator(client)
+    db_session.add(Site(site_id="other-site", name="Other", timezone="Africa/Harare"))
+    db_session.flush()
+    for tid, site_id, ref in (
+        ("wt-1", "kn-zw-01", operator_id),
+        ("wt-other-person", "kn-zw-01", "op-someone-else"),
+        ("wt-other-site", "other-site", operator_id),
+    ):
+        db_session.add(
+            WeighTicket(
+                id=tid,
+                site_id=site_id,
+                ticket_no=tid.upper(),
+                scale_id="wb-1",
+                ts=_NOW,
+                direction="outbound",
+                gross_kg=40000.0,
+                tare_kg=15000.0,
+                net_kg=25000.0,
+                asset_id="HT-102",
+                material="ore",
+                destination="ROM pad",
+                operator_ref=ref,
+                created_at=_NOW,
+                created_by="clerk",
+            )
+        )
+    db_session.commit()
+
+    r = client.get(f"/sites/kn-zw-01/operators/{operator_id}/export")
+    assert r.status_code == 200, r.text
+    tickets = r.json()["references"]["weigh_tickets"]
+    assert [t["id"] for t in tickets] == ["wt-1"]
+    assert tickets[0]["ticket_no"] == "WT-1"
+    assert tickets[0]["net_kg"] == 25000.0
+    assert tickets[0]["asset_id"] == "HT-102"
+    assert tickets[0]["material"] == "ore"
+
+    audit = client.get("/sites/kn-zw-01/audit").json()
+    entry = next(a for a in audit if a["action"] == "personal_data.export")
+    assert entry["detail"]["weigh_tickets"] == 1
