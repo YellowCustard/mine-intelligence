@@ -21,7 +21,7 @@ from pathlib import Path
 
 import paho.mqtt.client as mqtt
 import pytest
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from minemonitor.devices import service
 from minemonitor.devices.acl import render_mosquitto_acl
@@ -180,6 +180,45 @@ def test_service_account_publishes_positions_the_ingestor_receives(
         for c in clients:
             c.loop_stop()
             c.disconnect()
+        broker.terminate()
+        broker.wait(timeout=5)
+
+
+def test_ingestor_whose_login_is_refused_exits_instead_of_idling(
+    db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A wrong ``MM_MQTT_PASSWORD`` used to look like a quiet broker: the ingestor subscribed
+    on a refused CONNACK, received nothing and logged nothing, forever. Now it stops and
+    ``run_forever`` exits non-zero, so the container shows as restarting."""
+    from minemonitor.ingest.mqtt import MqttIngestor
+
+    passwd = render_password_file(
+        db_session, service_user=_SVC_USER, service_hash=mosquitto_password_hash(_SVC_PASS)
+    )
+    acl = render_mosquitto_acl(db_session, ingest_user=_SVC_USER)
+    port = _free_port()
+    broker = _start_broker(tmp_path, port, passwd, acl)
+    factory = sessionmaker(bind=db_session.bind, expire_on_commit=False, future=True)
+    monkeypatch.setattr("minemonitor.ingest.mqtt.get_session_factory", lambda: factory)
+    ing = MqttIngestor(host="127.0.0.1", port=port, client_id="mm-ingestor-refused")
+    ing._client.username_pw_set(_SVC_USER, "wrong")
+    exit_code: list[object] = []
+
+    def run() -> None:
+        try:
+            ing.run_forever()
+        except SystemExit as exc:
+            exit_code.append(exc.code)
+
+    runner = threading.Thread(target=run, daemon=True)
+    runner.start()
+    try:
+        runner.join(timeout=10)
+        assert not runner.is_alive(), "ingestor kept running after the broker refused its login"
+        assert len(exit_code) == 1 and exit_code[0] not in (0, None)
+    finally:
+        ing._stop.set()
+        runner.join(timeout=5)
         broker.terminate()
         broker.wait(timeout=5)
 

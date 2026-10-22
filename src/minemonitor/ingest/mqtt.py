@@ -22,6 +22,8 @@ import time
 from typing import Literal
 
 import paho.mqtt.client as mqtt
+from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.reasoncodes import ReasonCode
 from pydantic import ValidationError
 
 from minemonitor.config import get_settings
@@ -44,6 +46,14 @@ from minemonitor.storage.db import get_session_factory, is_transient_db_error
 _Outcome = Literal["stored", "dropped", "stopped"]
 
 log = logging.getLogger("minemonitor.mqtt")
+
+# CONNACK refusals that reconnecting cannot fix: the credentials or the broker's password
+# file must change first. paho 2.1 reports MQTT 3.1.1 return codes 4 and 5 as these same v5
+# reason codes (134, 135), so one check covers both protocol versions.
+_LOGIN_REFUSED = (
+    ReasonCode(PacketTypes.CONNACK, "Bad user name or password"),
+    ReasonCode(PacketTypes.CONNACK, "Not authorized"),
+)
 
 
 def position_topic(prefix: str, site_id: str, asset_id: str) -> str:
@@ -80,9 +90,14 @@ class MqttPublisher:
         self._drainer: threading.Thread | None = None
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
-        if reason_code == 0:
-            self._connected.set()
-            log.info("publisher connected", extra={"host": self.host})
+        if reason_code.is_failure:
+            log.error(
+                "publisher connection refused by broker; positions stay spooled",
+                extra={"host": self.host, "port": self.port, "reason": str(reason_code)},
+            )
+            return
+        self._connected.set()
+        log.info("publisher connected", extra={"host": self.host})
 
     def _on_disconnect(self, client, userdata, *args) -> None:
         self._connected.clear()
@@ -195,8 +210,24 @@ class MqttIngestor:
         self._require_registered_device = s.mqtt_require_registered_device
         self.rejected_count = 0
         self.processing_failed_count = 0
+        self._login_refused: str | None = None
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
+        if reason_code.is_failure:
+            where = {"host": self.host, "port": self.port, "reason": str(reason_code)}
+            if reason_code in _LOGIN_REFUSED:
+                # Reconnecting forever would look like a quiet broker. Stop instead, so
+                # run_forever exits non-zero and the container visibly restarts.
+                log.error(
+                    "ingestor login refused by broker; check MM_MQTT_USERNAME and "
+                    "MM_MQTT_PASSWORD; stopping",
+                    extra=where,
+                )
+                self._login_refused = str(reason_code)
+                self._stop.set()
+            else:
+                log.error("ingestor connection refused by broker; will retry", extra=where)
+            return
         topic = f"{self.prefix}/+/+/position"
         client.subscribe(topic, qos=1)
         vision_topic = f"{self.prefix}/+/vision/+/+"
@@ -502,6 +533,8 @@ class MqttIngestor:
                 time.sleep(0.5)
         finally:
             self.stop()
+        if self._login_refused is not None:
+            raise SystemExit(f"MQTT login refused by broker: {self._login_refused}")
 
     def stop(self) -> None:
         self._stop.set()
